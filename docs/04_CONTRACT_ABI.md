@@ -274,6 +274,7 @@ ABI 文档。
   `BurnTeamQuota`                   `0x5254000D` RoundController          TeamVault（失败销毁 1.2 亿）
 
   `ClaimAll`                        `0x5254000E` 用户                     RoundController（多轮奖励合并领取，≤10 轮）
+  `StakeDeposit`                    `0x5254000F` 用户 Jetton Wallet（forward payload） RoundController / 质押钱包（TEP-74 transfer 携带）
 
   `CancelStake`                      **无此消息**                          ——（V5.3 已确认：不支持取消质押）
   --------------------------------------------------------------------------------------------------
@@ -452,3 +453,41 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 - **技术终止**：连续暂停 14 天 或 观察结束超时 7 天 → **任何人可调用** `AbortTechnical`；退还 100% 本金、不销毁奖励/团队额度、不消耗档位；新增 `techAbortPauseSeconds` / `techAbortObservationTimeout`。
 - **R1 前校准**：V6.1 未确认；Lead 建议不保留（若保留仅限 R1 开窗前、只能下调 P0、≤30%、一次性、链上公告、执行后永久失效）。
 
+
+---
+
+## 19. 前端/合约对齐的 Payload 定义（V6.2 补充，contract-dev 实现后以 contracts/README 为准）
+
+### 19.1 StakeDeposit（0x5254000F）
+
+通过标准 Jetton transfer（TEP-74 `0xf8a7ea5`）的 forward_payload 携带：
+
+```
+StakePayload {
+  op: uint32 = 0x5254000F
+  version: uint8 = 1
+  roundId: uint8
+  depositNonce: uint64
+  riskDisclosureVersion: uint16
+  acceptFullPrincipalBurn: uint8   // 1 = 已确认，0 = 拒绝（合约退款）
+}
+```
+
+- forward_ton_amount：默认 0.05 TON（用于触发 transfer_notification 与后续处理）；
+- 金额为 0、roundId 不在报名窗口、风险版本不匹配、nonce 重复 → 退款，不记账。
+
+### 19.2 Claim 类消息（用户 → RoundController）
+
+```
+ClaimPayload {
+  op: uint32        // ClaimPrincipal 0x52540006 / ClaimReward 0x52540007 / ClaimAll 0x5254000E
+  queryId: uint64
+  roundId: uint8    // ClaimAll 时填 0 表示自动扫描 ≤10 轮；单轮领取时填对应轮次
+}
+```
+
+- 返回消息携带 queryId 便于前端关联；
+- ClaimAll 遍历上限 = ROUND_COUNT（10），有界循环；
+- 每个 (roundId, owner, kind) 幂等标记，重复领取返回已领取结果，不重复转账。
+
+> 以上为 V6.2 前端与合约的临时约定；contract-dev 若在实现中调整，需同步更新本节与 contracts/README，前端以最终 ABI 为准。
