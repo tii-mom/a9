@@ -283,6 +283,7 @@ ABI 文档。
   `TeamBurnedAck`                   `0x52540014` TeamVault                RoundController
   `RetryPendingActions`             `0x52540015` 任何人                    RoundController（重试未完成的 burn/转账）
   `SetJettonWallet`                 `0x52540016` 部署时一次性               RoundController（绑定 Jetton Wallet）
+  `InitController`                  `0x52540012` 部署时一次性               TeamVault（绑定 RoundController）
 
   `CancelStake`                      **无此消息**                          ——（V5.3 已确认：不支持取消质押）
   --------------------------------------------------------------------------------------------------
