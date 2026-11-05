@@ -134,7 +134,7 @@ npm run build               # 构建 web/dist
 ```bash
 cd worker
 npx wrangler d1 migrations apply fuse-protocol --remote
-npx wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql
+npx wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql
 npx wrangler secret put ADMIN_TOKEN
 cd .. && npm run build && cd worker && npx wrangler deploy
 ```

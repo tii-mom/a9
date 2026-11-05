@@ -239,9 +239,11 @@ export interface ProtocolStats {
   lockedStakeRaw: string;
   stakerCount: number;
   volume24hUsdE8: string;
-  liquidityUsdE8: string;
+  /** chain 模式下拿不到真实池子流动性时为 null（宁可空，不可假） */
+  liquidityUsdE8: string | null;
   priceUsdE8: string;
-  price24hAgoUsdE8: string;
+  /** chain 模式下拿不到 24h 前真实 TWAP 时为 null（宁可空，不可假） */
+  price24hAgoUsdE8: string | null;
   oracle: OracleStatus;
   /** 下一轮质押预计开启时间（unix ms）；无活跃轮次时为结算时间 + 预告期，否则为 null */
   nextStakeOpenAt: number | null;

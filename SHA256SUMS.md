@@ -43,6 +43,6 @@
 - `worker/src/state.ts`: `0d24f0c6acd3228f555a1419a46b238e26fd30a595114376737e9f6be0a2f1dc`
 - `worker/src/views.ts`: `6af9718ee738f2ad9cd7b7fc1ad75ccbc58e64d208a7dbb41ec53fada4552894`
 - `worker/migrations/0004_observation_24.sql`: `6df6421d1e263dcdaa386882817bd7f43a071cf1ac4a774cac7ac56e331780db`
-- `worker/migrations/seed.sql`: `05ac7b0a9c5a7f684febdbd48b28893334512107d7d638adb44743f751d553c5`
+- `worker/seed/seed.sql`: `0c65af8fbb9d8783a239e4d41a1dc8006f37972d3c7132d768ec7fb43e3999a4`
 
 共 42 个文件。

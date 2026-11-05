@@ -165,8 +165,14 @@ node ops/scripts/65_set_jetton_wallets.mjs
 node ops/scripts/70_bind_roles.mjs
 node ops/scripts/55_fund_ton.mjs && node ops/scripts/50_fund_vaults.mjs
 node ops/scripts/60_verify_and_register.mjs
-node ops/scripts/verify_deployment.mjs                         # 对账
+node ops/scripts/verify_deployment.mjs                         # 验收（默认 STRICT）
 ```
+> **验收门禁（V8 / STRICT）**：`verify_deployment.mjs` **默认 STRICT**，开轮前必检项（协议配置 17 项、
+> Jetton Wallet code hash、TeamVault pending 清零、TeamVault.controller 地址比对、注资登记等）必须全部 PASS；
+> getter 缺失 / 返回栈异常 / 必检分支未执行一律 FAIL（结尾有 `gate.missing.*` 覆盖审计）。
+> `--lenient` 仅用于排查，**输出不得作为开轮或上线依据**。
+> STRICT 下 code hash 不一致 = 线上实例与 `contracts/build` 不一致（通常为未重部署），**必须重部署后再开轮**。
+
 每步先 dry-run 看输出，确认后加 `OPS_EXECUTE=1` 重跑。部署完成后把地址写入 `ops/config/testnet.params.json` 的 `contracts` 段与 D1 `contracts` 表，前端与 `/api/config` 即可切真实网络。
 
 **注意**：已部署实例的 config 不可变（RC 不可升级），参数一旦写进 storage 只能重新部署。因此 **Jetton Master 补齐 + 参数签字完成后再执行第一次真实部署**，避免浪费测试网地址与 TON。
@@ -316,7 +322,7 @@ npm run typecheck && npm run build
 # 部署（Lead/运维执行）
 cd worker
 ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote
-./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql
+./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql
 ./node_modules/.bin/wrangler secret put ADMIN_TOKEN
 cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
 

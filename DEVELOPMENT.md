@@ -33,7 +33,7 @@ npm run typecheck && npm run build
 ```bash
 cd worker
 ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote
-./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql
+./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql
 ./node_modules/.bin/wrangler secret put ADMIN_TOKEN       # 运维后台 token
 cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
 ```
@@ -75,8 +75,8 @@ cd worker && ./node_modules/.bin/wrangler domains add fuse.<your-domain>
 
 ```bash
 cd worker
-node scripts/generate-seed.mjs                                  # 重新生成 migrations/seed.sql
-./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql
+node scripts/generate-seed.mjs                                  # 重新生成 worker/seed/seed.sql
+./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql
 cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
 ```
 
