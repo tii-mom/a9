@@ -3,8 +3,8 @@
 // RoundController / TeamVault so integration tests can assert amounts and recipients.
 // It does not implement Jetton Master notifications / total supply accounting.
 
-import "../types"
-import "../constants"
+import "@contracts/types"
+import "@contracts/constants"
 
 contract MockJettonWallet {
     author: "A9 Protocol"
@@ -71,7 +71,7 @@ fun onInternalMessage(in: InMessage) {
     }
 }
 
-fun onBouncedMessage(in: InMessageBounced) {}
+fun onBouncedMessage(_in: InMessageBounced) {}
 
 get fun get_mock_state(): MockWalletState {
     val st = MockWalletStorage.load();

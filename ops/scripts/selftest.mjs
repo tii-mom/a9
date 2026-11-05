@@ -35,7 +35,7 @@ function test(name, fn) {
   }
 }
 function run(args, env = {}) {
-  const result = spawnSync(process.execPath, args, { cwd: BAM_ROOT, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 120000 });
+  const result = spawnSync(process.execPath, args, { cwd: BAM_ROOT, encoding: 'utf8', env: { ...process.env, OPS_RECORDS_DIR: join(temp, 'records'), ...env }, timeout: 120000 });
   return { code: result.status, out: String(result.stdout || '') + String(result.stderr || '') };
 }
 function assert(condition, message) {

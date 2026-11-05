@@ -3,10 +3,10 @@
   "chainId": -3,
   "status": "not_deployed",
   "configVersion": 1,
-  "paramsDigest": null,
+  "paramsDigest": "sha256:a604b7f99ccced06e68fbbf3e5df68153f1ee6ea4d0c0db2ff3cae763030d3a9",
   "codeHashes": {},
   "createdAt": "2026-11-05T07:09:38.869Z",
-  "updatedAt": "2026-11-05T07:09:38.870Z",
+  "updatedAt": "2026-11-05T07:18:43.172Z",
   "contracts": {
     "jettonMaster": {
       "address": null,
@@ -142,10 +142,61 @@
   },
   "funding": [],
   "verification": {
-    "lastRunAt": null,
-    "healthy": null,
-    "checks": [],
-    "digest": null
+    "lastRunAt": "2026-11-05T07:18:43.171Z",
+    "healthy": true,
+    "checks": [
+      {
+        "name": "contract.jettonMaster",
+        "status": "FAIL",
+        "detail": "未登记地址"
+      },
+      {
+        "name": "contract.teamVault",
+        "status": "FAIL",
+        "detail": "未登记地址"
+      },
+      {
+        "name": "contract.roundController",
+        "status": "FAIL",
+        "detail": "未登记地址"
+      },
+      {
+        "name": "wallet.adminOwner",
+        "status": "WARN",
+        "detail": "未登记（部署前必须提供）"
+      },
+      {
+        "name": "wallet.treasury",
+        "status": "WARN",
+        "detail": "未登记（部署前必须提供）"
+      },
+      {
+        "name": "wallet.teamWallet",
+        "status": "WARN",
+        "detail": "未登记（部署前必须提供）"
+      },
+      {
+        "name": "wallet.marketingWallet",
+        "status": "WARN",
+        "detail": "未登记（部署前必须提供）"
+      },
+      {
+        "name": "wallet.liquidityWallet",
+        "status": "WARN",
+        "detail": "未登记（部署前必须提供）"
+      },
+      {
+        "name": "wallet.teamInternalWallet",
+        "status": "WARN",
+        "detail": "未登记（部署前必须提供）"
+      },
+      {
+        "name": "bindings.roundControllerUpgradeable",
+        "status": "PASS",
+        "detail": "不可升级（D-24）"
+      }
+    ],
+    "digest": "sha256:caf50dd3acedee7e36bee25acb3152b49d797c7d800b31cf35458f52b0114903"
   },
   "notes": [
     "初始登记表：尚未部署。部署时由 10/20/30 脚本写入地址，60 脚本定稿并生成地址簿。"

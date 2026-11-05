@@ -111,7 +111,7 @@ fun onInternalMessage(in: InMessage) {
     }
 }
 
-fun onBouncedMessage(in: InMessageBounced) {
+fun onBouncedMessage(_in: InMessageBounced) {
     // Outgoing messages are all idempotent instructions. A bounced child is
     // recovered by the permissionless Finalize/Retry paths; no funds are moved
     // on a bounce, and no state is rolled back here.
@@ -246,7 +246,7 @@ fun handleOpenRound(sender: address, msg: OpenRound) {
     });
 }
 
-fun handleCloseStaking(sender: address, msg: CloseStaking) {
+fun handleCloseStaking(_sender: address, msg: CloseStaking) {
     var s = lazy Storage.load();
     val now: uint64 = blockchain.now() as uint64;
     val rd = ensureRoundExists(s, s.currentRoundId);
@@ -271,7 +271,7 @@ fun handleCloseStaking(sender: address, msg: CloseStaking) {
     s.save();
 }
 
-fun handleStartObservation(sender: address, msg: StartObservation) {
+fun handleStartObservation(_sender: address, msg: StartObservation) {
     var s = lazy Storage.load();
     val now: uint64 = blockchain.now() as uint64;
     assert (msg.roundId == s.currentRoundId) throw Errors.BadRoundId;
@@ -285,7 +285,7 @@ fun handleStartObservation(sender: address, msg: StartObservation) {
     s.save();
 }
 
-fun handleSubmitCandle(sender: address, msg: SubmitCandle) {
+fun handleSubmitCandle(_sender: address, msg: SubmitCandle) {
     var s = lazy Storage.load();
     val now: uint64 = blockchain.now() as uint64;
     val t = timing(s);
@@ -330,8 +330,8 @@ fun handleSubmitCandle(sender: address, msg: SubmitCandle) {
     s.save();
 }
 
-fun settleRound(s: Storage, rd: RoundData, success: bool, now: uint64) {
-    val e = econ(s);
+fun settleRound(s: Storage, rd: RoundData, success: bool, _now: uint64) {
+    val _e = econ(s);
     val v = vaults(s);
     val roundId = s.currentRoundId;
     var updated = rd;
@@ -372,7 +372,7 @@ fun settleRound(s: Storage, rd: RoundData, success: bool, now: uint64) {
     s.save();
 }
 
-fun handleFinalizeRound(sender: address, msg: FinalizeRound) {
+fun handleFinalizeRound(_sender: address, msg: FinalizeRound) {
     var s = lazy Storage.load();
     val now: uint64 = blockchain.now() as uint64;
     assert (msg.roundId == s.currentRoundId) throw Errors.BadRoundId;
@@ -425,7 +425,7 @@ fun handleFinalizeRound(sender: address, msg: FinalizeRound) {
 // Oracle pause / technical abort
 // ===========================================================================
 
-fun handlePauseOracle(sender: address, msg: PauseOracle) {
+fun handlePauseOracle(sender: address, _msg: PauseOracle) {
     var s = lazy Storage.load();
     requireAdminOrOracle(s, sender);
     val now: uint64 = blockchain.now() as uint64;
@@ -438,7 +438,7 @@ fun handlePauseOracle(sender: address, msg: PauseOracle) {
     s.save();
 }
 
-fun handleResumeOracle(sender: address, msg: ResumeOracle) {
+fun handleResumeOracle(sender: address, _msg: ResumeOracle) {
     var s = lazy Storage.load();
     requireAdminOrOracle(s, sender);
     val now: uint64 = blockchain.now() as uint64;
@@ -460,7 +460,7 @@ fun handleResumeOracle(sender: address, msg: ResumeOracle) {
     s.save();
 }
 
-fun handleAbortTechnical(sender: address, msg: AbortTechnical) {
+fun handleAbortTechnical(_sender: address, _msg: AbortTechnical) {
     var s = lazy Storage.load();
     val now: uint64 = blockchain.now() as uint64;
     val t = timing(s);
@@ -837,11 +837,11 @@ fun handleTeamBurnedAck(sender: address, msg: TeamBurnedAck) {
 // ===========================================================================
 
 fun handleRetryPendingActions(sender: address, msg: RetryPendingActions) {
-    var s = lazy Storage.load();
+    val s = lazy Storage.load();
     requireAdmin(s, sender);
     assert (msg.roundId == s.currentRoundId) throw Errors.BadRoundId;
     val rd = ensureRoundExists(s, msg.roundId);
-    val e = econ(s);
+    val _e = econ(s);
     val v = vaults(s);
 
     if (rd.status == STATUS_SETTLING_SUCCESS) {
@@ -888,21 +888,23 @@ fun handleSetJettonWallet(sender: address, msg: SetJettonWallet) {
 // ===========================================================================
 
 fun sendTeamRelease(teamVault: address, roundId: uint8, queryId: uint64) {
-    createMessage({
+    val out = createMessage({
         bounce: BounceMode.NoBounce,
         value: ton("0.05"),
         dest: teamVault,
         body: ReleaseTeamQuota { queryId, roundId },
-    }).send(SEND_MODE_PAY_FEES_SEPARATELY);
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 fun sendTeamBurn(teamVault: address, roundId: uint8, burnId: uint256, queryId: uint64) {
-    createMessage({
+    val out = createMessage({
         bounce: BounceMode.NoBounce,
         value: ton("0.05"),
         dest: teamVault,
         body: BurnTeamQuota { queryId, roundId, burnId },
-    }).send(SEND_MODE_PAY_FEES_SEPARATELY);
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 // ===========================================================================

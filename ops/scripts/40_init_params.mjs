@@ -41,8 +41,13 @@ writeJSON(snapshotFile, {
 ok('参数快照已写入：' + snapshotFile);
 
 if (!controller) {
-  fail('RoundController 未登记：先执行 30_deploy_round_controller.mjs');
-  process.exit(finish());
+  if (execute) {
+    fail('RoundController 未登记：先执行 30_deploy_round_controller.mjs');
+    process.exit(finish());
+  }
+  warn('RoundController 未登记：dry-run 仅生成参数快照，跳过链上比对');
+  printNextSteps(['部署后重跑：node scripts/40_init_params.mjs --execute --online']);
+  process.exit(finish({ 模式: 'DRY-RUN（未部署）', 快照: snapshotFile }));
 }
 
 if (execute) {

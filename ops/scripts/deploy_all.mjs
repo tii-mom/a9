@@ -54,11 +54,16 @@ for (const item of plan) {
   }
   const childArgs = [join(scriptsDir, item.script)];
   if (execute) childArgs.push('--execute');
-  if (getArg('all') && item.id === 'funding') childArgs.push('--all');
+  if (!execute && item.id === 'verify') childArgs.push('--offline');
+  if (item.id === 'funding' && !getArg('skip-allocations')) childArgs.push('--all');
   section('step ' + item.step + ' — ' + item.id);
   detail('node ' + childArgs.join(' '));
   const result = spawnSync(process.execPath, childArgs, { stdio: 'inherit', env: process.env });
   if (result.status !== 0) {
+    if (item.id === 'verify' && !execute) {
+      warn('dry-run 验收返回非 0（未部署属预期；部署后重跑 verify_deployment.mjs）');
+      break;
+    }
     if (item.id === 'verify') {
       warn('验收脚本返回非 0（可先完成链上初始化后重跑）');
       failed.push(item.id);

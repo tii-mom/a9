@@ -232,7 +232,6 @@
     { "id": "teamVault", "step": 20, "script": "20_deploy_teamvault.mjs", "dependsOn": ["jettonMint"] },
     { "id": "roundController", "step": 30, "script": "30_deploy_round_controller.mjs", "dependsOn": ["teamVault"] },
     { "id": "params", "step": 40, "script": "40_init_params.mjs", "dependsOn": ["roundController"] },
-    { "id": "adminOps", "step": 80, "script": "80_admin_ops.mjs", "dependsOn": ["register"] },
     { "id": "roles", "step": 70, "script": "70_bind_roles.mjs", "dependsOn": ["params"] },
     { "id": "funding", "step": 50, "script": "50_fund_vaults.mjs", "dependsOn": ["roles"] },
     { "id": "register", "step": 60, "script": "60_verify_and_register.mjs", "dependsOn": ["funding"] },

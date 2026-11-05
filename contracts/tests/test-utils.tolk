@@ -9,8 +9,6 @@ import "@acton/types/transaction"
 
 import "@contracts/constants"
 import "@contracts/types"
-import "@contracts/TeamVault"
-import "@contracts/RoundController"
 import "@contracts/mocks/MockJettonWallet"
 
 // 1.2e8 A9 with 9 decimals
@@ -280,7 +278,7 @@ fun rcUserStake(rc: RoundControllerHandle, roundId: uint8, owner: address): Stak
     return net.runGetMethod<StakePosition>(rc.address, "get_user_stake", [roundId, owner]);
 }
 
-fun setRCWallet(rc: RoundControllerHandle, from: address, wallet: address): SendResultList {
+fun setRcWallet(rc: RoundControllerHandle, from: address, wallet: address): SendResultList {
     return net.send(from, createMessage({
         bounce: true,
         value: ton("0.2"),
@@ -424,7 +422,7 @@ fun setupProtocol(): ProtocolFixture {
     val rc = deployRoundController(admin.address, oracle.address, jettonMaster.address, tv.address);
 
     val rcWallet = deployMockWallet(rc.address, (ROUND_REWARD_RAW * 12) as coins);
-    expect(setRCWallet(rc, admin.address, rcWallet.address)).toHaveSuccessfulTx<SetJettonWallet>({
+    expect(setRcWallet(rc, admin.address, rcWallet.address)).toHaveSuccessfulTx<SetJettonWallet>({
         from: admin.address,
         to: rc.address,
     });

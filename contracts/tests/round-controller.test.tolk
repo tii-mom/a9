@@ -1,9 +1,6 @@
-import "@acton/build"
 import "@acton/emulation/network"
 import "@acton/emulation/testing"
 import "@acton/testing/expect"
-import "@acton/types/big_array"
-import "@acton/types/transaction"
 
 import "@contracts/constants"
 import "@contracts/types"
@@ -44,7 +41,7 @@ get fun `test RoundController deploys with V6.1 parameters and zeroed state`() {
 get fun `test SetJettonWallet is admin-only and locked after the first round opens`() {
     val f = setupProtocol();
     val attacker = testing.treasury("attacker");
-    expect(setRCWallet(f.rc, attacker.address, f.admin)).toHaveFailedTx<SetJettonWallet>({
+    expect(setRcWallet(f.rc, attacker.address, f.admin)).toHaveFailedTx<SetJettonWallet>({
         from: attacker.address,
         to: f.rc.address,
         exitCode: Errors.NotAdmin,
@@ -55,7 +52,7 @@ get fun `test SetJettonWallet is admin-only and locked after the first round ope
         from: f.admin,
         to: f.rc.address,
     });
-    expect(setRCWallet(f.rc, f.admin, f.admin)).toHaveFailedTx<SetJettonWallet>({
+    expect(setRcWallet(f.rc, f.admin, f.admin)).toHaveFailedTx<SetJettonWallet>({
         from: f.admin,
         to: f.rc.address,
         exitCode: Errors.BadRoundStatus,
@@ -299,4 +296,67 @@ get fun `test late keeper re-anchors the staking window instead of deadlocking`(
     expect(r2.status).toEqual(STATUS_STAKING_OPEN);
     expect(r2.stakeOpenAt).toEqual((now as uint64));
     expect(r2.stakeCloseAt).toEqual((now as uint64) + 259200);
+}
+
+get fun `test first depositor and exact 20,000,000 A9 hard cap are accepted`() {
+    val f = setupProtocol();
+    val alice = testing.treasury("alice");
+    expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({
+        from: f.admin,
+        to: f.rc.address,
+    });
+
+    // first depositor is 100% of the round total (allowed; the cap is a fixed hard cap)
+    expect(sendStake(f.rc, f.rcWallet.address, alice.address, 100000000000000 as coins, buildStakePayload(1, 1, 1, 1)))
+        .toHaveSuccessfulTx<TransferNotification>({ from: f.rcWallet.address, to: f.rc.address });
+    expect(rcUserStake(f.rc, 1, alice.address).amountRaw).toEqual(100000000000000 as uint128);
+
+    // exactly the per-address hard cap is accepted
+    val capAmount = 20000000000000000 as coins; // 20,000,000 A9
+    val topUp = capAmount - 100000000000000 as coins;
+    expect(sendStake(f.rc, f.rcWallet.address, alice.address, topUp, buildStakePayload(1, 2, 1, 1)))
+        .toHaveSuccessfulTx<TransferNotification>({ from: f.rcWallet.address, to: f.rc.address });
+    expect(rcUserStake(f.rc, 1, alice.address).amountRaw).toEqual(capAmount as uint128);
+    expect(net.runGetMethod<uint128>(f.rc.address, "get_round_total_stake", [1 as uint8]))
+        .toEqual(capAmount as uint128);
+}
+
+get fun `test round total cap 200,000,000 A9 rejects the 11th depositor`() {
+    val f = setupProtocol();
+    expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({
+        from: f.admin,
+        to: f.rc.address,
+    });
+
+    val perAddress = 20000000000000000 as coins; // 20,000,000 A9
+    val owners: array<address> = [
+        testing.treasury("cap-owner-0").address,
+        testing.treasury("cap-owner-1").address,
+        testing.treasury("cap-owner-2").address,
+        testing.treasury("cap-owner-3").address,
+        testing.treasury("cap-owner-4").address,
+        testing.treasury("cap-owner-5").address,
+        testing.treasury("cap-owner-6").address,
+        testing.treasury("cap-owner-7").address,
+        testing.treasury("cap-owner-8").address,
+        testing.treasury("cap-owner-9").address,
+    ];
+    var i: int = 0;
+    while (i < 10) {
+        expect(sendStake(f.rc, f.rcWallet.address, owners.get(i), perAddress, buildStakePayload(1, 1, 1, 1)))
+            .toHaveSuccessfulTx<TransferNotification>({ from: f.rcWallet.address, to: f.rc.address });
+        i += 1;
+    }
+    expect(net.runGetMethod<uint128>(f.rc.address, "get_round_total_stake", [1 as uint8]))
+        .toEqual(MAX_TOTAL_STAKE_RAW);
+
+    // 11th depositor would push the round above the 200,000,000 A9 hard cap
+    val late = testing.treasury("cap-owner-late");
+    expect(sendStake(f.rc, f.rcWallet.address, late.address, 10000000000000 as coins, buildStakePayload(1, 1, 1, 1)))
+        .toHaveSuccessfulTx<TransferNotification>({ from: f.rcWallet.address, to: f.rc.address });
+    expect(rcUserStake(f.rc, 1, late.address).amountRaw).toEqual(0 as uint128);
+    expect(net.runGetMethod<uint128>(f.rc.address, "get_round_total_stake", [1 as uint8]))
+        .toEqual(MAX_TOTAL_STAKE_RAW);
+    expect(mockState(f.rcWallet).transferCount).toEqual(1);
+    expect(mockState(f.rcWallet).lastTransferDest).toEqual(late.address);
 }

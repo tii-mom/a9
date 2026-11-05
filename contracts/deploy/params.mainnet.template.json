@@ -1,0 +1,6 @@
+{
+  "$comment": "MAINNET IS NOT APPROVED YET. Blocking items before mainnet: (1) OracleAdapter signed submissions replacing the admin-supplied TWAP in OpenRound; (2) audited Jetton burn acknowledgement extension (or signed off-chain reconciliation) instead of the testnet BurnAck authority; (3) third-party audit of RoundController + TeamVault; (4) ops runbook + monitoring (task-6). Copy params.testnet.json and change network.",
+  "network": "mainnet",
+  "status": "BLOCKED_PENDING_AUDIT_AND_ORACLE",
+  "parameterSource": "deploy/params.testnet.json"
+}

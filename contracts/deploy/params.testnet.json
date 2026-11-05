@@ -1,0 +1,76 @@
+{
+  "$comment": "A9 Protocol V6.1 deployment parameter template. Values in raw units where noted; USD_E8 = USD * 1e8. Fill every <PLACEHOLDER> before deploying. Source of truth: docs/00 (V6.1), docs/04, docs/11.",
+  "network": "testnet",
+  "token": {
+    "name": "A9",
+    "symbol": "A9",
+    "decimals": 9,
+    "totalSupplyRaw": "10000000000000000000",
+    "totalSupplyHuman": "10000000000"
+  },
+  "tokenomics": {
+    "rewardPoolRaw": "7000000000000000000",
+    "rewardPerRoundRaw": "700000000000000000",
+    "roundCount": 10,
+    "teamPoolRaw": "1200000000000000000",
+    "teamPerRoundRaw": "120000000000000000",
+    "internalSaleCapRaw": "800000000000000000",
+    "liquidityRaw": "500000000000000000",
+    "marketingRaw": "500000000000000000"
+  },
+  "price": {
+    "p0UsdE8": "116000",
+    "p0Usd": "0.00116",
+    "priceMultiplier": 2,
+    "note": "target = max(P0 * 2^tier, 2 * opening 24h TWAP), locked at open; ladder R10 = 118784000 USD_E8"
+  },
+  "round": {
+    "previewSeconds": 86400,
+    "stakeDurationSeconds": 259200,
+    "observationSeconds": 259200,
+    "candleSeconds": 14400,
+    "candleCount": 18,
+    "minQualifiedCandles": 12,
+    "failureThreshold": "qualified < 12 after 18 candles => SETTLING_FAILURE"
+  },
+  "stakingLimits": {
+    "minStakeRaw": "10000000000000",
+    "minStakeHuman": "10000",
+    "maxStakePerAddressRaw": "20000000000000000",
+    "maxStakePerAddressHuman": "20000000",
+    "maxStakePerAddressBps": 1000,
+    "maxTotalStakeRaw": "200000000000000000",
+    "maxTotalStakeHuman": "200000000"
+  },
+  "technicalAbort": {
+    "pauseSeconds": 1209600,
+    "observationTimeoutSeconds": 604800
+  },
+  "riskDisclosureVersion": 1,
+  "configVersion": 1,
+  "addresses": {
+    "admin": "<ADMIN_OWNER_ADDRESS>",
+    "oracle": "<ORACLE_OR_GUARDIAN_ADDRESS>",
+    "jettonMaster": "<JETTON_MASTER_ADDRESS>",
+    "teamVault": "<TEAM_VAULT_ADDRESS>",
+    "roundController": "<ROUND_CONTROLLER_ADDRESS>",
+    "roundControllerJettonWallet": "<RC_JETTON_WALLET_ADDRESS>",
+    "teamVaultJettonWallet": "<TEAM_VAULT_JETTON_WALLET_ADDRESS>",
+    "teamWallet": "<TEAM_HOT_WALLET_ADDRESS>",
+    "teamInternalWallet": "<TEAM_INTERNAL_SALE_WALLET>"
+  },
+  "tonBalances": {
+    "roundController": "20",
+    "teamVault": "10"
+  },
+  "deployOrder": [
+    "1. Deploy Jetton Master, mint 10,000,000,000 A9, close mint authority",
+    "2. Deploy TeamVault (placeholder jettonWallet = admin, controller = null)",
+    "3. Deploy RoundController with teamVault address (placeholder stakingJettonWallet = admin)",
+    "4. Jetton Master.get_wallet_address(roundController) -> admin RoundController.SetJettonWallet",
+    "5. Jetton Master.get_wallet_address(teamVault) -> admin TeamVault.SetJettonWallet",
+    "6. admin TeamVault.InitController(roundController) (one-time)",
+    "7. Fund RC Jetton Wallet with 7,000,000,000 A9; TeamVault Jetton Wallet with 1,200,000,000 A9",
+    "8. Fund TON gas balances; admin OpenRound(round 1) with opening 24h TWAP"
+  ]
+}

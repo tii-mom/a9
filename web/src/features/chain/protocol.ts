@@ -50,8 +50,10 @@ export const DEFAULT_TOKEN_DECIMALS = 9;
 export const DEFAULT_MIN_STAKE_TOKENS = 10_000n;
 /** 本轮总质押上限：200,000,000 A9 */
 export const DEFAULT_MAX_TOTAL_STAKE_TOKENS = 200_000_000n;
-/** 单地址 ≤ 本轮总质押的 10%（bps = 1000） */
+/** 单地址 ≤ 本轮总质押的 10%（bps = 1000，旧口径，仅为兼容保留） */
 export const DEFAULT_MAX_STAKE_PER_ADDRESS_BPS = 1000;
+/** V6.1 定稿：单地址固定硬顶 20,000,000 A9（= 本轮总上限 200,000,000 的 10%） */
+export const DEFAULT_MAX_STAKE_PER_ADDRESS_TOKENS = 20_000_000n;
 /** 轮次上限（claimAll 有界循环上界） */
 export const ROUND_COUNT_MAX = 10;
 

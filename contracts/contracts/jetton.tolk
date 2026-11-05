@@ -1,5 +1,4 @@
 // Shared TEP-74 message builders + forward-payload helpers.
-import "types"
 import "constants"
 
 // Builds a standard TEP-74 transfer body (forward_payload inline, empty).
@@ -61,22 +60,24 @@ fun sendJettonTransfer(
     responseDestination: address,
 ): void {
     val body = buildJettonTransferBody(queryId, amount, recipient, responseDestination);
-    createMessage({
+    val out = createMessage({
         bounce: BounceMode.NoBounce,
         value: ton("0.05"),
         dest: jettonWallet,
         body,
-    }).send(SEND_MODE_PAY_FEES_SEPARATELY);
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 fun sendJettonBurn(jettonWallet: address, queryId: uint64, amount: coins, responseDestination: address): void {
     val body = buildJettonBurnBody(queryId, amount, responseDestination);
-    createMessage({
+    val out = createMessage({
         bounce: BounceMode.NoBounce,
         value: ton("0.05"),
         dest: jettonWallet,
         body,
-    }).send(SEND_MODE_PAY_FEES_SEPARATELY);
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 fun emitExternalEvent<T>(body: T): void {

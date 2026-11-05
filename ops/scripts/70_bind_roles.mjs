@@ -25,8 +25,12 @@ kv('当前绑定记录', registeredBinding || '（未绑定）');
 kv('调用者', 'TeamVault.admin（部署者/硬件钱包），只能调用一次');
 
 if (!teamVault || !controller) {
-  fail('缺少 TeamVault 或 RoundController 地址：先完成 20/30 部署，或用 --adopt 登记');
-  process.exit(finish());
+  if (execute) {
+    fail('缺少 TeamVault 或 RoundController 地址：先完成 20/30 部署，或用 --adopt 登记');
+    process.exit(finish());
+  }
+  warn('TeamVault / RoundController 未登记：dry-run 仅打印绑定计划（不可逆操作，部署后双人核对再执行）');
+  process.exit(finish({ 模式: 'DRY-RUN（未部署）' }));
 }
 if (registeredBinding && !addressEquals(registeredBinding, controller)) {
   fail('登记表显示 TeamVault 已绑定到其他地址：' + registeredBinding + '（链上不可逆，立刻停止并核查）');

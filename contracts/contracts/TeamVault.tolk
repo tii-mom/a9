@@ -144,7 +144,7 @@ fun onInternalMessage(in: InMessage) {
     }
 }
 
-fun onBouncedMessage(in: InMessageBounced) {
+fun onBouncedMessage(_in: InMessageBounced) {
     // TeamVault state is written before outgoing messages are sent and every
     // instruction is idempotent, so a bounced child message is recovered by
     // resending the same instruction from RoundController.
@@ -156,12 +156,13 @@ fun requireController(st: TeamVaultStorage, sender: address) {
 }
 
 fun sendTeamReleasedAck(st: TeamVaultStorage, roundId: uint8, amountRaw: uint128, queryId: uint64) {
-    createMessage({
+    val out = createMessage({
         bounce: BounceMode.NoBounce,
         value: ton("0.02"),
         dest: st.config.controller!,
         body: TeamReleasedAck { queryId, roundId, amountRaw },
-    }).send(SEND_MODE_PAY_FEES_SEPARATELY);
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 fun sendTeamBurnedAck(
@@ -171,12 +172,13 @@ fun sendTeamBurnedAck(
     burnId: uint256,
     queryId: uint64,
 ) {
-    createMessage({
+    val out = createMessage({
         bounce: BounceMode.NoBounce,
         value: ton("0.02"),
         dest: st.config.controller!,
         body: TeamBurnedAck { queryId, roundId, amountRaw, burnId },
-    }).send(SEND_MODE_PAY_FEES_SEPARATELY);
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 get fun get_team_vault_state(): TeamVaultState {

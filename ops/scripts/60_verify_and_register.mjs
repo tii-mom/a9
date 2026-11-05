@@ -32,7 +32,10 @@ const checks = verifyRegistryStructure(registry);
 table(['检查项', '状态', '详情'], checks.map((item) => [item.name, item.status, item.detail]));
 let failures = 0;
 for (const item of checks) {
-  if (item.status === CHECK_STATUS.FAIL) { failures++; fail(item.name + '：' + item.detail); }
+  if (item.status === CHECK_STATUS.FAIL) {
+    if (execute) { failures++; fail(item.name + '：' + item.detail); }
+    else warn(item.name + '：' + item.detail + '（dry-run 允许，EXECUTE 前必须完成）');
+  }
   if (item.status === CHECK_STATUS.WARN) warn(item.name + '：' + item.detail);
 }
 

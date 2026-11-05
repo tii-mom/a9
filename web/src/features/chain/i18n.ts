@@ -19,6 +19,7 @@ export interface ChainDict {
   unconfiguredHint: string;
   retry: string;
   dataSourceDemoWarn: string;
+  demoClaimWarn: string;
   walletDemoTitle: string;
   walletDemoDesc: string;
   switchWallet: string;
@@ -34,6 +35,7 @@ export interface ChainDict {
   amountPlaceholder: string;
   minStake: string;
   maxStake: string;
+  maxPerAddress: string;
   failLoss: string;
   shareEst: string;
   myStake: string;
@@ -87,6 +89,7 @@ const ZH: ChainDict = {
   unconfiguredHint: '启用条件：/api/config 的 contracts.roundController 与 contracts.jettonMaster 均非空，且 network 为 testnet 或 mainnet。',
   retry: '重试',
   dataSourceDemoWarn: '后端当前使用演示数据源：轮次状态、可领取金额来自演示数据，链上实际状态以合约 get method 为准。',
+  demoClaimWarn: '注意：本面板的按钮会发起真实链上交易；页面下方的「可领取」演示按钮仍走后端演示接口，不会上链，请勿混淆。',
   walletDemoTitle: '演示钱包无法签名',
   walletDemoDesc: '演示钱包地址是本地生成的，不能签名交易。请切换为真实 TON 钱包后再进行链上质押/领取。',
   switchWallet: '连接真实钱包',
@@ -102,6 +105,7 @@ const ZH: ChainDict = {
   amountPlaceholder: '例如 100000',
   minStake: '单笔最低',
   maxStake: '本轮总上限',
+  maxPerAddress: '单地址上限',
   failLoss: '失败损失',
   shareEst: '预计占比',
   myStake: '本轮已有质押',
@@ -180,6 +184,7 @@ const EN: ChainDict = {
   unconfiguredHint: 'Enablement: /api/config must expose non-empty contracts.roundController and contracts.jettonMaster with network testnet or mainnet.',
   retry: 'Retry',
   dataSourceDemoWarn: 'The backend still uses the demo data source: round state and claimable amounts are demo data. The on-chain state from contract get methods is authoritative.',
+  demoClaimWarn: 'Note: the buttons in this panel send real on-chain transactions. The demo Claim buttons elsewhere on this page still call the backend demo API and do not go on-chain.',
   walletDemoTitle: 'Demo wallet cannot sign',
   walletDemoDesc: 'The demo address is generated locally and cannot sign transactions. Connect a real TON wallet to stake or claim on-chain.',
   switchWallet: 'Connect a real wallet',
@@ -195,6 +200,7 @@ const EN: ChainDict = {
   amountPlaceholder: 'e.g. 100000',
   minStake: 'Minimum per stake',
   maxStake: 'Round cap',
+  maxPerAddress: 'Per-address cap',
   failLoss: 'On failure',
   shareEst: 'Estimated share',
   myStake: 'Already staked this round',

@@ -10,7 +10,7 @@ export const BAM_ROOT = resolve(OPS_ROOT, '..');
 export const DEFAULT_PARAMS = join(OPS_ROOT, 'config', 'testnet.params.json');
 export const DEFAULT_REGISTRY = join(OPS_ROOT, 'config', 'testnet.registry.json');
 export const TEMPLATE_REGISTRY = join(OPS_ROOT, 'config', 'testnet.registry.template.json');
-export const RECORDS_DIR = join(OPS_ROOT, 'records');
+export const RECORDS_DIR = process.env.OPS_RECORDS_DIR ? resolve(process.env.OPS_RECORDS_DIR) : join(OPS_ROOT, 'records');
 
 export function readJSON(path) {
   return JSON.parse(readFileSync(path, 'utf8'));

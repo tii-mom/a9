@@ -25,8 +25,13 @@ kv('铸造后动作', '关闭 mint：admin 置空，total_supply 冻结为 100 �
 kv('后续分配', '70 亿 → 奖励金库；12 亿 → TeamVault；8 亿 → 团队内盘钱包；5 亿 → 流动性；5 亿 → 营销（合计 100 亿）');
 
 if (!master) {
-  fail('Jetton Master 未登记：先执行 10_deploy_jetton.mjs，或用 --adopt 登记');
-  process.exit(finish());
+  if (execute) {
+    fail('Jetton Master 未登记：先执行 10_deploy_jetton.mjs，或用 --adopt 登记');
+    process.exit(finish());
+  }
+  warn('Jetton Master 未登记：dry-run 仅打印计划（部署后重跑本步骤）');
+  detail('计划：铸造 ' + params.token.totalSupplyRaw + ' raw 到 treasury=' + (treasury || '<TREASURY>') + '，随后关闭 mint。');
+  process.exit(finish({ 模式: 'DRY-RUN（未部署）' }));
 }
 if (!treasury && execute) {
   fail('缺少 treasury 地址（--treasury / TON_TREASURY_ADDRESS / 登记表）');

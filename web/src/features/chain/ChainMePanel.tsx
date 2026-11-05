@@ -220,6 +220,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
 
       <div className="ap-pad">
         <p className="note">{d.desc}</p>
+        <p className="note chain-dim">{d.demoClaimWarn}</p>
 
         {raw && raw.dataSource !== 'chain' ? <div className="chain-warn">{d.dataSourceDemoWarn}</div> : null}
         {walletNetworkMismatch ? <div className="chain-warn">{d.walletNetMismatch}</div> : null}
@@ -309,6 +310,9 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
                 </span>
                 <span>
                   {d.maxStake}: <b>{formatRawAmount(chain.maxTotalStakeRaw, decimals)} A9</b>
+                </span>
+                <span>
+                  {d.maxPerAddress}: <b>{formatRawAmount(chain.maxStakePerAddressRaw, decimals)} A9</b>
                 </span>
                 <span>
                   {d.myStake}: <b>{formatRawAmount(myStakeRaw, decimals)} A9</b>

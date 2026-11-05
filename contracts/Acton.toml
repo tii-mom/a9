@@ -29,6 +29,7 @@ width = 100
 ignore = ["contracts/types.tolk", "contracts/constants.tolk"]
 
 [scripts]
+deploy-emulation = "acton script scripts/deploy-emulation.tolk"
 
 [import-mappings]
 acton = ".acton"

@@ -4,7 +4,7 @@
  */
 
 import type { RoundSummary } from '@shared/types';
-import { parseTonAddress, toRawAddress } from './address';
+import { parseTonAddress, toRawAddress, type TonAddress } from './address';
 import { toBocBase64 } from './cell';
 import type { ChainConfig } from './config';
 import { chainError, ChainError } from './errors';
@@ -74,6 +74,15 @@ export function tonBalanceToNumber(text: string | null | undefined): number | nu
   return Number.isFinite(value) ? value : null;
 }
 
+/** 解析配置/钱包地址；非法时给 BAD_CONFIG（避免原始 CRC 报错直达 UI）。 */
+function requireTonAddress(value: string, label: string): TonAddress {
+  try {
+    return parseTonAddress(value);
+  } catch {
+    throw chainError('BAD_CONFIG', '地址不合法: ' + label, value);
+  }
+}
+
 function assertWalletReady(chain: ChainConfig, wallet: WalletContext): void {
   if (!chain.configured) throw chainError('CHAIN_NOT_CONFIGURED');
   if (!wallet.address) throw chainError('WALLET_NOT_CONNECTED');
@@ -110,18 +119,14 @@ export function validateStake(params: {
   if (amountRaw > chain.maxTotalStakeRaw) {
     throw chainError('AMOUNT_TOO_LARGE', '超过本轮总质押上限', '上限 ' + chain.maxTotalStakeRaw.toString());
   }
-  // 单地址累计 ≤ 本轮总质押的 10%
-  const total = BigInt(round.totalAcceptedStakeRaw || '0') + amountRaw;
+  // 单地址累计 ≤ 固定硬顶（V6.1：20,000,000 A9，不随本轮总量浮动）
   const mine = (params.myStakeRaw ?? 0n) + amountRaw;
-  if (chain.maxStakePerAddressBps < 10000 && total > 0n) {
-    const mineBps = Number((mine * 10000n) / total);
-    if (mineBps > chain.maxStakePerAddressBps) {
-      throw chainError(
-        'AMOUNT_TOO_LARGE',
-        '单地址质押占比超限',
-        '单地址上限 ' + chain.maxStakePerAddressBps / 100 + '%（含本轮已有质押）',
-      );
-    }
+  if (chain.maxStakePerAddressRaw > 0n && mine > chain.maxStakePerAddressRaw) {
+    throw chainError(
+      'AMOUNT_TOO_LARGE',
+      '单地址质押超过硬顶',
+      '单地址上限 ' + chain.maxStakePerAddressRaw.toString() + ' raw（含本轮已有质押）',
+    );
   }
   assertGas(chain, wallet, MIN_STAKE_TON_BALANCE);
 }
@@ -162,15 +167,15 @@ export async function prepareStakeTransaction(params: {
   });
   const transferCell = buildJettonTransferCell({
     amountRaw,
-    destination: parseTonAddress(chain.roundController),
-    responseDestination: parseTonAddress(wallet.address),
+    destination: requireTonAddress(chain.roundController, 'roundController'),
+    responseDestination: requireTonAddress(wallet.address, 'wallet'),
     forwardTonNano: DEFAULT_FORWARD_TON_NANO,
     forwardPayload: stakePayload,
   });
   const request: TonConnectTxRequest = {
     validUntil: validUntilSeconds(),
     network: chain.chainId ?? undefined,
-    from: toRawAddress(parseTonAddress(wallet.address)),
+    from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
     messages: [
       {
         address: params.jettonWalletFriendly,
@@ -211,7 +216,7 @@ export function prepareClaimTransaction(params: {
   const request: TonConnectTxRequest = {
     validUntil: validUntilSeconds(),
     network: chain.chainId ?? undefined,
-    from: toRawAddress(parseTonAddress(wallet.address)),
+    from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
     messages: [
       {
         address: chain.roundController,

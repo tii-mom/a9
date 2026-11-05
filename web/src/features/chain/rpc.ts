@@ -108,6 +108,7 @@ async function resolveViaToncenterRunGetMethod(
   const variants: unknown[][] = [
     [{ type: 'slice', value: ownerRaw }],
     [{ type: 'slice', value: ownerFriendly }],
+    [{ type: 'slice', value: addressCellBoc }],
     [{ type: 'cell', value: addressCellBoc }],
   ];
   for (const stack of variants) {
@@ -194,7 +195,12 @@ export async function resolveJettonWalletAddress(params: {
       'tonapi 与 toncenter 均未返回 get_wallet_address 结果（可检查网络/合约是否已部署）',
     );
   }
-  const address = parseTonAddress(raw);
+  let address: TonAddress;
+  try {
+    address = parseTonAddress(raw);
+  } catch {
+    throw chainError('BAD_CONFIG', 'Jetton Wallet 地址非法', raw);
+  }
   const resolved: ResolvedJettonWallet = {
     raw: toRawAddress(address),
     friendly: toFriendlyAddress(address, chain.network === 'testnet', true),
@@ -248,6 +254,16 @@ function normalizeRaw(value: string | undefined | null): string | null {
   return value;
 }
 
+/** 尽力把来源地址规范成 raw；解析失败时原样返回，避免整批交易解析失败。 */
+function safeRawAddress(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return toRawAddress(parseTonAddress(value));
+  } catch {
+    return value;
+  }
+}
+
 function mapToncenterTx(tx: ToncenterTxRaw): OnchainTx {
   const inSource = normalizeRaw(tx.in_msg?.source);
   const hash = tx.transaction_id?.hash ?? '';
@@ -257,7 +273,7 @@ function mapToncenterTx(tx: ToncenterTxRaw): OnchainTx {
     utime: Number(tx.utime ?? 0),
     aborted: Boolean(tx.description?.aborted),
     external: !inSource,
-    inSource: inSource ? toRawAddress(parseTonAddress(inSource)) : null,
+    inSource: safeRawAddress(inSource),
     inDestination: tx.in_msg?.destination ? normalizeRaw(tx.in_msg.destination) : null,
     inValueNanoton: tx.in_msg?.value ?? null,
     inBody: tx.in_msg?.msg_data?.body ?? null,

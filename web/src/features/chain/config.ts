@@ -9,6 +9,7 @@ import type { DataSource, ProtocolConfig } from '@shared/types';
 import { base64Decode, base64UrlEncode } from './address';
 import {
   DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
+  DEFAULT_MAX_STAKE_PER_ADDRESS_TOKENS,
   DEFAULT_MAX_TOTAL_STAKE_TOKENS,
   DEFAULT_MIN_STAKE_TOKENS,
   DEFAULT_TOKEN_DECIMALS,
@@ -39,6 +40,9 @@ export interface ChainConfig {
   roundCount: number;
   minStakeRaw: bigint;
   maxTotalStakeRaw: bigint;
+  /** 单地址固定硬顶（raw，V6.1 = 20,000,000 A9） */
+  maxStakePerAddressRaw: bigint;
+  /** 旧口径（bps），仅为兼容保留；前端校验以 maxStakePerAddressRaw 为准 */
   maxStakePerAddressBps: number;
   dataSource: DataSource;
   tonConnectManifestUrl: string | null;
@@ -103,6 +107,10 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     roundCount: config?.roundCount ?? 10,
     minStakeRaw: parseRawExtra(contractExtra(config, 'minStakeRaw'), DEFAULT_MIN_STAKE_TOKENS * tokenUnit),
     maxTotalStakeRaw: parseRawExtra(contractExtra(config, 'maxTotalStakeRaw'), DEFAULT_MAX_TOTAL_STAKE_TOKENS * tokenUnit),
+    maxStakePerAddressRaw: parseRawExtra(
+      contractExtra(config, 'maxStakePerAddressRaw'),
+      DEFAULT_MAX_STAKE_PER_ADDRESS_TOKENS * tokenUnit,
+    ),
     maxStakePerAddressBps: parseBpsExtra(contractExtra(config, 'maxStakePerAddressBps'), DEFAULT_MAX_STAKE_PER_ADDRESS_BPS),
     dataSource: config?.dataSource ?? 'demo',
     tonConnectManifestUrl: config?.tonConnectManifestUrl ?? null,

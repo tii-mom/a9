@@ -13,3 +13,4 @@ qa/prod/
 qa/final/
 qa/*.png
 worker/scripts/*.sql
+.playwright-cli/
