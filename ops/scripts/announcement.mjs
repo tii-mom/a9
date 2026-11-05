@@ -125,7 +125,7 @@ const values = {
   burnedReward: tokens(burnedRewardRaw),
   burnedTeam: tokens(burnedTeamRaw),
   burnedPrincipal: tokens(burnedPrincipalRaw),
-  closeReason: data.closeReason || '72 小时报名窗口到期正常关闭',
+  closeReason: data.closeReason || '36 小时报名窗口到期正常关闭',
   pauseReason: data.pauseReason || '价格数据源异常，暂停观察',
   resumeAt: fmtTime(data.resumeAt || data.pausedAt),
   abortReason: data.abortReason || '连续暂停 14 天或观察结束超时 7 天',

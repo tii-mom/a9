@@ -21,12 +21,12 @@ const MIN_STAKE_RAW: uint128 = 10000000000000;
 const MAX_TOTAL_STAKE_RAW: uint128 = 200000000000000000;
 
 const P0_USD_E8: uint128 = 116000;
-const CANDLE_SECONDS: uint32 = 14400;
-const CANDLE_COUNT: uint8 = 18;
-const MIN_QUALIFIED_CANDLES: uint8 = 12;
-const PREVIEW_SECONDS: uint32 = 86400;
-const STAKE_DURATION_SECONDS: uint32 = 259200;
-const OBSERVATION_SECONDS: uint32 = 259200;
+const CANDLE_SECONDS: uint32 = 3600;
+const CANDLE_COUNT: uint8 = 24;
+const MIN_QUALIFIED_CANDLES: uint8 = 16;
+const PREVIEW_SECONDS: uint32 = 43200;
+const STAKE_DURATION_SECONDS: uint32 = 129600;
+const OBSERVATION_SECONDS: uint32 = 86400;
 const TECH_ABORT_PAUSE_SECONDS: uint32 = 1209600;
 const TECH_ABORT_OBS_TIMEOUT_SECONDS: uint32 = 604800;
 const RISK_DISCLOSURE_VERSION: uint16 = 1;
@@ -74,7 +74,7 @@ struct TeamVaultHandle {
     address: address
 }
 
-fun deployTeamVault(admin: address, teamWallet: address): TeamVaultHandle {
+fun deployTeamVault(admin: address, teamWallet: address, jettonMaster: address): TeamVaultHandle {
     val deployer = testing.treasury("team-vault-deployer");
     val storage = TeamVaultStorage {
         config: TeamVaultConfig {
@@ -86,9 +86,11 @@ fun deployTeamVault(admin: address, teamWallet: address): TeamVaultHandle {
         params: TeamVaultParams {
             jettonWallet: admin,
             teamWallet,
+            jettonMaster,
             teamRoundRaw: TEAM_ROUND_RAW,
         }.toCell(),
         rounds: [],
+        pendingBurnIds: [],
         totalReleasedRaw: 0,
         totalBurnedRaw: 0,
         releasedCount: 0,
@@ -119,6 +121,7 @@ struct TeamVaultFixture {
     admin: address
     rc: address
     teamWallet: address
+    jettonMaster: address
     vault: TeamVaultHandle
     wallet: MockWalletHandle
 }
@@ -129,7 +132,8 @@ fun setupTeamVault(fundedBalance: coins): TeamVaultFixture {
     val admin = testing.treasury("admin");
     val rc = testing.treasury("rc");
     val teamWallet = testing.treasury("team-wallet");
-    val vault = deployTeamVault(admin.address, teamWallet.address);
+    val jettonMaster = testing.treasury("jetton-master");
+    val vault = deployTeamVault(admin.address, teamWallet.address, jettonMaster.address);
     val wallet = deployMockWallet(vault.address, fundedBalance);
     expect(setTeamVaultWallet(vault, admin.address, wallet.address)).toHaveSuccessfulTx<SetJettonWallet>({
         from: admin.address,
@@ -139,7 +143,14 @@ fun setupTeamVault(fundedBalance: coins): TeamVaultFixture {
         from: admin.address,
         to: vault.address,
     });
-    return { admin: admin.address, rc: rc.address, teamWallet: teamWallet.address, vault, wallet };
+    return {
+        admin: admin.address,
+        rc: rc.address,
+        teamWallet: teamWallet.address,
+        jettonMaster: jettonMaster.address,
+        vault,
+        wallet,
+    };
 }
 
 fun teamVaultState(vault: TeamVaultHandle): TeamVaultState {
@@ -239,6 +250,7 @@ fun deployRoundController(
     };
     val storage = Storage {
         config: cfg.toCell(),
+        extras: emptyExtras().toCell(),
         currentRoundId: 0,
         successCount: 0,
         lastSettledAt: 0,
@@ -400,6 +412,7 @@ fun submitAllCandles(
 struct ProtocolFixture {
     admin: address
     oracle: address
+    keeper: Treasury
     jettonMaster: address
     teamWallet: address
     rc: RoundControllerHandle
@@ -410,7 +423,11 @@ struct ProtocolFixture {
 
 fun setupProtocol(): ProtocolFixture {
     val admin = testing.treasury("admin");
-    val oracle = testing.treasury("oracle");
+    // P0-1: candle submission / early close is admin-or-oracle only. A single
+    // keeper treasury is created here and doubles as the oracle so tests do not
+    // try to redeploy it later.
+    val keeper = testing.treasury("keeper");
+    val oracle = keeper;
     val jettonMaster = testing.treasury("jetton-master");
     val teamWallet = testing.treasury("team-wallet");
 
@@ -418,7 +435,7 @@ fun setupProtocol(): ProtocolFixture {
     // transaction pays storage rent for the whole jump from t=0 and fails (-669).
     testing.setNow(1000000);
 
-    val tv = deployTeamVault(admin.address, teamWallet.address);
+    val tv = deployTeamVault(admin.address, teamWallet.address, jettonMaster.address);
     val rc = deployRoundController(admin.address, oracle.address, jettonMaster.address, tv.address);
 
     val rcWallet = deployMockWallet(rc.address, (ROUND_REWARD_RAW * 12) as coins);
@@ -444,6 +461,7 @@ fun setupProtocol(): ProtocolFixture {
     return {
         admin: admin.address,
         oracle: oracle.address,
+        keeper,
         jettonMaster: jettonMaster.address,
         teamWallet: teamWallet.address,
         rc,
@@ -574,7 +592,7 @@ fun retryPendingActions(rc: RoundControllerHandle, from: address, roundId: uint8
 }
 
 // Runs one complete successful round for a single staker (open -> stake ->
-// close -> observe 12/18 -> finalize) and leaves the clock at settlement time.
+// close -> observe 16/24 -> finalize) and leaves the clock at settlement time.
 fun runSuccessRound(
     f: ProtocolFixture,
     roundId: uint8,
@@ -597,9 +615,122 @@ fun runSuccessRound(
         from: keeper,
         to: f.rc.address,
     });
-    submitAllCandles(f.rc, keeper, roundId, 12, target);
+    submitAllCandles(f.rc, keeper, roundId, MIN_QUALIFIED_CANDLES, target);
     expect(finalizeRound(f.rc, keeper, roundId)).toHaveSuccessfulTx<FinalizeRound>({
         from: keeper,
         to: f.rc.address,
     });
+}
+
+
+// ---------------------------------------------------------------------------
+// V8 reward-state helpers
+// ---------------------------------------------------------------------------
+
+fun setReferrer(rc: RoundControllerHandle, from: address, referrer: address): SendResultList {
+    return net.send(from, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: rc.address,
+        body: SetReferrer { referrer },
+    }));
+}
+
+fun rollReward(rc: RoundControllerHandle, from: address, roundId: uint8): SendResultList {
+    return net.send(from, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: rc.address,
+        body: RollReward { queryId: 0, roundId },
+    }));
+}
+
+fun claimRewardEarly(rc: RoundControllerHandle, from: address, roundId: uint8): SendResultList {
+    return net.send(from, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: rc.address,
+        body: ClaimRewardEarly { queryId: 0, roundId },
+    }));
+}
+
+fun claimUnlocked(rc: RoundControllerHandle, from: address): SendResultList {
+    return net.send(from, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: rc.address,
+        body: ClaimUnlocked { queryId: 0 },
+    }));
+}
+
+fun rcRewardState(rc: RoundControllerHandle, owner: address, roundId: uint8): RewardStateInfo {
+    return net.runGetMethod<RewardStateInfo>(rc.address, "get_reward_state", [owner, roundId]);
+}
+
+fun rcUnlockInfo(rc: RoundControllerHandle, owner: address): UnlockInfo {
+    return net.runGetMethod<UnlockInfo>(rc.address, "get_unlock_info", [owner]);
+}
+
+fun rcReferral(rc: RoundControllerHandle, owner: address): ReferralInfo {
+    return net.runGetMethod<ReferralInfo>(rc.address, "get_referral", [owner]);
+}
+
+fun rcStreak(rc: RoundControllerHandle, owner: address): StreakInfo {
+    return net.runGetMethod<StreakInfo>(rc.address, "get_streak", [owner]);
+}
+
+fun rcUserWeight(rc: RoundControllerHandle, roundId: uint8, owner: address): uint128 {
+    return net.runGetMethod<uint128>(rc.address, "get_user_weight", [roundId, owner]);
+}
+
+fun rcTotalWeight(rc: RoundControllerHandle, roundId: uint8): uint128 {
+    return net.runGetMethod<uint128>(rc.address, "get_total_weight", [roundId]);
+}
+
+// Top up all A9 contracts before a large testing.setNow() jump (storage rent).
+fun topUpForTimeJump(f: ProtocolFixture, amount: coins) {
+    testing.topUp(f.rc.address, amount);
+    testing.topUp(f.rcWallet.address, amount);
+    testing.topUp(f.tv.address, amount);
+    testing.topUp(f.tvWallet.address, amount);
+}
+
+
+fun sendBurnConfirm(vault: TeamVaultHandle, fromMaster: address, roundId: uint8): SendResultList {
+    val q: uint64 = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+    return net.send(fromMaster, createMessage({
+        bounce: true,
+        value: ton("0.1"),
+        dest: vault.address,
+        body: ReturnExcessesBack { queryId: q },
+    }));
+}
+
+// Simulates the team burn transfer bouncing back from TeamVault's Jetton Wallet.
+fun bounceTeamBurn(vault: TeamVaultHandle, wallet: address, roundId: uint8) {
+    val q: uint64 = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+    val body = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(OP_JETTON_BURN, 32)
+        .storeUint(q, 64)
+        .endCell();
+    val msg = createMessage({
+        bounce: false,
+        value: ton("0.1"),
+        dest: vault.address,
+        body,
+    }).bounced();
+    testing.processSingleTraceStep(wallet, msg);
+}
+
+
+// P0-2 closure: the Jetton Master confirms TeamVault's burn, which then acks RC.
+fun confirmTeamBurn(f: ProtocolFixture, roundId: uint8) {
+    val q: uint64 = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+    expect(net.send(f.jettonMaster, createMessage({
+        bounce: true,
+        value: ton("0.1"),
+        dest: f.tv.address,
+        body: ReturnExcessesBack { queryId: q },
+    }))).toHaveSuccessfulTx<ReturnExcessesBack>({ from: f.jettonMaster, to: f.tv.address });
 }

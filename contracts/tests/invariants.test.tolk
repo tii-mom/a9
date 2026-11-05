@@ -17,7 +17,7 @@ const AMOUNT: coins = 100000000000000; // 100,000 A9
 get fun `test TargetPriceSet / DepositAccepted / RoundSettled events are emitted`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     val openRes = openRound(f.rc, f.admin, 200000);
     expect(openRes).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
@@ -56,7 +56,7 @@ get fun `test TargetPriceSet / DepositAccepted / RoundSettled events are emitted
     advance(STAKE_DURATION_SECONDS as int);
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 1, 12, 400000 as uint128);
+    submitAllCandles(f.rc, keeper.address, 1, 16, 400000 as uint128);
     val finRes = finalizeRound(f.rc, keeper.address, 1);
     expect(finRes).toHaveSuccessfulTx<FinalizeRound>({ from: keeper.address, to: f.rc.address });
     val settledEv = finRes.findExternalOutMessage<RoundSettled>({ from: f.rc.address });
@@ -70,8 +70,8 @@ get fun `test TargetPriceSet / DepositAccepted / RoundSettled events are emitted
         };
         expect(body.roundId).toEqual(1);
         expect(body.status).toEqual(STATUS_SUCCEEDED);
-        expect(body.qualifiedCandles).toEqual(12);
-        expect(body.candlesSeen).toEqual(18);
+        expect(body.qualifiedCandles).toEqual(16);
+        expect(body.candlesSeen).toEqual(24);
         expect(body.tierAfter).toEqual(2);
     }
 }
@@ -83,11 +83,11 @@ get fun `test TargetPriceSet / DepositAccepted / RoundSettled events are emitted
 get fun `test success increments tier: R1 2xP0 -> R2 4xP0 -> R3 8xP0`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     runSuccessRound(f, 1, alice.address, keeper.address, AMOUNT);
     expect(net.runGetMethod<uint8>(f.rc.address, "get_success_count")).toEqual(1);
-    advance(86400);
+    advance(PREVIEW_SECONDS as int);
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     val r2 = rcRound(f.rc, 2);
     expect(r2.targetTier).toEqual(2);
@@ -97,10 +97,10 @@ get fun `test success increments tier: R1 2xP0 -> R2 4xP0 -> R3 8xP0`() {
     advance(STAKE_DURATION_SECONDS as int);
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
     expect(startObservation(f.rc, keeper.address, 2)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 2, 12, 464000 as uint128);
+    submitAllCandles(f.rc, keeper.address, 2, 16, 464000 as uint128);
     expect(finalizeRound(f.rc, keeper.address, 2)).toHaveSuccessfulTx<FinalizeRound>({ from: keeper.address, to: f.rc.address });
     expect(net.runGetMethod<uint8>(f.rc.address, "get_success_count")).toEqual(2);
-    advance(86400);
+    advance(PREVIEW_SECONDS as int);
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     val r3 = rcRound(f.rc, 3);
     expect(r3.targetTier).toEqual(3);
@@ -113,10 +113,11 @@ get fun `test success increments tier: R1 2xP0 -> R2 4xP0 -> R3 8xP0`() {
 
 get fun `test 0-stake failure burns reward + team only and stays permanent`() {
     val f = setupProtocol();
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
     val target = openAndCloseFirstRound(f, 0);
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 1, 11, target);
+    submitAllCandles(f.rc, keeper.address, 1, 15, target);
+    confirmTeamBurn(f, 1);
 
     val settling = rcRound(f.rc, 1);
     expect(settling.status).toEqual(STATUS_SETTLING_FAILURE);
@@ -151,16 +152,16 @@ get fun `test 0-stake failure burns reward + team only and stays permanent`() {
 get fun `test cross-round claimAll merges two rounds into a single transfer`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     runSuccessRound(f, 1, alice.address, keeper.address, AMOUNT);
-    advance(86400);
+    advance(PREVIEW_SECONDS as int);
     runSuccessRound(f, 2, alice.address, keeper.address, AMOUNT);
 
     val claimable = rcClaimable(f.rc, alice.address);
     expect(claimable.roundsMask).toEqual(3); // bits for rounds 1 and 2
     val expectedPrincipal: uint128 = (AMOUNT as uint128) * 2;
-    val expectedReward: uint128 = ROUND_REWARD_RAW * 2; // sole staker both rounds
+    val expectedReward: uint128 = ROUND_REWARD_RAW; // 2 rounds x 700M; legacy ClaimAll pays 50% now
     expect(claimable.principalRaw).toEqual(expectedPrincipal);
     expect(claimable.rewardRaw).toEqual(expectedReward);
 
@@ -171,6 +172,7 @@ get fun `test cross-round claimAll merges two rounds into a single transfer`() {
     val ms = mockState(f.rcWallet);
     expect(ms.transferCount).toEqual(1);
     expect(ms.lastTransferAmount).toEqual((expectedPrincipal + expectedReward) as coins);
+    expect(rcUnlockInfo(f.rc, alice.address).totalLockedRaw).toEqual(ROUND_REWARD_RAW * 2 - expectedReward);
     expect(ms.lastTransferDest).toEqual(alice.address);
 
     // second call: nothing left
@@ -184,10 +186,10 @@ get fun `test cross-round claimAll merges two rounds into a single transfer`() {
 get fun `test claimAll with a specific roundId only claims that round`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     runSuccessRound(f, 1, alice.address, keeper.address, AMOUNT);
-    advance(86400);
+    advance(PREVIEW_SECONDS as int);
     runSuccessRound(f, 2, alice.address, keeper.address, AMOUNT);
 
     expect(claimAll(f.rc, alice.address, 2)).toHaveSuccessfulTx<ClaimAll>({
@@ -211,14 +213,15 @@ get fun `test claimAll with a specific roundId only claims that round`() {
 get fun `test RetryPendingActions resends missing failure burns`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     stakeOk(f, 1, alice.address, AMOUNT, 1);
     advance(STAKE_DURATION_SECONDS as int);
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 1, 11, rcRound(f.rc, 1).targetPriceUsdE8);
+    submitAllCandles(f.rc, keeper.address, 1, 15, rcRound(f.rc, 1).targetPriceUsdE8);
+    confirmTeamBurn(f, 1);
     expect(rcStatus(f.rc, 1)).toEqual(STATUS_SETTLING_FAILURE);
     expect(mockState(f.rcWallet).burnCount).toEqual(2);
 
@@ -243,12 +246,12 @@ get fun `test RetryPendingActions resends missing failure burns`() {
 get fun `test ten successful rounds: tier 10 target is 1024 x P0 and round 11 is rejected`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     var roundId: uint8 = 1;
     while (roundId <= 10) {
         if (roundId > 1) {
-            advance(86400);
+            advance(PREVIEW_SECONDS as int);
         }
         runSuccessRound(f, roundId, alice.address, keeper.address, AMOUNT);
         roundId += 1;

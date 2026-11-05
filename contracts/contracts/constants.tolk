@@ -1,4 +1,4 @@
-// A9 Protocol — shared constants (V6.1)
+// A9 Protocol — shared constants (V6.2 timing)
 // Authority: docs/00_DECISIONS_V2.md (V6.1), docs/04_CONTRACT_ABI.md.
 // Custom opcodes occupy the project-reserved 0x5254xxxx range (see README §ABI).
 
@@ -8,11 +8,9 @@
 const OP_OPEN_ROUND: uint32 = 0x52540001;
 const OP_CLOSE_STAKING: uint32 = 0x52540002;
 const OP_SUBMIT_CANDLE: uint32 = 0x52540003;
-const OP_ORACLE_CANDLE_VERIFIED: uint32 = 0x52540004; // reserved (OracleAdapter phase 2)
 const OP_FINALIZE_ROUND: uint32 = 0x52540005;
 const OP_CLAIM_PRINCIPAL: uint32 = 0x52540006;
 const OP_CLAIM_REWARD: uint32 = 0x52540007;
-const OP_START_FAILURE_BURN: uint32 = 0x52540008; // reserved (logical ABI)
 const OP_BURN_ACK: uint32 = 0x52540009;
 const OP_PAUSE_ORACLE: uint32 = 0x5254000A;
 const OP_RESUME_ORACLE: uint32 = 0x5254000B;
@@ -23,10 +21,18 @@ const OP_STAKE_DEPOSIT: uint32 = 0x5254000F;
 const OP_ABORT_TECHNICAL: uint32 = 0x52540010;
 const OP_START_OBSERVATION: uint32 = 0x52540011;
 const OP_INIT_CONTROLLER: uint32 = 0x52540012;
-const OP_TEAM_RELEASED_ACK: uint32 = 0x52540013;
-const OP_TEAM_BURNED_ACK: uint32 = 0x52540014;
 const OP_RETRY_PENDING_ACTIONS: uint32 = 0x52540015;
 const OP_SET_JETTON_WALLET: uint32 = 0x52540016;
+const OP_CLAIM_REWARD_EARLY: uint32 = 0x52540017;
+const OP_ROLL_REWARD: uint32 = 0x52540018;
+const OP_SET_REFERRER: uint32 = 0x52540019;
+const OP_CLAIM_UNLOCKED: uint32 = 0x5254001A;
+// TEP-74 wallet -> owner excess return, also used as burn/claim completion signal
+const OP_RETURN_EXCESSES: uint32 = 0xd53276db;
+
+// Reserved (phase-2 OracleAdapter). RoundController has no handler for this yet;
+// only the ops dry-run script (scripts/deploy/admin_op.tolk) builds it for planning.
+const OP_ORACLE_CANDLE_VERIFIED: uint32 = 0x52540004;
 
 // Events (external-out logs, TEP-style). Not internal messages.
 const EV_TARGET_PRICE_SET: uint32 = 0x52540101;
@@ -35,12 +41,15 @@ const EV_DEPOSIT_ACCEPTED: uint32 = 0x52540103;
 const EV_TECHNICAL_ABORTED: uint32 = 0x52540104;
 const EV_TEAM_RELEASED: uint32 = 0x52540201;
 const EV_TEAM_BURNED: uint32 = 0x52540202;
+const EV_REWARD_ROLLED: uint32 = 0x52540105;
+const EV_REWARD_EARLY: uint32 = 0x52540106;
+const EV_REFERRER_SET: uint32 = 0x52540107;
+const EV_UNLOCK_CLAIMED: uint32 = 0x52540108;
 
 // TEP-74 / TEP-89 standard opcodes
 const OP_JETTON_TRANSFER: uint32 = 0x0f8a7ea5;
 const OP_JETTON_BURN: uint32 = 0x595f07bc;
 const OP_JETTON_TRANSFER_NOTIFICATION: uint32 = 0x7362d09c;
-const OP_TOP_UP_TONS: uint32 = 0xd372158c;
 
 // ---------------------------------------------------------------------------
 // Round status values (docs/02 §1). uint8 on the wire.
@@ -70,6 +79,28 @@ const ABORT_REASON_OBSERVATION_TIMEOUT: uint8 = 2;
 const MAX_ROUNDS: uint8 = 10;
 // claimAll upper bound: fixed 10-round scan (docs/04 §8.1, no unbounded loop).
 const MAX_CLAIM_SCAN_ROUNDS: uint8 = 10;
+
+// V8 reward-state values
+const REWARD_STATE_PENDING: uint8 = 0;
+const REWARD_STATE_ROLLED: uint8 = 1;
+const REWARD_STATE_EARLY: uint8 = 2;
+
+// V8 weight parameters (BPS = 1/10000)
+const STREAK_MAX: uint8 = 10;
+const STREAK_BPS_PER_ROUND: uint32 = 1000; // +10% per consecutive round
+const REFERRAL_BPS: uint32 = 2000; // 20% of referred stake
+const UNLOCK_DURATION_SECONDS: uint32 = 31104000; // 12 x 30 days, linear (1/12 per month)
+
+// P0-3 claim queryId kind (layout: roundId<<32 | kind<<24 | counter24)
+const CLAIM_KIND_PRINCIPAL: uint8 = 1;
+const CLAIM_KIND_REWARD: uint8 = 2;
+const CLAIM_KIND_CLAIM_ALL: uint8 = 3;
+const CLAIM_KIND_UNLOCK: uint8 = 4;
+
+// P0-2 burn queryId kind (layout: roundId<<16 | kind<<8 | nonce)
+const BURN_QUERY_REWARD: uint8 = 1; // same value as BURN_KIND_REWARD
+const BURN_QUERY_PRINCIPAL: uint8 = 3; // same value as BURN_KIND_PRINCIPAL
+const BURN_QUERY_TEAM: uint8 = 2; // same value as BURN_KIND_TEAM
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -136,4 +167,19 @@ enum Errors {
 
     // config
     BadConfig = 250,
+
+    // V8 reward states / referrals / unlock
+    AlreadyReferred = 260,
+    SelfReferral = 261,
+    MutualReferral = 262,
+    RewardStateLocked = 263,
+    UnlockNotStarted = 264,
+    NothingUnlocked = 265,
+    RollNotAvailable = 266,
+
+    // P0 fixes
+    ClaimPending = 270,
+    UnknownBounce = 271,
+    CounterOverflow = 272,
+    BadBurnQuery = 273,
 }

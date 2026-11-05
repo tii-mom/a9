@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { compactUsd, formatUsdE8, pad2 } from '../../lib/format';
 import type { BoardView } from './derive';
-import { clockText, priceMultiplierOf } from './derive';
+import { clockText } from './derive';
 import { useLang } from '../../lib/lang';
 import { fill, type LandingCopy } from './landing.i18n';
 import type { LandingWallet } from './wallet';
@@ -29,7 +29,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
   const decimals = cfg?.token.decimals ?? 9;
   const price = usdNum(board.priceUsdE8);
   const target = usdNum(board.targetUsdE8);
-  const mult = priceMultiplierOf(cfg, board.roundId);
+  const mult = board.priceMultiplier; // D-28 档位由 API 提供（失败不升档）
   const tonUsd = usdNum(cfg?.tonUsdE8 ?? null);
   const liquidity = usdNum(stats?.liquidityUsdE8 ?? null);
   const roundId = board.roundId;

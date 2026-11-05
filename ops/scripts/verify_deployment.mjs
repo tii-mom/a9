@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
-import { findJettonWallet, getAddressInformation, getJettonData, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { CHECK_STATUS, check, verifyAllocationInvariant, verifyFundingPlan, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, summary } from './lib/log.mjs';
@@ -83,6 +83,17 @@ if (!offline) {
       const data = await getJettonData(params, jettonMaster);
       add(check('jetton.total_supply', data.totalSupplyRaw === params.token.totalSupplyRaw ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, data.totalSupplyRaw + ' vs ' + params.token.totalSupplyRaw));
       add(check('jetton.mintable', data.mintable === false ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(data.mintable)));
+      add(check('jetton.admin_null', data.adminNull === true ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, data.adminNull ? 'admin = null（mint 已关闭）' : 'admin 非 null：mint-once 未完成'));
+    });
+    await netCheck('jetton.metadata', async () => {
+      const metadata = await getJettonMasterMetadata(params, jettonMaster);
+      if (!metadata) {
+        add(check('jetton.metadata', CHECK_STATUS.WARN, 'TON Center v3 暂未索引 metadata；get_jetton_data 已核对 supply/mint，稍后重跑'));
+        return;
+      }
+      add(check('jetton.name', metadata.name === params.token.name ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(metadata.name) + ' vs ' + params.token.name));
+      add(check('jetton.symbol', metadata.symbol === params.token.symbol ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(metadata.symbol) + ' vs ' + params.token.symbol));
+      add(check('jetton.decimals', Number(metadata.decimals) === Number(params.token.decimals) ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(metadata.decimals) + ' vs ' + params.token.decimals));
     });
   }
 

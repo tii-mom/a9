@@ -3,7 +3,7 @@
 
 import { str } from './lib/cli.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress, resolveWalletAddress } from './lib/step.mjs';
-import { commandTemplate, extractAddress, runCommand, substitute } from './lib/toolchain.mjs';
+import { commandTemplate, extractAddress, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { setContract, writeRegistry } from './lib/registry.mjs';
 import { validateTestnetAddress } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, detail } from './lib/log.mjs';
@@ -43,6 +43,17 @@ if (!adminOwner || !teamWallet) {
   const message = '缺少 admin 或 teamWallet：admin 来自 TON_ADMIN_OWNER_ADDRESS/登记表，teamWallet 由项目方部署前提供并登记';
   if (execute) { fail(message); process.exit(finish()); }
   warn(message + '（dry-run 继续）');
+}
+
+if (!hasCommand(params, 'deployTeamVault')) {
+  const pending = '测试网使用整体部署 15_deploy_contracts.mjs';
+  if (execute) {
+    fail('无分步 TeamVault 部署命令：' + pending + '；或用 --adopt 登记已部署地址');
+    process.exit(finish());
+  }
+  info('整体部署已包含 TeamVault；本脚本保留 --adopt 手工登记与核对');
+  printNextSteps(['整体部署：node scripts/15_deploy_contracts.mjs --execute', '已部署后：node scripts/20_deploy_teamvault.mjs --adopt <teamVault>']);
+  process.exit(finish({ 模式: 'DRY-RUN（整体部署路径）' }));
 }
 
 const rendered = substitute(commandTemplate(params, 'deployTeamVault'), {

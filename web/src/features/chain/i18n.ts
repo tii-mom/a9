@@ -72,6 +72,62 @@ export interface ChainDict {
   refreshStatus: string;
   phases: Record<ChainTxPhase, string>;
   errors: Record<ChainErrorCode, string>;
+  // ---- V8 奖励三态 ----
+  rewardTitle: string;
+  rewardDesc: string;
+  rollWarning: string;
+  rewardEmpty: string;
+  rewardEmptyDesc: string;
+  statePending: string;
+  stateRolled: string;
+  stateEarly: string;
+  stateUnlocked: string;
+  statePendingHint: string;
+  stateRolledHint: string;
+  stateEarlyHint: string;
+  optRoll: string;
+  optRollHint: string;
+  optEarly: string;
+  optEarlyHint: string;
+  optHold: string;
+  optHoldHint: string;
+  rollableLabel: string;
+  earlyAmountLabel: string;
+  lockedLabel: string;
+  rewardDemoNote: string;
+  rewardWalletNote: string;
+  unlockTitle: string;
+  unlockInactive: string;
+  unlockActive: string;
+  unlockMeta: string;
+  unlockAction: string;
+  unlockNothing: string;
+  // ---- V8 邀请 ----
+  inviteTitle: string;
+  inviteDesc: string;
+  inviteCodeLabel: string;
+  inviteLinkLabel: string;
+  inviteCopy: string;
+  inviteCopied: string;
+  inviteNote: string;
+  boundLabel: string;
+  boundNote: string;
+  unboundLabel: string;
+  pendingLabel: string;
+  pendingNote: string;
+  bindAction: string;
+  bindInputPlaceholder: string;
+  bindInvalid: string;
+  bindSelf: string;
+  streakLabel: string;
+  streakValue: string;
+  weightLabel: string;
+  referralBonusLabel: string;
+  referralStakeLabel: string;
+  invitedCountLabel: string;
+  referralBonusValue: string;
+  rewardDemoBound: string;
+  claimUnlockedDemo: string;
 }
 
 const ZH: ChainDict = {
@@ -141,6 +197,60 @@ const ZH: ChainDict = {
   txRetry: '重新发送',
   txDismiss: '关闭提示',
   refreshStatus: '刷新状态',
+  rewardTitle: '奖励处理',
+  rewardDesc: '每轮奖励三态：滚存 / 早领 50% / 不动；三态互斥、不可回退',
+  rollWarning: '滚存 = 把赢来的再押一次，可能归零。想落袋就选早领（拿 50%）。',
+  rewardEmpty: '暂无可处理奖励',
+  rewardEmptyDesc: '本轮结算成功后，奖励会出现在这里；失败轮次没有奖励。',
+  statePending: '未处理',
+  stateRolled: '已滚存',
+  stateEarly: '已早领',
+  stateUnlocked: '已解锁',
+  statePendingHint: '默认不动：锁到 R10 结束后，12 个月线性解锁。',
+  stateRolledHint: '已滚存 {amount} A9 进入下一轮质押；若下一轮失败，这部分会随本金一起销毁。',
+  stateEarlyHint: '已早领 {paid} A9，另 {locked} A9 进入 R10 后的解锁池（不销毁）。',
+  optRoll: '滚存',
+  optRollHint: '全额进下一轮，可能归零',
+  optEarly: '早领 50%',
+  optEarlyHint: '立即拿 {amount} A9，另 {locked} A9 锁到 R10 后',
+  optHold: '不动',
+  optHoldHint: '默认：锁到 R10 后 12 个月线性',
+  rollableLabel: '可滚存',
+  earlyAmountLabel: '早领可得',
+  lockedLabel: '进入解锁池',
+  rewardDemoNote: '演示模式：按钮为模拟操作，不会发送链上交易。',
+  rewardWalletNote: '连接真实 TON 钱包后可发起链上交易（当前为只读/演示）。',
+  unlockTitle: '解锁进度',
+  unlockInactive: 'R10 结束后开始 12 个月线性解锁（当前锁定 {amount} A9）。',
+  unlockActive: '已解锁 {pct}% · 可领取 {amount} A9',
+  unlockMeta: '锁定 {locked} A9 · 已领 {claimed} A9 · 共 12 个月线性释放',
+  unlockAction: '领取解锁',
+  unlockNothing: '暂无可领取的解锁额度',
+  inviteTitle: '邀请关系',
+  inviteDesc: '邀请码与邀请链接；被邀请人首次质押前绑定邀请人，绑定后不可修改。',
+  inviteCodeLabel: '我的邀请码',
+  inviteLinkLabel: '邀请链接',
+  inviteCopy: '复制',
+  inviteCopied: '已复制',
+  inviteNote: '邀请加成 = 被邀请人质押 × {bonusPct}%，封顶自己质押；只算直接邀请（一层）。',
+  boundLabel: '已绑定邀请人',
+  boundNote: '已绑定，不可修改',
+  unboundLabel: '未绑定邀请人',
+  pendingLabel: '待绑定邀请人',
+  pendingNote: '检测到邀请链接：请在首次质押前绑定（绑定后不可修改）。',
+  bindAction: '绑定邀请人',
+  bindInputPlaceholder: '粘贴邀请码或邀请人地址',
+  bindInvalid: '邀请码/地址无效',
+  bindSelf: '不能绑定自己',
+  streakLabel: '连续参与',
+  streakValue: '{count} 轮 · 权重 {multi}',
+  weightLabel: '当前权重倍数',
+  referralBonusLabel: '本轮邀请加成',
+  referralStakeLabel: '被邀请人本轮质押',
+  invitedCountLabel: '已邀请人数',
+  referralBonusValue: '{amount} A9 · {count} 人 · 被邀请人质押 {stake} A9',
+  rewardDemoBound: '演示模式：已模拟绑定（未上链）。',
+  claimUnlockedDemo: '演示模式：已模拟领取解锁额度（未上链）。',
   phases: {
     idle: '待发起',
     preparing: '准备交易…',
@@ -237,6 +347,60 @@ const EN: ChainDict = {
   txRetry: 'Send again',
   txDismiss: 'Dismiss',
   refreshStatus: 'Refresh status',
+  rewardTitle: 'Reward handling',
+  rewardDesc: 'Per-round reward: roll over, early claim 50%, or hold. Mutually exclusive and irreversible.',
+  rollWarning: 'Roll = stake your winnings again; it can go to zero. If you want to lock it in, choose early claim (50%).',
+  rewardEmpty: 'No rewards to handle',
+  rewardEmptyDesc: 'Rewards appear here after a round settles successfully. Failed rounds have no reward.',
+  statePending: 'Pending',
+  stateRolled: 'Rolled',
+  stateEarly: 'Early claimed',
+  stateUnlocked: 'Unlocked',
+  statePendingHint: 'Default hold: locked until R10 ends, then linear over 12 months.',
+  stateRolledHint: 'Rolled {amount} A9 into the next round staking; if that round fails this amount is burned with principal.',
+  stateEarlyHint: 'Early claimed {paid} A9; {locked} A9 entered the post-R10 unlock pool (not burned).',
+  optRoll: 'Roll over',
+  optRollHint: 'Full amount into next round; may go to zero',
+  optEarly: 'Early claim 50%',
+  optEarlyHint: 'Get {amount} A9 now; {locked} A9 locked until after R10',
+  optHold: 'Hold',
+  optHoldHint: 'Default: locked until after R10, then linear over 12 months',
+  rollableLabel: 'Rollable',
+  earlyAmountLabel: 'Early claim amount',
+  lockedLabel: 'To unlock pool',
+  rewardDemoNote: 'Demo mode: buttons are simulated and send no on-chain transaction.',
+  rewardWalletNote: 'Connect a real TON wallet to send on-chain transactions (currently read-only/demo).',
+  unlockTitle: 'Unlock progress',
+  unlockInactive: 'Unlock starts after R10 ends: linear over 12 months ({amount} A9 locked now).',
+  unlockActive: '{pct}% unlocked · {amount} A9 claimable',
+  unlockMeta: '{locked} A9 locked · {claimed} A9 claimed · linear over 12 months',
+  unlockAction: 'Claim unlocked',
+  unlockNothing: 'Nothing claimable yet',
+  inviteTitle: 'Referral',
+  inviteDesc: 'Invite code and link. Your invitee binds a referrer before their first stake; binding cannot be changed.',
+  inviteCodeLabel: 'My invite code',
+  inviteLinkLabel: 'Invite link',
+  inviteCopy: 'Copy',
+  inviteCopied: 'Copied',
+  inviteNote: 'Referral bonus = {bonusPct}% of invitee stake, capped at your own stake; direct invitees only (one level).',
+  boundLabel: 'Bound referrer',
+  boundNote: 'Bound; cannot be changed',
+  unboundLabel: 'No referrer bound',
+  pendingLabel: 'Pending referrer',
+  pendingNote: 'Invite link detected. Bind before your first stake (cannot be changed afterwards).',
+  bindAction: 'Bind referrer',
+  bindInputPlaceholder: 'Paste invite code or referrer address',
+  bindInvalid: 'Invalid invite code or address',
+  bindSelf: 'Cannot bind yourself',
+  streakLabel: 'Streak',
+  streakValue: '{count} rounds · weight {multi}',
+  weightLabel: 'Current weight',
+  referralBonusLabel: 'Referral bonus this round',
+  referralStakeLabel: 'Invitee stake this round',
+  invitedCountLabel: 'Invitees',
+  referralBonusValue: '{amount} A9 · {count} invitees · invitee stake {stake} A9',
+  rewardDemoBound: 'Demo mode: binding simulated (not on-chain).',
+  claimUnlockedDemo: 'Demo mode: unlock claim simulated (not on-chain).',
   phases: {
     idle: 'Ready',
     preparing: 'Preparing…',

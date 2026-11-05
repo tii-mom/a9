@@ -1,4 +1,4 @@
-/** 参数加载、V6.2 不变量校验、原始单位换算、配置哈希。 */
+/** 参数加载、V7 不变量校验、原始单位换算、配置哈希。 */
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -123,6 +123,15 @@ export function validateParams(params) {
     ['roundRewards', 'internalSale', 'liquidity', 'team', 'marketing'].every((key) => allocations[key] && allocations[key].percent != null),
     '分配必须包含 roundRewards/internalSale/liquidity/team/marketing'
   );
+  const liquidityAlloc = allocations.liquidity;
+  check(Number(liquidityAlloc.coldStartTokens) === 200000000, '流动性冷启动必须为 2 亿 A9');
+  check(asBigInt(liquidityAlloc.coldStartRaw) === asBigInt(liquidityAlloc.coldStartTokens) * 10n ** 9n, '冷启动 coldStartRaw 与 tokens 不一致');
+  check(
+    asBigInt(liquidityAlloc.coldStartTokens) * 100n === asBigInt(liquidityAlloc.tokens) * BigInt(liquidityAlloc.coldStartPercentOfLiquidity),
+    '冷启动池必须恰好占流动性额度 40%'
+  );
+  check(asBigInt(liquidityAlloc.coldStartTokens) <= asBigInt(liquidityAlloc.tokens), '冷启动池不得超过流动性额度');
+  check(String(liquidityAlloc.coldStartUsdtUsdE8) === '23200000000000', '冷启动 USDT 必须为 $232,000（USD_E8=23200000000000）');
   check(Number(p.supply.roundCount) === 10 && Number(p.rounds.roundCount) === 10, '轮次数量必须为 10');
 
   check(asBigInt(p.price.p0UsdE8) === 116000n, 'P0 必须为 116000 USD_E8（$0.00116）');
@@ -135,20 +144,20 @@ export function validateParams(params) {
   check(String(p.price.tierRule).includes('tier = 1 + successfulRounds'), 'tier 规则必须为 1 + 已成功轮数');
 
   const timeline = p.timeline;
-  check(Number(timeline.previewSeconds) === 86400, 'PREVIEW 必须为 24h（86400）');
-  check(Number(timeline.stakeDurationSeconds) === 259200, '报名窗口必须为 72h（259200）');
-  check(Number(timeline.candleSeconds) === 14400, 'K 线周期必须为 4h（14400）');
-  check(Number(timeline.candleCount) === 18, '观察 K 线数量必须为 18');
-  check(Number(timeline.minQualifiedCandles) === 12, '达标阈值必须为 12');
+  check(Number(timeline.previewSeconds) === 43200, 'PREVIEW 必须为 12h（43200）');
+  check(Number(timeline.stakeDurationSeconds) === 129600, '报名窗口必须为 36h（129600）');
+  check(Number(timeline.candleSeconds) === 3600, 'K 线周期必须为 1h（3600）');
+  check(Number(timeline.candleCount) === 24, '观察 K 线数量必须为 24');
+  check(Number(timeline.minQualifiedCandles) === 16, '达标阈值必须为 16');
   check(
     Number(timeline.observationSeconds) === Number(timeline.candleCount) * Number(timeline.candleSeconds),
     'observationSeconds 必须等于 candleCount × candleSeconds'
   );
   check(
     Number(timeline.roundSeconds) === Number(timeline.previewSeconds) + Number(timeline.stakeDurationSeconds) + Number(timeline.observationSeconds),
-    '单轮时长必须为 24h + 72h + 72h = 7 天'
+    '单轮时长必须为 12h + 36h + 24h = 72h'
   );
-  check(Number(timeline.roundsTotalSeconds) === Number(timeline.roundSeconds) * 10, '10 轮总时长必须为 70 天');
+  check(Number(timeline.roundsTotalSeconds) === Number(timeline.roundSeconds) * 10, '10 轮总时长必须为 30 天');
 
   const limits = p.stakeLimits;
   check(asBigInt(limits.minStakeTokens) === 10000n, '单笔最低质押必须为 10,000 A9');

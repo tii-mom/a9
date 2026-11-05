@@ -16,6 +16,7 @@ import {
   sharePct,
   stateShort,
   stateTone,
+  TIMING_FALLBACKS,
 } from './common';
 import { Empty, ErrorState, Loading, PageHead, StatePill, Stat } from './ui';
 import './pages.css';
@@ -79,9 +80,9 @@ const ZH: LbDict = {
   colAccepted: '质押时间',
   emptyTitle: '该轮暂无质押记录',
   emptyDesc: '还没有地址在轮次参与质押，或该轮尚未开启质押窗口。',
-  myRow: '我的战位',
+  myRow: '我的排名',
   you: '我',
-  goMe: '查看我的战况',
+  goMe: '查看我的质押',
   pastHint: '历史轮次为只读记录',
   noRound: '该轮数据尚未生成',
   partialRows: '榜单展示前 {shown} 名（共 {total} 个地址）',
@@ -115,7 +116,7 @@ const EN: LbDict = {
   emptyDesc: 'No address has staked in this round yet, or its staking window has not opened.',
   myRow: 'My position',
   you: 'me',
-  goMe: 'View my record',
+  goMe: 'View my stake',
   pastHint: 'Past rounds are read-only records',
   noRound: 'This round has no data yet',
   partialRows: 'Showing top {shown} of {total} addresses',
@@ -348,7 +349,7 @@ export default function LeaderboardPage() {
               <div>
                 <span className="lbl">{d.roundMetaCandles}</span>
                 <div className="v">
-                  {round.qualifiedCandles}/{round.candlesSeen} · {lang === 'zh' ? '阈值' : 'min'} {configQuery.data?.minQualifiedCandles ?? 8}
+                  {round.qualifiedCandles}/{round.candlesSeen} · {lang === 'zh' ? '阈值' : 'min'} {configQuery.data?.minQualifiedCandles ?? TIMING_FALLBACKS.minQualifiedCandles}
                 </div>
               </div>
               <div>

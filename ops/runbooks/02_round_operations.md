@@ -1,8 +1,8 @@
 # 02 — A9 测试网 10 轮运营手册（Round Operations）
 
-**版本**：V6.2 · 2026-11-05
+**版本**：V7（时间参数）· 2026-11-05
 **Owner**：testnet-ops
-**权威口径**：docs/00（V6.2）、docs/02（状态机）、docs/03（K 线/手动模式）、docs/10（上线清单）
+**权威口径**：docs/00（V7 时间参数）、docs/02（状态机）、docs/03（K 线/手动模式）、docs/10（上线清单）
 **覆盖路径**：成功 / 失败 / 无人质押 / 暂停恢复 / 技术终止（五条）
 
 ---
@@ -11,19 +11,19 @@
 
 ~~~text
 T0          上一轮结算（SUCCEEDED / FAILED_PERMANENT / TECHNICAL_ABORTED）
-T0~T0+24h   PREVIEW 预告期（不开放质押；发开轮预告；准备物料）
-T0+24h      自动开窗（STAKING_OPEN；开窗交易锁定 target）
-T0+24h~+96h 报名 72h（触价可提前关窗）
-T0+96h      关窗（STAKING_CLOSED）→ 观察开始
-T0+96h~+168h 观察 72h（18 根 × 4h K 线，阈值 12）
-T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
+T0~T0+12h   PREVIEW 预告期（不开放质押；发开轮预告；准备物料）
+T0+12h      自动开窗（STAKING_OPEN；开窗交易锁定 target）
+T0+12h~+48h 报名 36h（触价可提前关窗）
+T0+48h      关窗（STAKING_CLOSED）→ 观察开始
+T0+48h~+72h 观察 24h（24 根 × 1h K 线，阈值 16）
+T0+72h      观察结束 → 判定 → 结算 → 下一轮 T0
 ~~~
 
-- 报名时长严格 259,200 秒；观察窗口 259,200 秒 / 18 根；单轮 7 天、10 轮 70 天。
+- 报名时长严格 129,600 秒（36h）；观察窗口 86,400 秒 / 24 根 × 1h；单轮 72h、10 轮 30 天。
 - PREVIEW 与开窗由合约按 prevSettledAt 推导，不人工指定；测试网仅做**确认与监控**，不提前/延后开窗。
-- **例外（contracts/README §3.2）**：R1 无 PREVIEW，由 admin 在部署完成后手动 OpenRound（交易中 stakeOpenAt = now，并锁定 target）；R2~R10 才有 24h PREVIEW。
-- **晚开窗兜底（contracts/README §9.7）**：若 keeper 错过整个 72h 窗口，OpenRound 会把 stakeOpenAt 重锚为 now；正常路径不触发，但必须监控三个倒计时。
-- 触价提前关窗只改变关窗时刻，观察仍是完整 72h/18 根。
+- **例外（contracts/README §3.2）**：R1 无 PREVIEW，由 admin 在部署完成后手动 OpenRound（交易中 stakeOpenAt = now，并锁定 target）；R2~R10 才有 12h PREVIEW。
+- **晚开窗兜底（contracts/README §9.7）**：若 keeper 错过整个 36h 报名窗口，OpenRound 会把 stakeOpenAt 重锚为 now；正常路径不触发，但必须监控三个倒计时。
+- 触价提前关窗只改变关窗时刻，观察仍是完整 24h/24 根。
 
 ---
 
@@ -32,7 +32,7 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 | 角色 | 职责 | 可用操作 | 不可做 |
 | --- | --- | --- | --- |
 | Ops Lead | 轮次总控、决策、对外口径 | 读状态、组织公告、升级事故 | 不得单独执行 owner 写操作 |
-| Keeper（测试网白名单） | 每 4h 提交 K 线、跑 tick/监控 | SubmitCandle、只读巡检 | 不得暂停/恢复/结算 |
+| Keeper（测试网白名单） | 每 1h 提交 K 线、跑 tick/监控 | SubmitCandle、只读巡检 | 不得暂停/恢复/结算 |
 | On-call | 7×24 告警响应、一线处置 | 读状态、按预案升级、执行经过批准的操作 | 不得改参数/目标价 |
 | Comms | 公告与社区沟通 | 按模板发公告（经 Lead 批准） | 不得承诺收益/透露未公开地址 |
 | Finance | 对账、销毁/释放核对 | 只读链上 + 对账表 | 不得动用金库 |
@@ -55,21 +55,21 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 - [ ] 发布结算公告（成功/失败模板）；技术终止走 abort 模板。
 - [ ] 归档：交易哈希、事件、对账 CSV、公告链接 → ops/records/ 与 ops/drills/。
 
-### 3.2 P1 — PREVIEW 预告（T0 → T0+24h）
+### 3.2 P1 — PREVIEW 预告（T0 → T0+12h）
 
 - [ ] 计算下一轮：tier = 1 + 已成功轮数（失败同档）；阶梯下限 = P0 × 2^tier；实际 target 在开窗时锁定。
 - [ ] 若是 R1（部署后首轮）：无 PREVIEW，按 runbooks/01 §Step95 由 admin 手动 OpenRound（带 twap24h），公告与开轮同步。
 - [ ] 检查 TeamVault 与奖励池余额 ≥ 本轮额度（12 亿池剩余、70 亿池剩余）。
 - [ ] 准备并审批开轮公告（open 模板），预告期结束前发布；前端三个倒计时（距开窗 / 距关窗 / 距判定）核对。
-- [ ] 确认流动性/做市就绪（不做单边加池）；确认客服 FAQ 已更新。
-- [ ] 24h 到点自动开窗；人工只做**确认**：
+- [ ] 确认流动性/做市就绪（不做单边加池）：冷启动池 2 亿 A9 + $232,000 USDT（占流动性额度 40%，剩余 3 亿后续加池）；确认客服 FAQ 已更新。
+- [ ] 12h 到点自动开窗；人工只做**确认**：
   - 80_admin_ops --action status --round <N> 看到 STAKING_OPEN；
   - 链上 TargetPriceSet 的 target 与公告一致（任何人可用 P0、tier、TWAP 复算）。
 - [ ] 若开窗时间已到但状态未变：按事故流程升级（P1），不要手动改时间参数。
 
-### 3.3 P2 — 报名 72h（T0+24h → T0+96h）
+### 3.3 P2 — 报名 36h（T0+12h → T0+48h）
 
-每 4 小时巡检（可由 keeper/监控自动化）：
+每 1 小时巡检（观察期）/ 每 4 小时（报名期），可由 keeper/监控自动化：
 
 - [ ] monitor_check.mjs：健康、K 线（若已关窗）、预言机、供应量、管理员操作。
 - [ ] 质押总额与单地址集中度：单地址 ≤ 本轮总质押 10%，本轮 ≤ 2 亿 A9（合约强制，前端提示）。
@@ -77,33 +77,37 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 - [ ] 客服/社群问题：为什么不能取消质押、失败怎么销毁、技术暂停怎么办（统一口径）。
 - [ ] 每日 10:00 UTC 更新运营日报（质押量、地址数、集中度、异常）。
 
-### 3.4 P3 — 关窗（T0+96h，或触价提前）
+### 3.4 P3 — 关窗（T0+48h，或触价提前）
 
-- [ ] 确认状态为 STAKING_CLOSED；observationStart = stakeCloseAt（无 4h 取整）。
+- [ ] 确认状态为 STAKING_CLOSED；observationStart = stakeCloseAt（无整点取整）。
 - [ ] 发布报名截止公告（stake-close 模板；注明关窗原因与观察起止）。
 - [ ] 冻结质押快照：totalAcceptedStakeRaw、地址数、最大地址占比，写入对账表。
 - [ ] 若无人质押：**照常进入观察**（不跳过、不延期、不判负）；在公告中说明“0 人质押仍观察，通过则 7 亿销毁（D-18b）”。
 
-### 3.5 P4 — 观察 72h（18 根 K 线）
+### 3.5 P4 — 观察 24h（24 根 1h K 线）
 
 测试网为**手动 K 线模式**（docs/03 §12）：无签名验证，由白名单 keeper 提交，数据必须公开可复核。
 
-每根 4h K 线：
+每根 1h K 线（每小时一根，24 根；**periodStart 必须严格等于 observationStart + i × 3600**，否则合约报 CandlePeriodMismatch）：
 
-- [ ] 取得该 4h 区间的 TWAP（多源或协议约定的公开数据，保留原始数据与算法说明）。
-- [ ] 计算：periodStart = observationStart + i × 14400，periodEnd = periodStart + 14400。
-- [ ] 提交（示例，参数以实际为准）：
-      node ops/scripts/80_admin_ops.mjs --action submit-candle --round <N> --candle <i> --periodStart <unix> --periodEnd <unix> --twap <USD_E8> --digest <hex32>
+- [ ] 取得该 1h 区间的 TWAP（多源或协议约定的公开数据，保留原始数据与算法说明）。
+- [ ] 计算：periodStart = observationStart + i × 3600，periodEnd = periodStart + 3600；digest 为 64 hex（可带 0x）。
+- [ ] 单根提交（dry-run 先看摘要；EXECUTE 需 OPS_EXECUTE=1 + OPS_CONFIRM=YES）：
+      node ops/scripts/80_admin_ops.mjs --action submit-candle --round <N> --candle <i> --twap <USD_E8> --digest <64hex> --observation-start <unix>
+      脚本自动算 periodStart/periodEnd 并强校验 observationStart + i×3600；也支持 --periodStart/--periodEnd 显式传入（不一致直接拦截，不进 acton）。
+- [ ] 批量/循环：--from-json candles.json（[{candleIndex,twapUsdE8,digest}]）或 --count N --twaps a,b,c --digests h1,h2,h3（与 count 等长）。
+- [ ] 底层调用（脚本模板自动生成）：OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<wallet> ROUND_CONTROLLER_ADDRESS=<rc> A9_CANDLE_INDEX=<i> A9_PERIOD_START=<unix> A9_PERIOD_END=<unix> A9_TWAP_E8=<usd_e8> A9_DIGEST=<64hex> acton script scripts/deploy/admin_op.tolk submit-candle <N> 0 --net testnet。
+- [ ] oracle-candle（0x52540004）当前 RC 无 handler，仅 dry-run 联调，**禁止广播**。
 - [ ] 提交后确认 candlesSeen 增加、qualified 判定正确（TWAP ≥ target 计达标，含等号）。
 - [ ] 每根 K 线数据归档：原始源、计算过程、digest、提交交易哈希（公开可复核）。
 - [ ] 监控：K 线缺失（应见 vs 已见 > 1 根）、时间区间错误、重复提交、预言机暂停。
 
 **禁止**：不得在观察窗口内更换价格源/改目标价；不得把缺失数据当未达标；不得提前结算。
 
-### 3.6 P5 — 判定与结算（T0+168h 前后）
+### 3.6 P5 — 判定与结算（T0+72h 前后）
 
-- [ ] 18 根齐备后：qualified ≥ 12 → 成功；**<12 即失败**（contracts/README §9.2 裁决：无 7~11 中间态，避免轮次永久卡住）。
-- [ ] 失败条件必须以链上状态为准（SETTLING_FAILURE/FAILED_PERMANENT），公告数字与 RoundSettled 事件一致。
+- [ ] 24 根齐备后：qualified ≥ 16 → 成功；**≤15 即失败**（V7 口径：无中间态，避免轮次永久卡住）。
+- [ ] 判定条件必须以链上状态为准（SETTLING_FAILURE/FAILED_PERMANENT），公告数字与 RoundSettled 事件一致。
 - [ ] 触发结算（正常由 keeper/任何人触发；owner 仅必要时介入）：80_admin_ops --action finalize-round --round <N>。
 - [ ] 成功：确认本金可领取 + 7 亿奖励可 claimAll + TeamVault 释放 1.2 亿（仅一次）。
 - [ ] 失败：确认三笔销毁全部确认后状态才进入 FAILED_PERMANENT；未确认前不得公告“已销毁”。
@@ -119,7 +123,7 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 
 ### 3.8 P7 — 进入下一轮
 
-- [ ] 进入 24h PREVIEW；按 P1 重复。
+- [ ] 进入 12h PREVIEW；按 P1 重复。
 - [ ] 失败轮：tier 不变（同档重试），公告中明确“下一轮仍是同一档目标”。
 - [ ] 技术终止：不消耗档位，退款完成后按原 tier 继续。
 
@@ -129,10 +133,10 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 
 | 路径 | 触发条件 | 合约行为 | 运营动作 | 公告模板 |
 | --- | --- | --- | --- | --- |
-| 成功 | 18 根齐备且 qualified ≥ 12 | 本金可领 + 7 亿奖励可 claimAll + 团队释放 1.2 亿 | 核对领取、对账、KPI，发成功公告 | success |
-| 失败 | 18 根齐备且 qualified < 12 | 三笔 burn（7 亿 + 1.2 亿 + 本金），终态永久关闭 | 核对三笔与 supply 减少、对账、发失败公告、准备同档下一轮 | fail |
+| 成功 | 24 根齐备且 qualified ≥ 16 | 本金可领 + 7 亿奖励可 claimAll + 团队释放 1.2 亿 | 核对领取、对账、KPI，发成功公告 | success |
+| 失败 | 24 根齐备且 qualified ≤ 15 | 三笔 burn（7 亿 + 1.2 亿 + 本金），终态永久关闭 | 核对三笔与 supply 减少、对账、发失败公告、准备同档下一轮 | fail |
 | 无人质押 | 关窗时 totalStake = 0 | 照常观察；失败销毁奖励+团队；通过且 0 人 → 奖励销毁（D-18b） | 公告说明；对账时本金笔为 0 | stake-close / fail / success |
-| 暂停恢复 | 预言机/数据故障 | ORACLE_PAUSED；不判负不销毁；恢复后重收满 18 根 | 发暂停公告、定位数据源、恢复公告；14 天阈值计时 | pause / resume |
+| 暂停恢复 | 预言机/数据故障 | ORACLE_PAUSED；不判负不销毁；恢复后重收满 24 根 | 发暂停公告、定位数据源、恢复公告；14 天阈值计时 | pause / resume |
 | 技术终止 | 连续暂停 ≥14 天 或 观察超时 ≥7 天 | 任何人可 AbortTechnical：退 100% 本金、不销毁奖励/团队、不消耗档位 | 发 abort 公告、核对退款、继续下一轮 | abort |
 
 **注意**：技术终止只能在合约条件满足时触发（提前触发会 revert）；不要用管理员权限绕过。
@@ -150,8 +154,8 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 
 | 轮次 | 计划窗口 | 奖励 | 团队额度 | 关键动作 |
 | --- | --- | --- | --- | --- |
-| R1 | 部署后 admin 手动 OpenRound（无 PREVIEW）→ +72h 报名 → +72h 观察 | 7 亿 | 1.2 亿 | 首轮：SetJettonWallet/InitController/TON gas 就绪、确认流动性、公告、客服峰值 |
-| R2~R10 | 各自 T0（上一轮结算）+24h 起 | 7 亿 | 1.2 亿 | 按 §3 SOP 滚动；失败轮同档重试 |
+| R1 | 部署后 admin 手动 OpenRound（无 PREVIEW）→ +36h 报名 → +24h 观察 | 7 亿 | 1.2 亿 | 首轮：SetJettonWallet/InitController/TON gas 就绪、确认流动性、公告、客服峰值 |
+| R2~R10 | 各自 T0（上一轮结算）+12h 起 | 7 亿 | 1.2 亿 | 按 §3 SOP 滚动；失败轮同档重试 |
 
 ---
 
@@ -250,11 +254,11 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 | --- | --- | --- | --- |
 | Vault 架构 | StakingVault + RewardVault 两个地址 | RC 只拥有 1 个 Jetton Wallet（本金+奖励），无独立 vault | 地址簿/公告不要出现不存在的 vault 地址 |
 | 单地址限额 | 本轮总质押 10%（动态） | 固定硬顶 20,000,000 A9 + 总上限 2 亿 | 前端/客服话术按固定硬顶解释 |
-| 7~11 根达标 | 只写 ≥12 成功 / ≤6 失败 | 18 根齐备后 <12 即失败 | 判定/公告不再存在“中间带” |
-| R1 启动 | 24h PREVIEW | R1 无 PREVIEW，admin 手动 OpenRound | 上线当日必须安排开轮操作与公告 |
+| 判定阈值 | 旧口径（较少 K 线、较低阈值） | 24 根齐备后 ≥16 成功、≤15 失败（V7） | 判定/公告无中间带 |
+| R1 启动 | 12h PREVIEW | R1 无 PREVIEW，admin 手动 OpenRound | 上线当日必须安排开轮操作与公告 |
 | SetJettonWallet | 未提及 | 0x52540016 一次性，admin 调用，早于 InitController | 部署 65 → 70 顺序不可颠倒 |
 | Burn ack | 标准 TEP-74 无 ack | 测试网由 jettonMaster 地址充当 ack 权威 | 主网前必须换受审计扩展；对账以链上 supply 为准 |
-| 晚开窗 | 严格推导 | 错过 72h 窗口会重锚 stakeOpenAt | 监控三倒计时 + 告警；异常时公告 |
+| 晚开窗 | 严格推导 | 错过 36h 报名窗口会重锚 stakeOpenAt | 监控三倒计时 + 告警；异常时公告 |
 | 技术终止后 | 未明确 | 创建下一轮 PREVIEW、tier 不变 | 继续排期，不消耗档位 |
 
 ---

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /** 55 — TON gas 充值：RC ≥20 TON、TeamVault ≥10 TON（contracts/deploy/params.testnet.json）。 */
 
-import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
-import { commandTemplate, runCommand, substitute } from './lib/toolchain.mjs';
+import { requireConfirm } from './lib/cli.mjs';
+import { bootstrap, finish, printNextSteps, resolveAddress, signerWallet } from './lib/step.mjs';
+import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { getTonBalance } from './lib/ton.mjs';
 import { writeRegistry } from './lib/registry.mjs';
 import { asBigInt } from './lib/config.mjs';
@@ -14,13 +15,14 @@ const { execute, params, registry } = bootstrap({
   dependsOn: ['roles'],
 });
 
+const signer = signerWallet(params);
 const targets = [
-  { key: 'roundController', label: 'RoundController', minTon: Number(params.tonBalances.roundControllerMinTon) },
-  { key: 'teamVault', label: 'TeamVault', minTon: Number(params.tonBalances.teamVaultMinTon) },
+  { key: 'roundController', file: 'round-controller.addr', label: 'RoundController', minTon: Number(params.tonBalances.roundControllerMinTon) },
+  { key: 'teamVault', file: 'team-vault.addr', label: 'TeamVault', minTon: Number(params.tonBalances.teamVaultMinTon) },
 ];
 const rows = [];
 for (const target of targets) {
-  const address = resolveContractAddress(registry, target.key);
+  const address = resolveAddress(registry, params, target.key, target.file);
   let balanceTon = null;
   if (address && execute) {
     try {
@@ -36,16 +38,24 @@ for (const target of targets) {
 section('TON 余额计划');
 table(['合约', '地址', '当前 TON', '目标 TON', '需补 TON'], rows);
 detail('用途：RC 每条跨合约指令约 0.05 TON；TeamVault 需支付 release/burn 与 ack。');
+detail('签名钱包（A9_SIGNER_WALLET）=' + signer + '；fund_ton 的 amountTon 为整数 TON（含 1 TON 缓冲）。');
+for (const row of rows) detail('dest=' + row[1] + ' value=' + row[3] + ' TON（target）');
 
 if (!execute) {
-  info('dry-run：不发送 TON 转账。真实执行需要 OPS_EXECUTE=1。');
+  info('dry-run：不发送 TON 转账。真实执行：OPS_EXECUTE=1 + OPS_CONFIRM=YES。');
   printNextSteps(['下一步：node scripts/50_fund_vaults.mjs --all（A9 注资与分配）']);
   process.exit(finish({ 模式: 'DRY-RUN' }));
 }
 
+if (!hasCommand(params, 'fundTon')) {
+  fail('缺少 fundTon 命令模板（检查 config/testnet.params.json toolchain.commands）');
+  process.exit(finish());
+}
+requireConfirm('TON gas 充值（RC/TeamVault）');
+
 for (const target of targets) {
-  const address = resolveContractAddress(registry, target.key);
-  if (!address) { fail(target.label + ' 未登记地址'); process.exit(finish()); }
+  const address = resolveAddress(registry, params, target.key, target.file);
+  if (!address) { fail(target.label + ' 未登记地址（登记表或 contracts/deploy/' + target.file + '）'); process.exit(finish()); }
   let balanceTon = null;
   try {
     const balance = await getTonBalance(params, address);
@@ -56,12 +66,14 @@ for (const target of targets) {
   }
   const deficit = target.minTon - balanceTon;
   if (deficit <= 0) { info(target.label + ' 余额充足（' + balanceTon.toFixed(2) + ' TON），跳过'); continue; }
-  const amountTon = (Math.ceil((deficit + 1) * 100) / 100).toFixed(2);
+  const amountTon = String(Math.ceil(deficit + 1));
   const rendered = substitute(commandTemplate(params, 'fundTon'), {
     contractsDir: params.toolchain.contractsDir,
+    signerWallet: signer,
     recipient: address,
     amountTon,
   });
+  detail('dest=' + address + ' value=' + amountTon + ' TON（整数，含 1 TON 缓冲） signer=' + signer);
   detail('命令：' + rendered);
   const result = runCommand(rendered, { execute: true });
   if (result.status !== 0) {

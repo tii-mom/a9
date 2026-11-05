@@ -49,8 +49,8 @@ export function useLandingData(): LandingData {
   );
 
   const board = useMemo(
-    () => deriveBoard(configQ.data, focus, detailQ.data),
-    [configQ.data, focus, detailQ.data],
+    () => deriveBoard(configQ.data, focus, detailQ.data, roundsQ.data ?? []),
+    [configQ.data, focus, detailQ.data, roundsQ.data],
   );
 
   const [now, setNow] = useState(() => Date.now());

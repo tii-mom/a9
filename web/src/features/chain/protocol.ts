@@ -13,7 +13,34 @@ export const OPCODES = {
   CLAIM_REWARD: 0x52540007,
   /** 合并领取本金 + 奖励（用户 → RoundController，≤10 轮） */
   CLAIM_ALL: 0x5254000e,
+  /** V8：早领 50%（PENDING → EARLY），用户 → RoundController */
+  CLAIM_REWARD_EARLY: 0x52540017,
+  /** V8：滚存（PENDING → ROLLED，全额进下一轮），用户 → RoundController */
+  ROLL_REWARD: 0x52540018,
+  /** V8：绑定邀请人（一次性、不可改），用户 → RoundController */
+  SET_REFERRER: 0x52540019,
+  /** V8：R10 终态后按 12 个月线性领取解锁池，用户 → RoundController */
+  CLAIM_UNLOCKED: 0x5254001a,
 } as const;
+
+/** V8 奖励三态（合约 StakePosition.rewardState，0/1/2）。 */
+export const REWARD_STATE = {
+  PENDING: 0,
+  ROLLED: 1,
+  EARLY: 2,
+} as const;
+
+/** V8 早领比例：立即支付 50%，另 50% 进解锁池（不销毁）。 */
+export const EARLY_CLAIM_BPS = 5000;
+/** V8 权重：连续参与每轮 +10%，封顶 10 轮（+100%）。 */
+export const STREAK_BONUS_BPS = 1000;
+export const STREAK_CAP = 10;
+/** V8 权重：直接邀请加成 20% × 被邀请人质押，封顶邀请人自己质押。 */
+export const REFERRAL_BONUS_BPS = 2000;
+/** V8 解锁期：R10 终态后 12 × 30 天线性（每月 1/12）。 */
+export const UNLOCK_MONTHS = 12;
+export const UNLOCK_MONTH_SECONDS = 30 * 24 * 3600;
+export const UNLOCK_PERIOD_SECONDS = UNLOCK_MONTHS * UNLOCK_MONTH_SECONDS;
 
 /** 标准 TEP-74 Jetton transfer opcode。 */
 export const JETTON_TRANSFER_OP = 0x0f8a7ea5;
@@ -68,6 +95,11 @@ export const EVENT_OPCODES = {
   TECHNICAL_ABORTED: 0x52540104,
   TEAM_RELEASED: 0x52540201,
   TEAM_BURNED: 0x52540202,
+  // V8
+  REWARD_ROLLED: 0x52540105,
+  REWARD_EARLY: 0x52540106,
+  REFERRER_SET: 0x52540107,
+  UNLOCK_CLAIMED: 0x52540108,
 } as const;
 
 /**
@@ -89,6 +121,13 @@ export const GET_METHODS = {
     userRewardEstimate: 'get_user_reward_estimate',
     claimableAll: 'get_claimable_all',
     roundBurnStatus: 'get_round_burn_status',
+    // V8
+    rewardState: 'get_reward_state',
+    unlockInfo: 'get_unlock_info',
+    referral: 'get_referral',
+    streak: 'get_streak',
+    userWeight: 'get_user_weight',
+    totalWeight: 'get_total_weight',
   },
   teamVault: {
     teamVaultState: 'get_team_vault_state',

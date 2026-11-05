@@ -152,7 +152,7 @@
           "prefix_num": 0,
           "prefix_len": 1,
           "is_prefix_implicit": null,
-          "stack_type_id": 150,
+          "stack_type_id": 151,
           "stack_width": 1
         },
         {
@@ -160,7 +160,7 @@
           "prefix_num": 1,
           "prefix_len": 1,
           "is_prefix_implicit": null,
-          "stack_type_id": 151,
+          "stack_type_id": 152,
           "stack_width": 1
         }
       ],
@@ -169,6 +169,26 @@
     {
       "kind": "StructRef",
       "struct_name": "TopUpTons"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ClaimRewardEarly"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RollReward"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SetReferrer"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ClaimUnlocked"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ReturnExcessesBack"
     },
     {
       "kind": "StructRef",
@@ -184,7 +204,7 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 41
+      "inner_ty_idx": 46
     },
     {
       "kind": "StructRef",
@@ -192,7 +212,7 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 43
+      "inner_ty_idx": 48
     },
     {
       "kind": "StructRef",
@@ -204,7 +224,7 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 45
+      "inner_ty_idx": 50
     },
     {
       "kind": "StructRef",
@@ -212,33 +232,73 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 48
+      "inner_ty_idx": 53
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 40
+      "inner_ty_idx": 45
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "StorageExtras"
+    },
+    {
+      "kind": "mapKV",
+      "key_ty_idx": 7,
+      "value_ty_idx": 7
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "StreakInfo"
+    },
+    {
+      "kind": "mapKV",
+      "key_ty_idx": 7,
+      "value_ty_idx": 58
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "LockedState"
+    },
+    {
+      "kind": "mapKV",
+      "key_ty_idx": 7,
+      "value_ty_idx": 60
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "PendingClaim"
+    },
+    {
+      "kind": "mapKV",
+      "key_ty_idx": 11,
+      "value_ty_idx": 62
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 56
     },
     {
       "kind": "StructRef",
       "struct_name": "RoundData"
     },
     {
-      "kind": "cellOf",
-      "inner_ty_idx": 17
-    },
-    {
       "kind": "StructRef",
-      "struct_name": "CandleRecord"
+      "struct_name": "RoundExtra"
+    },
+    {
+      "kind": "mapKV",
+      "key_ty_idx": 7,
+      "value_ty_idx": 13
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 66
     },
     {
       "kind": "mapKV",
       "key_ty_idx": 16,
-      "value_ty_idx": 53
-    },
-    {
-      "kind": "mapKV",
-      "key_ty_idx": 16,
-      "value_ty_idx": 51
+      "value_ty_idx": 65
     },
     {
       "kind": "StructRef",
@@ -247,12 +307,12 @@
     {
       "kind": "mapKV",
       "key_ty_idx": 7,
-      "value_ty_idx": 56
+      "value_ty_idx": 70
     },
     {
       "kind": "mapKV",
       "key_ty_idx": 16,
-      "value_ty_idx": 57
+      "value_ty_idx": 71
     },
     {
       "kind": "StructRef",
@@ -280,6 +340,21 @@
     },
     {
       "kind": "StructRef",
+      "struct_name": "RewardStateInfo"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "UnlockInfo"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ReferralInfo"
+    },
+    {
+      "kind": "addressOpt"
+    },
+    {
+      "kind": "StructRef",
       "struct_name": "TargetPriceSet"
     },
     {
@@ -293,6 +368,22 @@
     {
       "kind": "StructRef",
       "struct_name": "DepositAccepted"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RewardRolled"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ReferrerSet"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "UnlockClaimed"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RewardEarly"
     }
   ],
   "struct_instantiations": [],
@@ -301,7 +392,7 @@
     {
       "kind": "struct",
       "name": "ProtocolAddresses",
-      "ty_idx": 41,
+      "ty_idx": 46,
       "fields": [
         {
           "name": "admin",
@@ -320,7 +411,7 @@
     {
       "kind": "struct",
       "name": "ProtocolVaults",
-      "ty_idx": 43,
+      "ty_idx": 48,
       "fields": [
         {
           "name": "stakingJettonWallet",
@@ -335,7 +426,7 @@
     {
       "kind": "struct",
       "name": "ProtocolEcon",
-      "ty_idx": 45,
+      "ty_idx": 50,
       "fields": [
         {
           "name": "p0UsdE8",
@@ -359,7 +450,7 @@
         },
         {
           "name": "maxStakePerAddressBps",
-          "ty_idx": 46
+          "ty_idx": 51
         },
         {
           "name": "maxTotalStakeRaw",
@@ -370,7 +461,7 @@
     {
       "kind": "struct",
       "name": "ProtocolTiming",
-      "ty_idx": 48,
+      "ty_idx": 53,
       "fields": [
         {
           "name": "previewSeconds",
@@ -406,7 +497,7 @@
         },
         {
           "name": "riskDisclosureVersion",
-          "ty_idx": 46
+          "ty_idx": 51
         },
         {
           "name": "configVersion",
@@ -417,30 +508,30 @@
     {
       "kind": "struct",
       "name": "ProtocolConfig",
-      "ty_idx": 40,
+      "ty_idx": 45,
       "fields": [
         {
           "name": "addresses",
-          "ty_idx": 42
-        },
-        {
-          "name": "vaults",
-          "ty_idx": 44
-        },
-        {
-          "name": "econ",
           "ty_idx": 47
         },
         {
-          "name": "timing",
+          "name": "vaults",
           "ty_idx": 49
+        },
+        {
+          "name": "econ",
+          "ty_idx": 52
+        },
+        {
+          "name": "timing",
+          "ty_idx": 54
         }
       ]
     },
     {
       "kind": "struct",
       "name": "ProtocolConfigView",
-      "ty_idx": 61,
+      "ty_idx": 75,
       "fields": [
         {
           "name": "admin",
@@ -484,7 +575,7 @@
         },
         {
           "name": "maxStakePerAddressBps",
-          "ty_idx": 46
+          "ty_idx": 51
         },
         {
           "name": "maxTotalStakeRaw",
@@ -524,7 +615,7 @@
         },
         {
           "name": "riskDisclosureVersion",
-          "ty_idx": 46
+          "ty_idx": 51
         },
         {
           "name": "configVersion",
@@ -534,35 +625,35 @@
     },
     {
       "kind": "struct",
-      "name": "CandleRecord",
-      "ty_idx": 53,
+      "name": "RoundExtra",
+      "ty_idx": 66,
       "fields": [
         {
-          "name": "periodStart",
-          "ty_idx": 9
+          "name": "failureBurnId",
+          "ty_idx": 17
         },
         {
-          "name": "periodEnd",
-          "ty_idx": 9
+          "name": "candleHash",
+          "ty_idx": 17
         },
         {
-          "name": "twapPriceUsdE8",
+          "name": "totalWeight",
           "ty_idx": 13
         },
         {
-          "name": "qualified",
-          "ty_idx": 5
+          "name": "bonus",
+          "ty_idx": 67
         },
         {
-          "name": "dataDigest",
-          "ty_idx": 17
+          "name": "referred",
+          "ty_idx": 67
         }
       ]
     },
     {
       "kind": "struct",
       "name": "StakePosition",
-      "ty_idx": 56,
+      "ty_idx": 70,
       "fields": [
         {
           "name": "amountRaw",
@@ -579,13 +670,21 @@
         {
           "name": "rewardClaimed",
           "ty_idx": 5
+        },
+        {
+          "name": "weight",
+          "ty_idx": 13
+        },
+        {
+          "name": "rewardState",
+          "ty_idx": 16
         }
       ]
     },
     {
       "kind": "struct",
       "name": "RoundData",
-      "ty_idx": 51,
+      "ty_idx": 65,
       "fields": [
         {
           "name": "status",
@@ -660,19 +759,15 @@
           "ty_idx": 5
         },
         {
-          "name": "failureBurnId",
-          "ty_idx": 52
-        },
-        {
-          "name": "candles",
-          "ty_idx": 54
+          "name": "extra",
+          "ty_idx": 68
         }
       ]
     },
     {
       "kind": "struct",
       "name": "RoundView",
-      "ty_idx": 62,
+      "ty_idx": 76,
       "fields": [
         {
           "name": "roundId",
@@ -753,17 +848,129 @@
         {
           "name": "failureBurnId",
           "ty_idx": 17
+        },
+        {
+          "name": "candleHash",
+          "ty_idx": 17
+        },
+        {
+          "name": "totalWeight",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "StreakInfo",
+      "ty_idx": 58,
+      "fields": [
+        {
+          "name": "lastRound",
+          "ty_idx": 16
+        },
+        {
+          "name": "count",
+          "ty_idx": 16
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "LockedState",
+      "ty_idx": 60,
+      "fields": [
+        {
+          "name": "lockedRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "claimedRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "PendingClaim",
+      "ty_idx": 62,
+      "fields": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "kind",
+          "ty_idx": 16
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        },
+        {
+          "name": "principalMask",
+          "ty_idx": 51
+        },
+        {
+          "name": "rewardMask",
+          "ty_idx": 51
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "lockedDeltaRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "lockedBeforeRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "StorageExtras",
+      "ty_idx": 56,
+      "fields": [
+        {
+          "name": "referrer",
+          "ty_idx": 57
+        },
+        {
+          "name": "streaks",
+          "ty_idx": 59
+        },
+        {
+          "name": "locked",
+          "ty_idx": 61
+        },
+        {
+          "name": "pending",
+          "ty_idx": 63
+        },
+        {
+          "name": "claimCounter",
+          "ty_idx": 11
+        },
+        {
+          "name": "unlockStart",
+          "ty_idx": 11
         }
       ]
     },
     {
       "kind": "struct",
       "name": "Storage",
-      "ty_idx": 39,
+      "ty_idx": 44,
       "fields": [
         {
           "name": "config",
-          "ty_idx": 50
+          "ty_idx": 55
+        },
+        {
+          "name": "extras",
+          "ty_idx": 64
         },
         {
           "name": "currentRoundId",
@@ -783,11 +990,11 @@
         },
         {
           "name": "rounds",
-          "ty_idx": 55
+          "ty_idx": 69
         },
         {
           "name": "stakes",
-          "ty_idx": 58
+          "ty_idx": 72
         }
       ]
     },
@@ -989,7 +1196,7 @@
     {
       "kind": "struct",
       "name": "ReleaseTeamQuota",
-      "ty_idx": 59,
+      "ty_idx": 73,
       "prefix": {
         "prefix_num": 1381236748,
         "prefix_len": 32
@@ -1008,7 +1215,7 @@
     {
       "kind": "struct",
       "name": "BurnTeamQuota",
-      "ty_idx": 60,
+      "ty_idx": 74,
       "prefix": {
         "prefix_num": 1381236749,
         "prefix_len": 32
@@ -1166,6 +1373,74 @@
       ]
     },
     {
+      "kind": "struct",
+      "name": "ClaimRewardEarly",
+      "ty_idx": 39,
+      "prefix": {
+        "prefix_num": 1381236759,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RollReward",
+      "ty_idx": 40,
+      "prefix": {
+        "prefix_num": 1381236760,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SetReferrer",
+      "ty_idx": 41,
+      "prefix": {
+        "prefix_num": 1381236761,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "referrer",
+          "ty_idx": 7
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ClaimUnlocked",
+      "ty_idx": 42,
+      "prefix": {
+        "prefix_num": 1381236762,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
+    {
       "kind": "alias",
       "name": "ForwardPayloadRemainder",
       "ty_idx": 32,
@@ -1241,8 +1516,23 @@
     },
     {
       "kind": "struct",
+      "name": "ReturnExcessesBack",
+      "ty_idx": 43,
+      "prefix": {
+        "prefix_num": 3576854235,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
+    {
+      "kind": "struct",
       "name": "Claimable",
-      "ty_idx": 63,
+      "ty_idx": 77,
       "fields": [
         {
           "name": "principalRaw",
@@ -1254,14 +1544,14 @@
         },
         {
           "name": "roundsMask",
-          "ty_idx": 46
+          "ty_idx": 51
         }
       ]
     },
     {
       "kind": "struct",
       "name": "RoundBurnStatus",
-      "ty_idx": 64,
+      "ty_idx": 78,
       "fields": [
         {
           "name": "rewardBurnConfirmed",
@@ -1283,8 +1573,73 @@
     },
     {
       "kind": "struct",
+      "name": "RewardStateInfo",
+      "ty_idx": 79,
+      "fields": [
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "state",
+          "ty_idx": 16
+        },
+        {
+          "name": "rollableRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "earlyAmountRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "UnlockInfo",
+      "ty_idx": 80,
+      "fields": [
+        {
+          "name": "unlockStart",
+          "ty_idx": 11
+        },
+        {
+          "name": "totalLockedRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "claimedRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "claimableRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ReferralInfo",
+      "ty_idx": 81,
+      "fields": [
+        {
+          "name": "referrer",
+          "ty_idx": 82
+        },
+        {
+          "name": "referredStakeThisRound",
+          "ty_idx": 13
+        },
+        {
+          "name": "bonusThisRound",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
       "name": "TargetPriceSet",
-      "ty_idx": 65,
+      "ty_idx": 83,
       "prefix": {
         "prefix_num": 1381236993,
         "prefix_len": 32
@@ -1311,7 +1666,7 @@
     {
       "kind": "struct",
       "name": "RoundSettled",
-      "ty_idx": 66,
+      "ty_idx": 84,
       "prefix": {
         "prefix_num": 1381236994,
         "prefix_len": 32
@@ -1346,7 +1701,7 @@
     {
       "kind": "struct",
       "name": "DepositAccepted",
-      "ty_idx": 68,
+      "ty_idx": 86,
       "prefix": {
         "prefix_num": 1381236995,
         "prefix_len": 32
@@ -1373,7 +1728,7 @@
     {
       "kind": "struct",
       "name": "TechnicalAborted",
-      "ty_idx": 67,
+      "ty_idx": 85,
       "prefix": {
         "prefix_num": 1381236996,
         "prefix_len": 32
@@ -1390,6 +1745,98 @@
         {
           "name": "at",
           "ty_idx": 11
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RewardRolled",
+      "ty_idx": 87,
+      "prefix": {
+        "prefix_num": 1381236997,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "nextRoundId",
+          "ty_idx": 16
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RewardEarly",
+      "ty_idx": 90,
+      "prefix": {
+        "prefix_num": 1381236998,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "paidRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "lockedRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ReferrerSet",
+      "ty_idx": 88,
+      "prefix": {
+        "prefix_num": 1381236999,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "referrer",
+          "ty_idx": 7
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "UnlockClaimed",
+      "ty_idx": 89,
+      "prefix": {
+        "prefix_num": 1381237000,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
         }
       ]
     }
@@ -1448,6 +1895,21 @@
     },
     {
       "body_ty_idx": 38
+    },
+    {
+      "body_ty_idx": 39
+    },
+    {
+      "body_ty_idx": 40
+    },
+    {
+      "body_ty_idx": 41
+    },
+    {
+      "body_ty_idx": 42
+    },
+    {
+      "body_ty_idx": 43
     }
   ],
   "incoming_external": [],
@@ -1456,35 +1918,47 @@
       "body_ty_idx": 3
     },
     {
-      "body_ty_idx": 59
+      "body_ty_idx": 73
     },
     {
-      "body_ty_idx": 60
+      "body_ty_idx": 74
     }
   ],
   "emitted_events": [
     {
-      "body_ty_idx": 65
+      "body_ty_idx": 83
     },
     {
-      "body_ty_idx": 66
+      "body_ty_idx": 84
     },
     {
-      "body_ty_idx": 67
+      "body_ty_idx": 85
     },
     {
-      "body_ty_idx": 68
+      "body_ty_idx": 86
+    },
+    {
+      "body_ty_idx": 87
+    },
+    {
+      "body_ty_idx": 88
+    },
+    {
+      "body_ty_idx": 89
+    },
+    {
+      "body_ty_idx": 90
     }
   ],
   "storage": {
-    "storage_ty_idx": 39
+    "storage_ty_idx": 44
   },
   "get_methods": [
     {
       "tvm_method_id": 101317,
       "name": "get_protocol_config",
       "parameters": [],
-      "return_ty_idx": 61
+      "return_ty_idx": 75
     },
     {
       "tvm_method_id": 92146,
@@ -1507,7 +1981,7 @@
           "ty_idx": 16
         }
       ],
-      "return_ty_idx": 62
+      "return_ty_idx": 76
     },
     {
       "tvm_method_id": 81440,
@@ -1532,21 +2006,6 @@
       "return_ty_idx": 13
     },
     {
-      "tvm_method_id": 89912,
-      "name": "get_round_candle",
-      "parameters": [
-        {
-          "name": "roundId",
-          "ty_idx": 16
-        },
-        {
-          "name": "candleIndex",
-          "ty_idx": 16
-        }
-      ],
-      "return_ty_idx": 53
-    },
-    {
       "tvm_method_id": 119194,
       "name": "get_user_stake",
       "parameters": [
@@ -1559,7 +2018,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 56
+      "return_ty_idx": 70
     },
     {
       "tvm_method_id": 130459,
@@ -1596,7 +2055,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 63
+      "return_ty_idx": 77
     },
     {
       "tvm_method_id": 89989,
@@ -1607,7 +2066,98 @@
           "ty_idx": 16
         }
       ],
-      "return_ty_idx": 64
+      "return_ty_idx": 78
+    },
+    {
+      "tvm_method_id": 86299,
+      "name": "get_user_weight",
+      "parameters": [
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        }
+      ],
+      "return_ty_idx": 13
+    },
+    {
+      "tvm_method_id": 126535,
+      "name": "get_total_weight",
+      "parameters": [
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        }
+      ],
+      "return_ty_idx": 13
+    },
+    {
+      "tvm_method_id": 115350,
+      "name": "get_reward_state",
+      "parameters": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 16
+        }
+      ],
+      "return_ty_idx": 79
+    },
+    {
+      "tvm_method_id": 109247,
+      "name": "get_unlock_info",
+      "parameters": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        }
+      ],
+      "return_ty_idx": 80
+    },
+    {
+      "tvm_method_id": 109548,
+      "name": "get_referral",
+      "parameters": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        }
+      ],
+      "return_ty_idx": 81
+    },
+    {
+      "tvm_method_id": 74423,
+      "name": "get_streak",
+      "parameters": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        }
+      ],
+      "return_ty_idx": 58
+    },
+    {
+      "tvm_method_id": 109492,
+      "name": "get_claim_counter",
+      "parameters": [],
+      "return_ty_idx": 11
+    },
+    {
+      "tvm_method_id": 81334,
+      "name": "has_pending_claim",
+      "parameters": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ],
+      "return_ty_idx": 5
     }
   ],
   "thrown_errors": [
@@ -1755,6 +2305,51 @@
       "kind": "enum_member",
       "name": "Errors.BadConfig",
       "err_code": 250
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.AlreadyReferred",
+      "err_code": 260
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.SelfReferral",
+      "err_code": 261
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.MutualReferral",
+      "err_code": 262
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.RewardStateLocked",
+      "err_code": 263
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.UnlockNotStarted",
+      "err_code": 264
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NothingUnlocked",
+      "err_code": 265
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.RollNotAvailable",
+      "err_code": 266
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.CounterOverflow",
+      "err_code": 272
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadBurnQuery",
+      "err_code": 273
     }
   ],
   "compiler_name": "tolk",

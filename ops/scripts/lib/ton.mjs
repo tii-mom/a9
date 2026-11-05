@@ -183,6 +183,7 @@ export async function getJettonData(params, masterAddress) {
     totalSupplyRaw: totalSupply === null ? null : totalSupply.toString(),
     mintable: mintable === null ? null : mintable !== 0n,
     admin,
+    adminNull: isNullAddressStackItem(admin),
     walletCode: stack[4] || null,
     raw: stack,
   };
@@ -212,6 +213,44 @@ export async function findJettonWallet(params, jettonMaster, ownerAddress) {
 export async function getTonBalance(params, address) {
   const info = await getAddressInformation(params, address);
   return { balanceNano: String(info.balance ?? '0'), state: info.state, codeHash: info.code_hash ?? null, raw: info };
+}
+
+/** 判断 get-method 返回的地址槽是否为 null（未设置）：null 类型或空/近空 slice。 */
+export function isNullAddressStackItem(item) {
+  if (!item) return true;
+  if (item.type === 'null') return true;
+  const value = item.value;
+  if (value === null || value === undefined || value === '') return true;
+  if (typeof value === 'string') {
+    try {
+      const bytes = Buffer.from(value, 'base64');
+      return bytes.length <= 1;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** 读取 Jetton Master 的元数据（TON Center v3）。decimals 可能是字符串。 */
+export async function getJettonMasterMetadata(params, address) {
+  const parsed = parseAddress(address);
+  if (!parsed.ok) throw new Error('非法 Jetton Master：' + address);
+  const url = params.network.toncenter.v3 + '/jetton/masters?address=' + encodeURIComponent(parsed.raw);
+  const json = await httpJson(url, { apiKey: toncenterApiKey(params) });
+  const masters = json.jetton_masters || json.masters || [];
+  if (!masters.length) return null;
+  const master = masters[0];
+  let content = master.jetton_content || master.content || {};
+  if (typeof content === 'string') {
+    try { content = JSON.parse(content); } catch { content = {}; }
+  }
+  return {
+    name: content.name !== undefined ? String(content.name) : null,
+    symbol: content.symbol !== undefined ? String(content.symbol) : null,
+    decimals: content.decimals !== undefined ? Number(content.decimals) : null,
+    raw: master,
+  };
 }
 
 export function validateTestnetAddress(input, label = 'address') {

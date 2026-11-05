@@ -45,7 +45,7 @@ function assert(condition, message) {
 section('自测：参数不变量');
 test('params.validate', () => {
   assert(errors.length === 0, '参数错误：' + errors.join('; '));
-  return 'V6.2 参数全部通过';
+  return 'V7 参数全部通过';
 });
 test('params.digest', () => {
   const again = paramsDigest(params);
@@ -57,6 +57,17 @@ test('allocation.sum', () => {
   assert(result.ok, '分配总和 != 100 亿');
   return result.sumRaw + ' raw';
 });
+test('liquidity.cold_start', () => {
+  const liquidity = params.supply.allocations.liquidity;
+  const tokens = asBigInt(liquidity.tokens);
+  const cold = asBigInt(liquidity.coldStartTokens);
+  assert(cold <= tokens, '冷启动 A9 不得超过流动性额度');
+  assert(cold * 100n === tokens * BigInt(liquidity.coldStartPercentOfLiquidity), '冷启动占比与 coldStartPercentOfLiquidity 不一致');
+  assert(cold * 100n === tokens * 40n, '冷启动必须占流动性 40%');
+  assert(asBigInt(liquidity.coldStartRaw) === cold * 10n ** 9n, ' coldStartRaw 与 coldStartTokens 不一致');
+  assert(String(liquidity.coldStartUsdtUsdE8) === '23200000000000', '冷启动 USDT 必须为 $232,000');
+  return '2 亿 A9 + $232,000 USDT（占流动性 40%，剩余 3 亿）';
+});
 test('price.ladder', () => {
   const ladder = expectedLadder(params);
   assert(ladder[1] === '232000' && ladder[10] === '118784000', '阶梯值不符合 P0=116000 × 2^tier');
@@ -64,16 +75,18 @@ test('price.ladder', () => {
   return 'R1 $0.00232 → R10 $1.18784';
 });
 test('timeline.invariants', () => {
-  assert(Number(params.timeline.roundSeconds) === 604800, '单轮 != 7 天');
-  assert(Number(params.timeline.roundsTotalSeconds) === 6048000, '10 轮 != 70 天');
-  assert(Number(params.timeline.candleCount) === 18 && Number(params.timeline.minQualifiedCandles) === 12, '观察窗口参数错误');
-  return '7 天/轮 · 70 天/10 轮 · 18 根/阈值 12';
+  assert(Number(params.timeline.roundSeconds) === 259200, '单轮 != 72h');
+  assert(Number(params.timeline.roundsTotalSeconds) === 2592000, '10 轮 != 30 天');
+  assert(Number(params.timeline.candleCount) === 24 && Number(params.timeline.minQualifiedCandles) === 16, '观察窗口参数错误');
+  assert(Number(params.timeline.candleSeconds) === 3600 && Number(params.timeline.observationSeconds) === 86400, 'K 线周期/观察窗口错误');
+  assert(Number(params.timeline.previewSeconds) === 43200 && Number(params.timeline.stakeDurationSeconds) === 129600, 'PREVIEW/报名窗口错误');
+  return '72h/轮 · 30 天/10 轮 · 24 根 × 1h / 阈值 16';
 });
 test('protocol.config.expected', () => {
   const expected = expectedProtocolConfig(params);
   assert(expected.p0UsdE8 === '116000' && expected.priceMultiplier === 2, 'P0/倍数错误');
   assert(expected.techAbortPauseSeconds === 1209600 && expected.techAbortObservationTimeout === 604800, '技术终止参数错误');
-  return '22 个字段与 V6.2 一致';
+  return '22 个字段与 V7 一致';
 });
 test('raw.amount.helper', () => {
   assert(rawAmount(700000000) === '700000000000000000', 'rawAmount 错误');
@@ -176,7 +189,7 @@ test('monitor.faults', () => {
 });
 
 section('自测：部署脚本 dry-run（临时登记表）');
-for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '55_fund_ton.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs']) {
+for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '15_deploy_contracts.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '55_fund_ton.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs']) {
   test('dryrun.' + script, () => {
     const extra = script === '50_fund_vaults.mjs' ? ['--all'] : [];
     const result = run([join(SCRIPTS, script), ...extra], { OPS_REGISTRY: tempRegistry });
@@ -186,8 +199,63 @@ for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_l
   });
 }
 
+section('自测：deploy_all 编排（whole / jetton）');
+test('deploy_all.whole', () => {
+  const result = run([join(SCRIPTS, 'deploy_all.mjs')], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, 'whole 模式失败：' + result.out.slice(-800));
+  assert(result.out.includes('部署模式') && result.out.includes('whole'), '未以 whole 模式运行');
+  assert(result.out.includes('contracts') && result.out.includes('verify'), 'whole 模式缺少步骤');
+  return '整体路径 15→40→55→50→60→90 dry-run PASS';
+});
+test('deploy_all.jetton', () => {
+  const result = run([join(SCRIPTS, 'deploy_all.mjs'), '--mode', 'jetton'], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, 'jetton 模式失败：' + result.out.slice(-800));
+  assert(result.out.includes('jettonMaster') && result.out.includes('jettonMint'), 'jetton 模式缺少 10/11 步骤');
+  return 'Jetton 分步 10→11 dry-run PASS';
+});
+
+section('自测：广播脚本 dry-run 摘要（50/55/80）');
+test('dryrun.50.summary', () => {
+  const result = run([join(SCRIPTS, '50_fund_vaults.mjs'), '--all'], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, '50 dry-run 失败：' + result.out.slice(-700));
+  for (const expected of ['dest=', 'value=', 'fund_jetton', 'A9']) assert(result.out.includes(expected), '缺少摘要字段：' + expected);
+  return '5 笔 fund_jetton 摘要（dest/value/amount）';
+});
+test('dryrun.55.summary', () => {
+  const result = run([join(SCRIPTS, '55_fund_ton.mjs')], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, '55 dry-run 失败：' + result.out.slice(-700));
+  for (const expected of ['dest=', 'value=', 'fund_ton', 'TON']) assert(result.out.includes(expected), '缺少摘要字段：' + expected);
+  return 'fund_ton 摘要（dest/value=整数 TON）';
+});
+test('dryrun.80.summary', () => {
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'pause-oracle', '--round', '1'], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, '80 dry-run 失败：' + result.out.slice(-700));
+  for (const expected of ['dest=', 'op=', 'value/extra=', 'admin_op.tolk']) assert(result.out.includes(expected), '缺少摘要字段：' + expected);
+  return 'admin_op 摘要（dest/op/value/round）';
+});
+
+section('自测：submit-candle（正例 + 窗口不一致负例）');
+test('dryrun.80.submit_candle', () => {
+  const obs = Math.floor(Date.now() / 1000) - 5 * 3600;
+  const digest = '0x' + 'ab'.repeat(32);
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'submit-candle', '--round', '1', '--candle', '2', '--twap', '232000', '--digest', digest, '--observation-start', String(obs)], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, 'submit-candle dry-run 失败：' + result.out.slice(-900));
+  for (const expected of ['candleIndex=2', 'periodStart=', 'opcode=0x52540003', 'dest=', 'twapUsdE8=232000']) {
+    assert(result.out.includes(expected), '缺少字段：' + expected);
+  }
+  return '单根 K 线 dry-run 摘要 + 窗口自动推导';
+});
+test('dryrun.80.submit_candle_window_mismatch', () => {
+  const obs = Math.floor(Date.now() / 1000) - 5 * 3600;
+  const digest = '0x' + 'cd'.repeat(32);
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'submit-candle', '--round', '1', '--candle', '2', '--twap', '232000', '--digest', digest, '--observation-start', String(obs), '--periodStart', String(obs + 9999)], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 1, '窗口不一致未被拦截（exit ' + result.code + '）');
+  assert(result.out.includes('不一致') || result.out.includes('observationStart'), '缺少窗口校验错误信息');
+  return 'periodStart 不匹配 → ops 层拦截，未进入 acton';
+});
+
 section('自测：全部脚本语法');
-const scriptFiles = ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '50_fund_vaults.mjs', '55_fund_ton.mjs', '60_verify_and_register.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '80_admin_ops.mjs', 'deploy_all.mjs', 'verify_deployment.mjs', 'reconcile.mjs', 'monitor_check.mjs', 'announcement.mjs'];
+const scriptFiles = ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '15_deploy_contracts.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '50_fund_vaults.mjs', '55_fund_ton.mjs', '60_verify_and_register.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '80_admin_ops.mjs', 'deploy_all.mjs', 'verify_deployment.mjs', 'reconcile.mjs', 'monitor_check.mjs', 'announcement.mjs'];
 test('syntax.all', () => {
   const bad = [];
   for (const file of scriptFiles) {

@@ -27,10 +27,17 @@ export function activeAdapter(params) {
   return { name, adapter };
 }
 
+export function hasCommand(params, commandName) {
+  const { adapter } = activeAdapter(params);
+  return Boolean(adapter.commands && adapter.commands[commandName]);
+}
+
 export function commandTemplate(params, commandName) {
   const { name, adapter } = activeAdapter(params);
   const template = adapter.commands && adapter.commands[commandName];
-  if (!template) throw new Error('适配器 ' + name + ' 未定义命令模板：' + commandName);
+  if (!template) {
+    throw new Error('适配器 ' + name + ' 未定义命令模板：' + commandName);
+  }
   return template;
 }
 

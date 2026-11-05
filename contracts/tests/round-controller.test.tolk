@@ -25,12 +25,12 @@ get fun `test RoundController deploys with V6.1 parameters and zeroed state`() {
     expect(cfg.minStakeRaw).toEqual(MIN_STAKE_RAW);
     expect(cfg.maxStakePerAddressBps).toEqual(1000);
     expect(cfg.maxTotalStakeRaw).toEqual(MAX_TOTAL_STAKE_RAW);
-    expect(cfg.previewSeconds).toEqual(86400);
-    expect(cfg.stakeDurationSeconds).toEqual(259200);
-    expect(cfg.candleSeconds).toEqual(14400);
-    expect(cfg.candleCount).toEqual(18);
-    expect(cfg.minQualifiedCandles).toEqual(12);
-    expect(cfg.observationSeconds).toEqual(259200);
+    expect(cfg.previewSeconds).toEqual(43200);
+    expect(cfg.stakeDurationSeconds).toEqual(129600);
+    expect(cfg.candleSeconds).toEqual(3600);
+    expect(cfg.candleCount).toEqual(24);
+    expect(cfg.minQualifiedCandles).toEqual(16);
+    expect(cfg.observationSeconds).toEqual(86400);
     expect(cfg.techAbortPauseSeconds).toEqual(1209600);
     expect(cfg.techAbortObsTimeoutSeconds).toEqual(604800);
     expect(cfg.riskDisclosureVersion).toEqual(1);
@@ -77,7 +77,7 @@ get fun `test R1 opens at 2xP0 and locks the target`() {
     expect(rd.targetTwap24hUsdE8).toEqual(100000 as uint128);
     expect(rd.rewardBudgetRaw).toEqual(ROUND_REWARD_RAW);
     expect(rd.stakeOpenAt).toEqual(1000000);
-    expect(rd.stakeCloseAt).toEqual(1000000 + 259200);
+    expect(rd.stakeCloseAt).toEqual(1000000 + 129600);
     expect(net.runGetMethod<uint8>(f.rc.address, "get_current_round")).toEqual(1);
     expect(net.runGetMethod<uint128>(f.rc.address, "get_round_target_price", [1 as uint8]))
         .toEqual(232000 as uint128);
@@ -219,7 +219,7 @@ get fun `test stake after window close is refunded`() {
         from: f.admin,
         to: f.rc.address,
     });
-    advance(259200);
+    advance(STAKE_DURATION_SECONDS as int);
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({
         from: f.admin,
         to: f.rc.address,
@@ -282,11 +282,11 @@ get fun `test per-address hard cap (20,000,000 A9) is enforced with refund`() {
 get fun `test late keeper re-anchors the staking window instead of deadlocking`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
     runSuccessRound(f, 1, alice.address, keeper.address, 100000000000000 as coins);
 
-    // miss the whole PREVIEW + 72h window
-    advance(86400 + 259200 + 5000);
+    // miss the whole PREVIEW + 36h window
+    advance((PREVIEW_SECONDS as int) + (STAKE_DURATION_SECONDS as int) + 5000);
     val now = testing.getNow();
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({
         from: f.admin,
@@ -295,7 +295,7 @@ get fun `test late keeper re-anchors the staking window instead of deadlocking`(
     val r2 = rcRound(f.rc, 2);
     expect(r2.status).toEqual(STATUS_STAKING_OPEN);
     expect(r2.stakeOpenAt).toEqual((now as uint64));
-    expect(r2.stakeCloseAt).toEqual((now as uint64) + 259200);
+    expect(r2.stakeCloseAt).toEqual((now as uint64) + (STAKE_DURATION_SECONDS as uint64));
 }
 
 get fun `test first depositor and exact 20,000,000 A9 hard cap are accepted`() {

@@ -35,3 +35,6 @@ global.libraries.toml
 # coverage
 lcov.info
 gen/
+
+# generated deployment address files
+deploy/*.addr

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /** 65 — SetJettonWallet：给 RC / TeamVault 写入各自的 canonical Jetton Wallet（admin 一次性，opcode 0x52540016）。 */
 
-import { flag } from './lib/cli.mjs';
-import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
-import { commandTemplate, runCommand, substitute } from './lib/toolchain.mjs';
+import { flag, requireConfirm } from './lib/cli.mjs';
+import { bootstrap, finish, printNextSteps, resolveAddress, resolveContractAddress, signerWallet } from './lib/step.mjs';
+import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { setContract, writeRegistry } from './lib/registry.mjs';
 import { findJettonWallet } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
@@ -14,9 +14,10 @@ const { args, execute, params, registry } = bootstrap({
   dependsOn: ['roundController'],
 });
 
-const jettonMaster = resolveContractAddress(registry, 'jettonMaster');
-const roundController = resolveContractAddress(registry, 'roundController');
-const teamVault = resolveContractAddress(registry, 'teamVault');
+const jettonMaster = resolveAddress(registry, params, 'jettonMaster', 'jetton-master.addr');
+const roundController = resolveAddress(registry, params, 'roundController', 'round-controller.addr');
+const teamVault = resolveAddress(registry, params, 'teamVault', 'team-vault.addr');
+const signer = signerWallet(params);
 const existingRc = resolveContractAddress(registry, 'roundControllerJettonWallet');
 const existingTv = resolveContractAddress(registry, 'teamVaultJettonWallet');
 
@@ -80,9 +81,20 @@ if (!execute) {
   process.exit(finish({ 模式: 'DRY-RUN' }));
 }
 
+if (!hasCommand(params, 'setJettonWallet')) {
+  if (rcWallet && tvWallet) {
+    info('整体部署已完成 SetJettonWallet；登记表已有 RC/TV Jetton Wallet：' + rcWallet + ' / ' + tvWallet);
+    process.exit(finish({ 结果: 'ALREADY_SET（整体部署）' }));
+  }
+  fail('缺少 setJettonWallet 命令模板（检查 config/testnet.params.json toolchain.commands）');
+  process.exit(finish());
+}
+requireConfirm('SetJettonWallet 广播（RC/TV，一次性）');
+
 const run = (targetContract, walletAddress) => {
   const rendered = substitute(commandTemplate(params, 'setJettonWallet'), {
     contractsDir: params.toolchain.contractsDir,
+    signerWallet: signer,
     targetContract,
     walletAddress,
   });

@@ -14,11 +14,11 @@ const TOTAL_TWO: coins = 400000000000000; // 400,000 A9
 // Success settlement + claims
 // ===========================================================================
 
-get fun `test success round: 12/18 candles -> SETTLING_SUCCESS -> SUCCEEDED with team release`() {
+get fun `test success round: 16/24 candles -> SETTLING_SUCCESS -> SUCCEEDED with team release`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
     val bob = testing.treasury("bob");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({
         from: f.admin,
@@ -39,12 +39,12 @@ get fun `test success round: 12/18 candles -> SETTLING_SUCCESS -> SUCCEEDED with
     expect(rcStatus(f.rc, 1)).toEqual(STATUS_OBSERVING);
 
     val target = rcRound(f.rc, 1).targetPriceUsdE8;
-    submitAllCandles(f.rc, keeper.address, 1, 12, target);
+    submitAllCandles(f.rc, keeper.address, 1, 16, target);
 
     val settling = rcRound(f.rc, 1);
     expect(settling.status).toEqual(STATUS_SETTLING_SUCCESS);
-    expect(settling.candlesSeen).toEqual(18);
-    expect(settling.qualifiedCandles).toEqual(12);
+    expect(settling.candlesSeen).toEqual(24);
+    expect(settling.qualifiedCandles).toEqual(16);
     expect(settling.totalAcceptedStakeRaw).toEqual(TOTAL_TWO as uint128);
     expect(settling.teamReleaseConfirmed).toBeTrue();
     expect(teamVaultState(f.tv).totalReleasedRaw).toEqual(TEAM_ROUND_RAW);
@@ -55,13 +55,13 @@ get fun `test success round: 12/18 candles -> SETTLING_SUCCESS -> SUCCEEDED with
     });
     val settled = rcRound(f.rc, 1);
     expect(settled.status).toEqual(STATUS_SUCCEEDED);
-    expect(settled.settledAt).toEqual(1518400);
+    expect(settled.settledAt).toEqual(1216000);
     expect(net.runGetMethod<uint8>(f.rc.address, "get_success_count")).toEqual(1);
 
-    // 24h PREVIEW: next round automatically created with stakeOpenAt = settledAt + 24h
+    // 12h PREVIEW: next round automatically created with stakeOpenAt = settledAt + 12h
     val next = rcRound(f.rc, 2);
     expect(next.status).toEqual(STATUS_PREVIEW);
-    expect(next.stakeOpenAt).toEqual(1518400 + 86400);
+    expect(next.stakeOpenAt).toEqual(1216000 + 43200);
     expect(next.rewardBudgetRaw).toEqual(ROUND_REWARD_RAW);
 }
 
@@ -69,7 +69,7 @@ get fun `test reward estimate + claimAll combines principal and reward exactly o
     val f = setupProtocol();
     val alice = testing.treasury("alice");
     val bob = testing.treasury("bob");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     stakeOk(f, 1, alice.address, AMOUNT_ALICE, 1);
@@ -77,7 +77,7 @@ get fun `test reward estimate + claimAll combines principal and reward exactly o
     advance(STAKE_DURATION_SECONDS as int);
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 1, 12, rcRound(f.rc, 1).targetPriceUsdE8);
+    submitAllCandles(f.rc, keeper.address, 1, 16, rcRound(f.rc, 1).targetPriceUsdE8);
     expect(finalizeRound(f.rc, keeper.address, 1)).toHaveSuccessfulTx<FinalizeRound>({ from: keeper.address, to: f.rc.address });
 
     // alice 25% of 700,000,000 A9
@@ -88,10 +88,10 @@ get fun `test reward estimate + claimAll combines principal and reward exactly o
 
     val claimable = rcClaimable(f.rc, alice.address);
     expect(claimable.principalRaw).toEqual(AMOUNT_ALICE as uint128);
-    expect(claimable.rewardRaw).toEqual(aliceReward);
+    expect(claimable.rewardRaw).toEqual(aliceReward / 2); // V8 legacy ClaimAll pays 50% now
     expect(claimable.roundsMask).toEqual(1);
 
-    val expectedTotal: coins = AMOUNT_ALICE + (aliceReward as coins);
+    val expectedTotal: coins = AMOUNT_ALICE + ((aliceReward / 2) as coins);
     expect(claimAll(f.rc, alice.address, 0)).toHaveSuccessfulTx<ClaimAll>({
         from: alice.address,
         to: f.rc.address,
@@ -107,6 +107,7 @@ get fun `test reward estimate + claimAll combines principal and reward exactly o
         to: f.rc.address,
     });
     expect(mockState(f.rcWallet).transferCount).toEqual(1);
+    expect(rcUnlockInfo(f.rc, alice.address).totalLockedRaw).toEqual(aliceReward - aliceReward / 2);
     expect(rcClaimable(f.rc, alice.address).principalRaw).toEqual(0 as uint128);
 }
 
@@ -114,7 +115,7 @@ get fun `test separate ClaimReward / ClaimPrincipal are idempotent`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
     val bob = testing.treasury("bob");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     stakeOk(f, 1, alice.address, AMOUNT_ALICE, 1);
@@ -122,7 +123,7 @@ get fun `test separate ClaimReward / ClaimPrincipal are idempotent`() {
     advance(STAKE_DURATION_SECONDS as int);
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 1, 12, rcRound(f.rc, 1).targetPriceUsdE8);
+    submitAllCandles(f.rc, keeper.address, 1, 16, rcRound(f.rc, 1).targetPriceUsdE8);
     expect(finalizeRound(f.rc, keeper.address, 1)).toHaveSuccessfulTx<FinalizeRound>({ from: keeper.address, to: f.rc.address });
 
     expect(claimReward(f.rc, bob.address, 1)).toHaveSuccessfulTx<ClaimReward>({ from: bob.address, to: f.rc.address });
@@ -146,11 +147,11 @@ get fun `test separate ClaimReward / ClaimPrincipal are idempotent`() {
 // Failure settlement (three burns + acks)
 // ===========================================================================
 
-get fun `test failure round: 11/18 -> three burns, acks required, permanent close, same-tier retry`() {
+get fun `test failure round: 15/24 -> three burns, acks required, permanent close, same-tier retry`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
     val bob = testing.treasury("bob");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     stakeOk(f, 1, alice.address, AMOUNT_ALICE, 1);
@@ -159,11 +160,12 @@ get fun `test failure round: 11/18 -> three burns, acks required, permanent clos
     expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
 
-    submitAllCandles(f.rc, keeper.address, 1, 11, rcRound(f.rc, 1).targetPriceUsdE8);
+    submitAllCandles(f.rc, keeper.address, 1, 15, rcRound(f.rc, 1).targetPriceUsdE8);
+    confirmTeamBurn(f, 1);
 
     val settling = rcRound(f.rc, 1);
     expect(settling.status).toEqual(STATUS_SETTLING_FAILURE);
-    expect(settling.qualifiedCandles).toEqual(11);
+    expect(settling.qualifiedCandles).toEqual(15);
     // team burn ack comes back synchronously through TeamVault
     expect(settling.teamBurnConfirmed).toBeTrue();
     // reward + principal burns are requested from RC's own Jetton wallet
@@ -237,7 +239,7 @@ get fun `test failure round: 11/18 -> three burns, acks required, permanent clos
     });
 
     // same tier retry: round 2 target is still 2 x P0 (tier unchanged)
-    advance(86400 + 1);
+    advance((PREVIEW_SECONDS as int) + 1);
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     val r2 = rcRound(f.rc, 2);
     expect(r2.status).toEqual(STATUS_STAKING_OPEN);
@@ -251,10 +253,10 @@ get fun `test failure round: 11/18 -> three burns, acks required, permanent clos
 
 get fun `test 0-stake success burns the round reward and still releases team quota`() {
     val f = setupProtocol();
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
     val target = openAndCloseFirstRound(f, 0);
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
-    submitAllCandles(f.rc, keeper.address, 1, 12, target);
+    submitAllCandles(f.rc, keeper.address, 1, 16, target);
 
     val settling = rcRound(f.rc, 1);
     expect(settling.status).toEqual(STATUS_SETTLING_SUCCESS);
@@ -296,7 +298,7 @@ get fun `test 0-stake success burns the round reward and still releases team quo
 get fun `test technical abort after 14 days of oracle pause refunds principal, no burns, tier unchanged`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     stakeOk(f, 1, alice.address, AMOUNT_ALICE, 1);
@@ -334,7 +336,7 @@ get fun `test technical abort after 14 days of oracle pause refunds principal, n
     expect(mockState(f.rcWallet).lastTransferAmount).toEqual(AMOUNT_ALICE);
 
     // tier not consumed: round 2 uses the same tier 1
-    advance(86400 + 1);
+    advance((PREVIEW_SECONDS as int) + 1);
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     expect(rcRound(f.rc, 2).targetTier).toEqual(1);
     expect(rcRound(f.rc, 2).targetPriceUsdE8).toEqual(232000 as uint128);
@@ -343,7 +345,7 @@ get fun `test technical abort after 14 days of oracle pause refunds principal, n
 get fun `test technical abort after observation timeout (7 days) is permissionless`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     expect(openRound(f.rc, f.admin, 0)).toHaveSuccessfulTx<OpenRound>({ from: f.admin, to: f.rc.address });
     stakeOk(f, 1, alice.address, AMOUNT_ALICE, 1);
@@ -355,7 +357,7 @@ get fun `test technical abort after observation timeout (7 days) is permissionle
     submitCandle(f.rc, keeper.address, 1, 0, 300000);
     submitCandle(f.rc, keeper.address, 1, 1, 300000);
     submitCandle(f.rc, keeper.address, 1, 2, 300000);
-    advance(259200 - 3 * 14400);
+    advance((OBSERVATION_SECONDS as int) - 3 * (CANDLE_SECONDS as int));
     expect(abortTechnical(f.rc, alice.address)).toHaveFailedTx<AbortTechnical>({
         from: alice.address,
         to: f.rc.address,
@@ -374,10 +376,10 @@ get fun `test technical abort after observation timeout (7 days) is permissionle
 // Pause / resume restarts the observation window
 // ===========================================================================
 
-get fun `test pause then resume restarts a full 18-candle observation`() {
+get fun `test pause then resume restarts a full 24-candle observation`() {
     val f = setupProtocol();
     val alice = testing.treasury("alice");
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
 
     val target = openAndCloseFirstRound(f, 0);
     stakeOk(f, 1, alice.address, AMOUNT_ALICE, 1);
@@ -395,7 +397,7 @@ get fun `test pause then resume restarts a full 18-candle observation`() {
     expect(resumed.candlesSeen).toEqual(0);
     expect(resumed.qualifiedCandles).toEqual(0);
 
-    submitAllCandles(f.rc, keeper.address, 1, 12, target);
+    submitAllCandles(f.rc, keeper.address, 1, 16, target);
     expect(rcRound(f.rc, 1).status).toEqual(STATUS_SETTLING_SUCCESS);
 }
 
@@ -405,7 +407,7 @@ get fun `test pause then resume restarts a full 18-candle observation`() {
 
 get fun `test candle validation: index, period, duplicate, not closed yet`() {
     val f = setupProtocol();
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
     val target = openAndCloseFirstRound(f, 0);
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
 
@@ -421,9 +423,9 @@ get fun `test candle validation: index, period, duplicate, not closed yet`() {
         body: SubmitCandle {
             queryId: 0,
             roundId: 1,
-            candleIndex: 18,
+            candleIndex: CANDLE_COUNT,
             periodStart: start as uint32,
-            periodEnd: (start + 14400) as uint32,
+            periodEnd: (start + (CANDLE_SECONDS as uint64)) as uint32,
             twapPriceUsdE8: target,
             dataDigest: 0 as uint256,
         },
@@ -443,7 +445,7 @@ get fun `test candle validation: index, period, duplicate, not closed yet`() {
             roundId: 1,
             candleIndex: 0,
             periodStart: start as uint32,
-            periodEnd: (start + 14400) as uint32,
+            periodEnd: (start + (CANDLE_SECONDS as uint64)) as uint32,
             twapPriceUsdE8: target,
             dataDigest: 0 as uint256,
         },
@@ -454,7 +456,7 @@ get fun `test candle validation: index, period, duplicate, not closed yet`() {
     });
 
     // period mismatch (time moves forward only)
-    testing.setNow((start + 14400) as uint32);
+    testing.setNow((start + (CANDLE_SECONDS as uint64)) as uint32);
     expect(net.send(f.admin, createMessage({
         bounce: true,
         value: ton("0.2"),
@@ -464,7 +466,7 @@ get fun `test candle validation: index, period, duplicate, not closed yet`() {
             roundId: 1,
             candleIndex: 0,
             periodStart: (start + 1) as uint32,
-            periodEnd: (start + 14401) as uint32,
+            periodEnd: (start + (CANDLE_SECONDS as uint64) + 1) as uint32,
             twapPriceUsdE8: target,
             dataDigest: 0 as uint256,
         },
@@ -486,14 +488,14 @@ get fun `test candle validation: index, period, duplicate, not closed yet`() {
     });
 }
 
-get fun `test 17 candles is not enough to settle; 18th decides`() {
+get fun `test 23 candles is not enough to settle; 24th decides`() {
     val f = setupProtocol();
-    val keeper = testing.treasury("keeper");
+    val keeper = f.keeper;
     val target = openAndCloseFirstRound(f, 0);
     expect(startObservation(f.rc, keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: keeper.address, to: f.rc.address });
 
     var i: uint8 = 0;
-    while (i < 17) {
+    while (i < CANDLE_COUNT - 1) {
         expect(submitCandle(f.rc, keeper.address, 1, i, target)).toHaveSuccessfulTx<SubmitCandle>({
             from: keeper.address,
             to: f.rc.address,
@@ -501,7 +503,7 @@ get fun `test 17 candles is not enough to settle; 18th decides`() {
         i += 1;
     }
     expect(rcStatus(f.rc, 1)).toEqual(STATUS_OBSERVING);
-    expect(submitCandle(f.rc, keeper.address, 1, 17, target)).toHaveSuccessfulTx<SubmitCandle>({
+    expect(submitCandle(f.rc, keeper.address, 1, CANDLE_COUNT - 1, target)).toHaveSuccessfulTx<SubmitCandle>({
         from: keeper.address,
         to: f.rc.address,
     });
@@ -519,7 +521,7 @@ get fun `test touch-price early close and refunds after close`() {
     val target = rcRound(f.rc, 1).targetPriceUsdE8;
     val openAt = rcRound(f.rc, 1).stakeOpenAt;
 
-    advance(3600);
+    advance(CANDLE_SECONDS as int);
     // below target -> cannot close early
     expect(closeStaking(f.rc, f.admin, target - 1)).toHaveFailedTx<CloseStaking>({
         from: f.admin,
@@ -532,9 +534,9 @@ get fun `test touch-price early close and refunds after close`() {
     });
     val rd = rcRound(f.rc, 1);
     expect(rd.status).toEqual(STATUS_STAKING_CLOSED);
-    expect(rd.stakeCloseAt).toEqual(openAt + 3600);
-    expect(rd.observationStart).toEqual(openAt + 3600);
-    expect(rd.observationEnd).toEqual(openAt + 3600 + 259200);
+    expect(rd.stakeCloseAt).toEqual(openAt + (CANDLE_SECONDS as uint64));
+    expect(rd.observationStart).toEqual(openAt + (CANDLE_SECONDS as uint64));
+    expect(rd.observationEnd).toEqual(openAt + (CANDLE_SECONDS as uint64) + (OBSERVATION_SECONDS as uint64));
 
     // staking after early close is refunded
     expect(sendStake(f.rc, f.rcWallet.address, alice.address, AMOUNT_ALICE, buildStakePayload(1, 1, 1, 1)))

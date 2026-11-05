@@ -1,4 +1,4 @@
-/* 应用页样式（我的战况 / 排行榜 / 运维后台）—— 仅 features/app 作用域。
+/* 应用页样式（我的质押 / 排行榜 / 运维后台）—— 仅 features/app 作用域。
    基础令牌与 .panel/.card/.table/.tbl 沿用 fuse.css + app.css，不引入第二套 UI。 */
 
 .ap-page { padding-bottom: 24px; }

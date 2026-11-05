@@ -1,9 +1,7 @@
-// A9 Protocol — storage, message and event types.
-// Logical layout follows docs/04 §3/§4/§5; concrete cell layout is Tolk-native.
-//
-// NOTE ON CELL SIZE: Tolk rejects structs whose estimated serialization exceeds
-// 1023 bits. Groups of addresses / round extras are therefore stored behind
-// refs (Cell<T>), which also keeps the root state cell small.
+// A9 Protocol — storage, message and event types (V8: weighted rewards + 3-state).
+// Logical layout follows docs/04 §3/§4/§5 and docs/17_REWARD_V2.md; concrete cell
+// layout is Tolk-native. Groups behind Cell<T> keep every cell under 1023 bits and
+// every cell under 4 refs.
 
 import "constants"
 
@@ -34,30 +32,21 @@ struct ProtocolEcon {
     teamRoundRaw: uint128
     // 10,000 * 10^9
     minStakeRaw: uint128
-    // 1000 bps = 10% of the round total per address
+    // 1000 bps = 10% of the round total per address (derives the fixed 20M hard cap)
     maxStakePerAddressBps: uint16
     // 200,000,000 * 10^9
     maxTotalStakeRaw: uint128
 }
 
 struct ProtocolTiming {
-    // 86,400 (24h PREVIEW, V6)
     previewSeconds: uint32
-    // 259,200 (72h staking window)
     stakeDurationSeconds: uint32
-    // 14,400 (4h candle)
     candleSeconds: uint32
-    // 18
     candleCount: uint8
-    // 12
     minQualifiedCandles: uint8
-    // 259,200 (72h observation window)
     observationSeconds: uint32
-    // 1,209,600 (14 days continuous oracle pause)
     techAbortPauseSeconds: uint32
-    // 604,800 (7 days observation-end timeout)
     techAbortObsTimeoutSeconds: uint32
-    // Risk disclosure version accepted by deposit payload (testnet starts at 1)
     riskDisclosureVersion: uint16
     configVersion: uint32
 }
@@ -69,8 +58,7 @@ struct ProtocolConfig {
     timing: Cell<ProtocolTiming>
 }
 
-// Flat view returned by get_protocol_config() (get methods return stack tuples,
-// not cells, so no 1023-bit constraint applies here).
+// Flat view returned by get_protocol_config().
 struct ProtocolConfigView {
     admin: address
     oracle: address
@@ -97,15 +85,20 @@ struct ProtocolConfigView {
 }
 
 // ===========================================================================
-// Round storage
+// Round / stake storage
 // ===========================================================================
 
-struct CandleRecord {
-    periodStart: uint32
-    periodEnd: uint32
-    twapPriceUsdE8: uint128
-    qualified: bool
-    dataDigest: uint256
+// V8: per-round weight meta (kept behind one ref to stay under 1023 bits).
+struct RoundExtra {
+    failureBurnId: uint256
+    // rolling sha256 over submitted candles: H(prev || index || twap || digest)
+    candleHash: uint256
+    // Σ weight (own weights + referral bonuses)
+    totalWeight: uint128
+    // referral bonus credited per referrer (already capped by own stake)
+    bonus: map<address, uint128>
+    // referred stake per referrer (for get_referral)
+    referred: map<address, uint128>
 }
 
 struct StakePosition {
@@ -113,6 +106,10 @@ struct StakePosition {
     lastDepositNonce: uint64
     principalClaimed: bool
     rewardClaimed: bool
+    // own weight = amount × (1 + 10% × min(streak,10)), accumulated at deposit time
+    weight: uint128
+    // 0 PENDING / 1 ROLLED / 2 EARLY
+    rewardState: uint8
 }
 
 struct RoundData {
@@ -134,9 +131,8 @@ struct RoundData {
     teamBurnConfirmed: bool
     rewardBurnConfirmed: bool
     principalBurnConfirmed: bool
-    // ref: keeps the round cell under 1023 bits
-    failureBurnId: Cell<uint256>
-    candles: map<uint8, CandleRecord>
+    // ref: candle hash + total weight + bonus/referred maps
+    extra: Cell<RoundExtra>
 }
 
 // Flat view returned by get_round().
@@ -161,14 +157,50 @@ struct RoundView {
     rewardBurnConfirmed: bool
     principalBurnConfirmed: bool
     failureBurnId: uint256
+    candleHash: uint256
+    totalWeight: uint128
+}
+
+struct StreakInfo {
+    lastRound: uint8
+    count: uint8
+}
+
+// V8 extras grouped behind one ref so Storage stays within 4 refs.
+struct LockedState {
+    lockedRaw: uint128
+    claimedRaw: uint128
+}
+
+// P0-3: every outbound claim transfer is recorded here by queryId and removed
+// when the wallet confirms (ReturnExcessesBack) or rolls back (bounce).
+struct PendingClaim {
+    owner: address
+    kind: uint8
+    roundId: uint8
+    principalMask: uint16
+    rewardMask: uint16
+    amountRaw: uint128
+    lockedDeltaRaw: uint128
+    lockedBeforeRaw: uint128
+}
+
+struct StorageExtras {
+    referrer: map<address, address>
+    streaks: map<address, StreakInfo>
+    locked: map<address, LockedState>
+    pending: map<uint64, PendingClaim>
+    claimCounter: uint64
+    // R10 unlock pool start (0 = not started)
+    unlockStart: uint64
 }
 
 struct Storage {
     // config grouped behind one ref: Storage must stay within 4 refs
     config: Cell<ProtocolConfig>
-    // 0 = nothing opened yet; otherwise the currently active (or last) round id.
+    // V8 social/unlock state behind one ref
+    extras: Cell<StorageExtras>
     currentRoundId: uint8
-    // Number of rounds settled as SUCCEEDED. Next tier = successCount + 1 (D-28).
     successCount: uint8
     lastSettledAt: uint64
     pausedAt: uint64
@@ -183,6 +215,27 @@ fun Storage.load(): Storage {
 
 fun Storage.save(self) {
     contract.setData(self.toCell());
+}
+
+fun emptyRoundExtra(): RoundExtra {
+    return RoundExtra {
+        failureBurnId: 0 as uint256,
+        candleHash: 0 as uint256,
+        totalWeight: 0,
+        bonus: [],
+        referred: [],
+    };
+}
+
+fun emptyExtras(): StorageExtras {
+    return StorageExtras {
+        referrer: [],
+        streaks: [],
+        locked: [],
+        pending: [],
+        claimCounter: 0,
+        unlockStart: 0,
+    };
 }
 
 fun emptyRound(): RoundData {
@@ -205,12 +258,12 @@ fun emptyRound(): RoundData {
         teamBurnConfirmed: false,
         rewardBurnConfirmed: false,
         principalBurnConfirmed: false,
-        failureBurnId: (0 as uint256).toCell(),
-        candles: [],
+        extra: emptyRoundExtra().toCell(),
     };
 }
 
 fun roundView(roundId: uint8, rd: RoundData): RoundView {
+    val extra = rd.extra.load();
     return {
         roundId,
         status: rd.status,
@@ -231,12 +284,14 @@ fun roundView(roundId: uint8, rd: RoundData): RoundView {
         teamBurnConfirmed: rd.teamBurnConfirmed,
         rewardBurnConfirmed: rd.rewardBurnConfirmed,
         principalBurnConfirmed: rd.principalBurnConfirmed,
-        failureBurnId: rd.failureBurnId.load(),
+        failureBurnId: extra.failureBurnId,
+        candleHash: extra.candleHash,
+        totalWeight: extra.totalWeight,
     };
 }
 
 // ===========================================================================
-// Custom messages (docs/04 §5)
+// Custom messages (docs/04 §5 + docs/17 §4.2)
 // ===========================================================================
 
 struct (0x52540001) OpenRound {
@@ -338,12 +393,27 @@ struct (0x52540015) RetryPendingActions {
     roundId: uint8
 }
 
-// One-time deployment initializer: the canonical Jetton Wallet address of the
-// contract is derived from (jetton master, owner = this contract), so it cannot
-// be baked into the state init (cyclic address). Admin sets it exactly once
-// before the protocol starts.
 struct (0x52540016) SetJettonWallet {
     wallet: address
+}
+
+// V8 reward-state opcodes (docs/17 §4.2)
+struct (0x52540017) ClaimRewardEarly {
+    queryId: uint64
+    roundId: uint8
+}
+
+struct (0x52540018) RollReward {
+    queryId: uint64
+    roundId: uint8
+}
+
+struct (0x52540019) SetReferrer {
+    referrer: address
+}
+
+struct (0x5254001A) ClaimUnlocked {
+    queryId: uint64
 }
 
 // ===========================================================================
@@ -389,6 +459,11 @@ struct (0x7362d09c) TransferNotification {
 
 struct (0xd372158c) TopUpTons {}
 
+// P0-2: TEP-74 wallet/master excess-return message; also used as completion ack.
+struct (0xd53276db) ReturnExcessesBack {
+    queryId: uint64
+}
+
 // StakePayload carried inside transfer_notification.forward_payload.
 // op(32)+version(8)+roundId(8)+depositNonce(64)+riskVersion(16)+acceptBurn(8) = 136 bit.
 struct (0x5254000F) StakeDeposit {
@@ -396,7 +471,6 @@ struct (0x5254000F) StakeDeposit {
     roundId: uint8
     depositNonce: uint64
     riskDisclosureVersion: uint16
-    // 0/1, uint8 on the wire per lead ABI decision (must be 1)
     acceptFullPrincipalBurn: uint8
 }
 
@@ -407,7 +481,6 @@ struct (0x5254000F) StakeDeposit {
 struct Claimable {
     principalRaw: uint128
     rewardRaw: uint128
-    // bit i set => round (i+1) included in the returned amounts
     roundsMask: uint16
 }
 
@@ -418,14 +491,32 @@ struct RoundBurnStatus {
     failureBurnId: uint256
 }
 
+struct RewardStateInfo {
+    amountRaw: uint128
+    state: uint8
+    rollableRaw: uint128
+    earlyAmountRaw: uint128
+}
+
+struct UnlockInfo {
+    unlockStart: uint64
+    totalLockedRaw: uint128
+    claimedRaw: uint128
+    claimableRaw: uint128
+}
+
+struct ReferralInfo {
+    referrer: address?
+    referredStakeThisRound: uint128
+    bonusThisRound: uint128
+}
+
 // ===========================================================================
-// TeamVault storage / types
+// TeamVault storage / types (unchanged)
 // ===========================================================================
 
 struct TeamVaultConfig {
-    // deployer/admin until InitController is called once
     admin: address
-    // null until initialized; immutable afterwards
     controller: address?
     configVersion: uint32
 }
@@ -433,6 +524,8 @@ struct TeamVaultConfig {
 struct TeamVaultParams {
     jettonWallet: address
     teamWallet: address
+    // P0-2 closure: only ReturnExcessesBack from this master confirms a team burn
+    jettonMaster: address
     teamRoundRaw: uint128
 }
 
@@ -445,9 +538,10 @@ struct TeamRoundState {
 
 struct TeamVaultStorage {
     config: TeamVaultConfig
-    // ref to stay under the 1023-bit root cell limit
     params: Cell<TeamVaultParams>
     rounds: map<uint8, TeamRoundState>
+    // pending burn burnId per round (kept until Jetton Master confirms)
+    pendingBurnIds: map<uint8, uint256>
     totalReleasedRaw: uint128
     totalBurnedRaw: uint128
     releasedCount: uint8
@@ -516,4 +610,28 @@ struct (0x52540202) TeamBurned {
     roundId: uint8
     amountRaw: uint128
     burnId: uint256
+}
+
+struct (0x52540105) RewardRolled {
+    roundId: uint8
+    owner: address
+    amountRaw: uint128
+    nextRoundId: uint8
+}
+
+struct (0x52540106) RewardEarly {
+    roundId: uint8
+    owner: address
+    paidRaw: uint128
+    lockedRaw: uint128
+}
+
+struct (0x52540107) ReferrerSet {
+    owner: address
+    referrer: address
+}
+
+struct (0x52540108) UnlockClaimed {
+    owner: address
+    amountRaw: uint128
 }

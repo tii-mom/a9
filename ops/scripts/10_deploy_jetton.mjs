@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** 10 — 部署 Jetton Master（TEP-74，官方复用；部署后 mint 权限最终关闭）。 */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolvePath } from './lib/config.mjs';
 import { str } from './lib/cli.mjs';
 import { bootstrap, finish, printNextSteps } from './lib/step.mjs';
@@ -15,7 +15,8 @@ const { args, execute, params, digest, registry, toolchain } = bootstrap({
   title: '部署 Jetton Master（A9 / TEP-74）',
 });
 
-const artifact = resolvePath(params.toolchain.buildDir + '/jetton_master.boc');
+const artifact = resolvePath(params.toolchain.buildDir + '/JettonMaster.json');
+const addressFile = resolvePath(params.toolchain.contractsDir + '/deploy/jetton-master.addr');
 const treasury =
   str(args, 'treasury') ||
   (registry.wallets.treasury && registry.wallets.treasury.address) ||
@@ -49,7 +50,7 @@ if (existing) {
 }
 
 if (!treasury) {
-  if (execute) { fail('缺少初始铸造接收地址（--treasury / TON_TREASURY_ADDRESS / 登记表）'); process.exit(finish()); }
+  if (execute) { fail('缺少初始铸造接收地址（TON_TREASURY_ADDRESS / 登记表 / 位置参数）'); process.exit(finish()); }
   warn('未提供 treasury 地址（dry-run 继续）');
 }
 if (execute && !existsSync(artifact)) {
@@ -73,7 +74,11 @@ if (execute) {
     fail('部署命令失败（exit ' + result.status + '）：' + (result.stderr || result.stdout).slice(0, 500));
     process.exit(finish());
   }
-  const address = str(args, 'address') || extractAddress(result.stdout) || extractAddress(result.stderr);
+  let address = str(args, 'address') || extractAddress(result.stdout) || extractAddress(result.stderr);
+  if (!address && existsSync(addressFile)) {
+    const fromFile = readFileSync(addressFile, 'utf8').trim();
+    if (fromFile) { address = fromFile; detail('地址来自 ' + addressFile); }
+  }
   if (!address) {
     fail('命令成功但未能从输出解析地址；请用 --adopt <address> 手工登记');
     detail('stdout: ' + result.stdout.slice(0, 500));
@@ -87,6 +92,7 @@ if (execute) {
 printNextSteps([
   '验证：' + (execute ? 'node scripts/verify_deployment.mjs --offline' : '部署后执行 verify_deployment.mjs'),
   '下一步：node scripts/11_mint_and_lock_jetton.mjs' + (execute ? ' --execute' : ''),
-  '铸造完成后必须关闭 mint 权限（admin 置空），否则不满足 TEP-74 “关闭 mint”要求。',
+  'mint-once：op 0x00000015，金额必须 1e19；mint 与 admin 置 null 在同一笔交易完成（二次 mint 报 MintClosed(75)）。',
+  '部署后会写出 contracts/deploy/jetton-master.addr（文本地址），脚本会自动读取。',
 ]);
 process.exit(finish({ 地址: registry.contracts.jettonMaster.address || '（dry-run 未变更）' }));

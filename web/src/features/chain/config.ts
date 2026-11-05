@@ -43,6 +43,21 @@ export interface ChainConfig {
   maxStakePerAddressRaw: bigint;
   /** 旧口径（bps），仅为兼容保留；前端校验以 maxStakePerAddressRaw 为准 */
   maxStakePerAddressBps: number;
+  // ---- V8 权重制 / 奖励三态 / 邀请 / 解锁（shared/types ProtocolConfig 已定稿） ----
+  /** 连续参与每轮权重加成（bps，1000 = +10%） */
+  streakBonusBps: number;
+  /** 连续参与加成封顶轮次（10 → 最高 2.00×） */
+  streakMaxRounds: number;
+  /** 直接邀请加成（bps，2000 = 被邀请人质押的 20%） */
+  referralBonusBps: number;
+  /** 邀请加成封顶 = 邀请人自己质押额（bps，10000 = 1.0×） */
+  referralCapMultiple: number;
+  /** 早领比例（bps，5000 = 先拿 50%） */
+  earlyClaimPenaltyBps: number;
+  /** 单地址单轮滚存上限（raw） */
+  rolloverCapPerAddressRaw: bigint;
+  /** R10 终态后线性解锁时长（秒） */
+  unlockDurationSeconds: number;
   dataSource: DataSource;
   tonConnectManifestUrl: string | null;
 }
@@ -117,6 +132,14 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     maxTotalStakeRaw,
     maxStakePerAddressRaw: parseRawExtra(contractExtra(config, 'maxStakePerAddressRaw'), derivedPerAddressCap),
     maxStakePerAddressBps,
+    // V8：字段由 shared/types ProtocolConfig 定稿；缺失时按合约/文档缺省值兜底
+    streakBonusBps: config?.streakBonusBps ?? 1000,
+    streakMaxRounds: config?.streakMaxRounds ?? 10,
+    referralBonusBps: config?.referralBonusBps ?? 2000,
+    referralCapMultiple: config?.referralCapMultiple ?? 10000,
+    earlyClaimPenaltyBps: config?.earlyClaimPenaltyBps ?? 5000,
+    rolloverCapPerAddressRaw: parseRawExtra(config?.rolloverCapPerAddressRaw ?? null, 20_000_000n * tokenUnit),
+    unlockDurationSeconds: config?.unlockDurationSeconds ?? 31_104_000,
     dataSource: config?.dataSource ?? 'demo',
     tonConnectManifestUrl: config?.tonConnectManifestUrl ?? null,
   };

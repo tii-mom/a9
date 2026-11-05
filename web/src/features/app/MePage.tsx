@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ApiError } from '../../lib/api';
 import { api, useQuery } from '../../lib/api';
@@ -7,9 +7,20 @@ import { useDict, useLang } from '../../lib/lang';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, useWallet } from '../wallet';
-import { ChainMePanel } from '../chain';
+import { ChainMePanel, RewardReferralPanel, captureInviteFromLocation } from '../chain';
 import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
-import { apiErrorText, COMMON, durationText, formatPrice, pickCurrentRound, resultLabel, sharePct } from './common';
+import {
+  apiErrorText,
+  COMMON,
+  durationText,
+  fillTemplate,
+  formatPrice,
+  hoursOf,
+  pickCurrentRound,
+  resultLabel,
+  sharePct,
+  TIMING_FALLBACKS,
+} from './common';
 import { Empty, ErrorState, Loading, PageHead, Stat, StatePill, ToastView, useToast } from './ui';
 import './pages.css';
 
@@ -71,32 +82,32 @@ interface MeDict extends Record<string, unknown> {
 }
 
 const ZH: MeDict = {
-  lbl: '我的战况',
-  title: '我的战况',
-  desc: '当前轮质押、可领取本金与奖励、历史轮次与累计战绩。钱包为只读连接，不会发起任何交易。',
+  lbl: '我的质押',
+  title: '我的质押',
+  desc: '当前轮质押、可领取本金与奖励、历史轮次与累计记录。钱包为只读连接，不会发起任何交易。',
   connect: '连接钱包',
   demo: '使用演示钱包',
   disconnect: '断开',
-  gateTitle: '连接钱包查看你的战况',
+  gateTitle: '连接钱包查看你的质押',
   gateDesc: '连接 TON 钱包（只读）或使用演示钱包，即可查看当前轮质押、可领取与历史记录。',
-  gateHint: '仅读取地址与余额，不签名、不转账；质押与领取请在首页指挥台完成。',
+  gateHint: '仅读取地址与余额，不签名、不转账；质押与领取请在首页交易台完成。',
   demoNotice: '当前为演示钱包：地址由本地生成或取自演示数据，资金与链上数据均为演示用途。',
   readonlyNotice: '只读模式：不会发起任何交易；合约部署后开放真实质押与领取。',
   chainNotice: '链上模式：合约已配置。质押与领取请在下方「链上操作」面板中签名完成，本页仅做数据展示。',
   chainClaimHint: '链上领取请使用上方「链上操作」面板（链上交易需钱包签名）；本页不再提供演示领取。',
-  chainDesc: '当前轮质押、可领取本金与奖励、历史轮次与累计战绩；链上质押与领取请在「链上交易」面板签名完成。',
+  chainDesc: '当前轮质押、可领取本金与奖励、历史轮次与累计记录；链上质押与领取请在「链上交易」面板签名完成。',
   statMyStake: '当前轮质押',
   statClaimPrincipal: '可领取本金',
   statClaimReward: '可领取奖励',
   statTotalStaked: '累计质押',
   statTotalReward: '累计奖励',
   statTotalClaimed: '累计已领取',
-  currentTitle: '当前轮战位',
+  currentTitle: '当前轮仓位',
   countdown: '距下一阶段',
   progress: '观察进度',
   qualifiedTarget: '达标线',
   noStakeThisRound: '本轮你还没有质押。',
-  goStake: '前往指挥台质押',
+  goStake: '前往交易台质押',
   claimTitle: '可领取',
   claimDesc: '本金与奖励分别领取，操作幂等',
   claimEmpty: '暂无可领取',
@@ -107,7 +118,7 @@ const ZH: MeDict = {
   historyTitle: '历史轮次',
   historyDesc: '你参与过的全部轮次与资金状态',
   historyEmpty: '暂无质押记录',
-  historyEmptyDesc: '该地址还没有任何轮次质押。可以回到首页指挥台，在当前轮质押窗口内参与。',
+  historyEmptyDesc: '该地址还没有任何轮次质押。可以回到首页交易台，在当前轮质押窗口内参与。',
   colRound: '轮次',
   colState: '状态',
   colStaked: '质押量',
@@ -120,8 +131,8 @@ const ZH: MeDict = {
   totalsMode: '连接方式',
   riskTitle: '风险提示（必读）',
   risk: [
-    '本轮目标价为 P0 × 2^轮次；第 10 轮目标为初始参考价的 1024 倍。',
-    '观察期 48 小时 = 12 根 4 小时 K 线，至少 8 根 TWAP ≥ 目标价才算通过。',
+    '目标价按档位 P0 × 2^tier（tier = 1 + 已成功轮数，失败同档重试）；最高档为初始参考价的 1024 倍。',
+    '单轮 72 小时：{previewHours} 小时预告 → {stakeHours} 小时报名 → {observationHours} 小时观察（{candleCount} 根 {candleHours} 小时 K 线，至少 {need} 根 TWAP ≥ 目标价才算通过）。',
     '本轮价格考核失败时，本轮 7 亿枚奖励额度全部销毁。',
     '本轮价格考核失败时，本轮全部已接受质押本金 100% 销毁。',
     '预言机技术故障不按市场失败处理，不销毁质押本金。',
@@ -136,15 +147,15 @@ const ZH: MeDict = {
 };
 
 const EN: MeDict = {
-  lbl: 'My War',
-  title: 'My War',
+  lbl: 'My Stake',
+  title: 'My Stake',
   desc: 'Current-round stake, claimable principal and rewards, round history and cumulative record. The wallet is read-only and never sends a transaction.',
   connect: 'Connect wallet',
   demo: 'Use demo wallet',
   disconnect: 'Disconnect',
-  gateTitle: 'Connect a wallet to see your record',
+  gateTitle: 'Connect a wallet to see your stake',
   gateDesc: 'Connect a TON wallet (read-only) or use the demo wallet to see your current stake, claimables and history.',
-  gateHint: 'Only address and balance are read. No signature, no transfer. Stake and claim from the home command panel.',
+  gateHint: 'Only address and balance are read. No signature, no transfer. Stake and claim from the home trade desk.',
   demoNotice: 'Demo wallet: the address is generated locally or taken from demo data. All funds are simulated.',
   readonlyNotice: 'Read-only mode: no transactions are sent. Real staking and claiming open after contract deployment.',
   chainNotice: 'On-chain mode: contracts are configured. Stake and claim from the On-chain panel below (wallet signature required); this page only displays data.',
@@ -161,7 +172,7 @@ const EN: MeDict = {
   progress: 'Observation',
   qualifiedTarget: 'Pass line',
   noStakeThisRound: 'You have no stake in this round yet.',
-  goStake: 'Stake from the command panel',
+  goStake: 'Stake from the trade desk',
   claimTitle: 'Claimable',
   claimDesc: 'Principal and reward are claimed separately; idempotent',
   claimEmpty: 'Nothing to claim',
@@ -172,7 +183,7 @@ const EN: MeDict = {
   historyTitle: 'Round history',
   historyDesc: 'Every round you joined and the status of your funds',
   historyEmpty: 'No stakes yet',
-  historyEmptyDesc: 'This address has no stake in any round. Go back to the command panel and join during the staking window.',
+  historyEmptyDesc: 'This address has no stake in any round. Go back to the trade desk and join during the staking window.',
   colRound: 'Round',
   colState: 'Status',
   colStaked: 'Staked',
@@ -185,8 +196,8 @@ const EN: MeDict = {
   totalsMode: 'Connection',
   riskTitle: 'Risk disclosure (required reading)',
   risk: [
-    'Target price is P0 × 2^round; round 10 targets 1024× the initial reference price.',
-    'The observation window is 48 hours = twelve 4-hour candles; at least 8 must have TWAP ≥ target.',
+    'Target price follows the tier ladder P0 × 2^tier (tier = 1 + successful rounds; a failed round retries the same tier); the top tier is 1024× the initial reference price.',
+    'Each round is 72 hours: {previewHours}h preview → {stakeHours}h staking → {observationHours}h observation ({candleCount} × {candleHours}-hour candles; at least {need} must have TWAP ≥ target to pass).',
     'If this round fails the price test, its 700M reward budget is fully burned.',
     'If this round fails the price test, 100% of the principal accepted for this round is burned.',
     'Oracle technical failures are not treated as a market failure and never burn principal.',
@@ -310,9 +321,22 @@ function MeDashboard({
   const roundProgress = roundDetailQuery.data;
   const candlesSeen = roundProgress?.candlesSeen ?? currentRound?.candlesSeen ?? 0;
   const qualified = roundProgress?.qualifiedCandles ?? currentRound?.qualifiedCandles ?? 0;
-  const candleCount = config?.candleCount ?? 12;
-  const minQualified = config?.minQualifiedCandles ?? 8;
+  const candleCount = config?.candleCount ?? TIMING_FALLBACKS.candleCount;
+  const minQualified = config?.minQualifiedCandles ?? TIMING_FALLBACKS.minQualifiedCandles;
   const observedPct = Math.min(100, (candlesSeen / Math.max(1, candleCount)) * 100);
+  // 风险文案中的时间/根数一律来自 /api/config（V7：12h 预告 / 36h 报名 / 24h 观察 / 24 根 × 1h / 阈值 16）
+  const riskVars = useMemo(
+    () => ({
+      previewHours: hoursOf(config?.previewSeconds, TIMING_FALLBACKS.previewSeconds),
+      stakeHours: hoursOf(config?.stakeDurationSeconds, TIMING_FALLBACKS.stakeDurationSeconds),
+      observationHours: hoursOf(config?.observationSeconds, TIMING_FALLBACKS.observationSeconds),
+      candleHours: hoursOf(config?.candleSeconds, TIMING_FALLBACKS.candleSeconds),
+      candleCount: config?.candleCount ?? TIMING_FALLBACKS.candleCount,
+      need: config?.minQualifiedCandles ?? TIMING_FALLBACKS.minQualifiedCandles,
+    }),
+    [config],
+  );
+  const riskItems = useMemo(() => d.risk.map((item) => fillTemplate(item, riskVars)), [d.risk, riskVars]);
 
   return (
     <>
@@ -323,6 +347,7 @@ function MeDashboard({
         <div className="note-box ap-note">{d.readonlyNotice}</div>
       )}
       {chainMode ? <ChainMePanel address={address} demo={demo} /> : null}
+      <RewardReferralPanel address={address} demo={demo} />
 
       {meQuery.error && !meQuery.data ? <ErrorState error={meQuery.error} onRetry={meQuery.refresh} /> : null}
 
@@ -595,7 +620,7 @@ function MeDashboard({
       <section className="warn ap-risk ap-sec">
         <div className="ap-risk-title">{d.riskTitle}</div>
         <ul className="warn-list">
-          {d.risk.map((item) => (
+          {riskItems.map((item) => (
             <li key={item}>
               <span aria-hidden="true">▲</span>
               <span>{item}</span>
@@ -613,6 +638,10 @@ export default function MePage() {
   const d = useDict(ZH, EN);
   const c = COMMON[lang];
   const wallet = useWallet();
+  // V8 邀请：进入 /me 时捕获 ?ref= 邀请码（幂等，存 localStorage，供首次质押前 SetReferrer）
+  useEffect(() => {
+    captureInviteFromLocation();
+  }, []);
   // 未连接钱包时也探测后端，保证「无后端」有明确错误态而不是空白引导
   const healthQuery = useQuery(() => api.health(), [], { enabled: !wallet.connected, intervalMs: 8000 });
   // 链上模式：/api/config 下发了 roundController 合约地址（为空则保持演示模式）

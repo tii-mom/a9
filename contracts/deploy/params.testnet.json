@@ -1,5 +1,5 @@
 {
-  "$comment": "A9 Protocol V6.1 deployment parameter template. Values in raw units where noted; USD_E8 = USD * 1e8. Fill every <PLACEHOLDER> before deploying. Source of truth: docs/00 (V6.1), docs/04, docs/11.",
+  "$comment": "A9 Protocol V6.2 deployment parameter template (12h preview + 36h staking + 24h observation = 72h/round, 30 days for 10 rounds). Values in raw units where noted; USD_E8 = USD * 1e8. Fill every <PLACEHOLDER> before deploying. Candle/observation timing is V6.2; source of truth: docs/00 (current), docs/04, docs/11.",
   "network": "testnet",
   "token": {
     "name": "A9",
@@ -25,13 +25,15 @@
     "note": "target = max(P0 * 2^tier, 2 * opening 24h TWAP), locked at open; ladder R10 = 118784000 USD_E8"
   },
   "round": {
-    "previewSeconds": 86400,
-    "stakeDurationSeconds": 259200,
-    "observationSeconds": 259200,
-    "candleSeconds": 14400,
-    "candleCount": 18,
-    "minQualifiedCandles": 12,
-    "failureThreshold": "qualified < 12 after 18 candles => SETTLING_FAILURE"
+    "previewSeconds": 43200,
+    "stakeDurationSeconds": 129600,
+    "observationSeconds": 86400,
+    "candleSeconds": 3600,
+    "candleCount": 24,
+    "minQualifiedCandles": 16,
+    "failureThreshold": "qualified < 16 after 24 candles => SETTLING_FAILURE",
+    "singleRoundSeconds": 259200,
+    "tenRoundsSeconds": 2592000
   },
   "stakingLimits": {
     "minStakeRaw": "10000000000000",
@@ -72,5 +74,24 @@
     "6. admin TeamVault.InitController(roundController) (one-time)",
     "7. Fund RC Jetton Wallet with 7,000,000,000 A9; TeamVault Jetton Wallet with 1,200,000,000 A9",
     "8. Fund TON gas balances; admin OpenRound(round 1) with opening 24h TWAP"
-  ]
+  ],
+  "rewardV2": {
+    "version": "V8.0",
+    "streakBpsPerRound": 1000,
+    "streakMax": 10,
+    "referralBps": 2000,
+    "referralCap": "min(20% x referredStake, referrer ownStake)",
+    "rewardStates": [
+      "PENDING=0",
+      "ROLLED=1",
+      "EARLY=2"
+    ],
+    "earlyClaimRatio": "50%",
+    "rollPerAddressCapRaw": "20000000000000000",
+    "rollRoundCapRaw": "200000000000000000",
+    "unlockDurationSeconds": 31104000,
+    "unlockNote": "12 x 30 days linear after R10 terminal; early forfeit + pending rewards go to this pool",
+    "rounding": "reward = floor(700M * weight / totalWeight); dust stays in vault (no extra mint)",
+    "legacyClaimSemantics": "ClaimPrincipal 100%; ClaimReward/ClaimAll reward = 50% paid + 50% locked (EARLY) during ladder; after R10 unlock ClaimReward rejected"
+  }
 }

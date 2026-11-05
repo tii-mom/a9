@@ -12,22 +12,28 @@ interface Props {
   copy: LandingCopy;
 }
 
-/** 18 candles with exactly 12 qualified (the default demo verdict). */
-const SIM_DEFAULT = [1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1].map(Boolean);
+/** Default demo verdict: exactly "need" of "candleCount" candles qualified. */
+function defaultPattern(candleCount: number): boolean[] {
+  return Array.from({ length: candleCount }, (_, index) => index % 3 !== 0);
+}
 /** One candle short of the pass line. */
-const SIM_SHORT = SIM_DEFAULT.map((value, index) => (index === 4 ? false : value));
+function shortPattern(candleCount: number): boolean[] {
+  const base = defaultPattern(candleCount);
+  return base.map((value, index) => (index === 1 ? false : value));
+}
 
 type Preset = 'all' | 'need' | 'short' | 'none';
 
 export function RulesSandbox({ cfg, board, copy }: Props) {
   const { lang } = useLang();
-  const candleCount = cfg?.candleCount ?? 18;
-  const need = cfg?.minQualifiedCandles ?? 12;
-  const [sim, setSim] = useState<boolean[]>(SIM_DEFAULT);
+  const candleCount = cfg?.candleCount ?? 24;
+  const need = cfg?.minQualifiedCandles ?? 16;
+  const basePattern = defaultPattern(candleCount);
+  const [sim, setSim] = useState<boolean[] | null>(null);
   const [stakeText, setStakeText] = useState('100000');
   const decimals = cfg?.token.decimals ?? 9;
 
-  const cells = Array.from({ length: candleCount }, (_, index) => sim[index] ?? false);
+  const cells = sim !== null && sim.length === candleCount ? sim : basePattern;
   const count = cells.filter(Boolean).length;
   const win = count >= need;
   const stake = Math.max(0, Number(stakeText) || 0);
@@ -38,14 +44,15 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
 
   const applyPreset = (preset: Preset) => {
     if (preset === 'all') setSim(Array.from({ length: candleCount }, () => true));
-    else if (preset === 'need') setSim(SIM_DEFAULT.slice(0, candleCount));
-    else if (preset === 'short') setSim(SIM_SHORT.slice(0, candleCount));
+    else if (preset === 'need') setSim(defaultPattern(candleCount));
+    else if (preset === 'short') setSim(shortPattern(candleCount));
     else setSim(Array.from({ length: candleCount }, () => false));
   };
 
   const toggle = (index: number) => {
     setSim((prev) => {
-      const next = Array.from({ length: candleCount }, (_, i) => prev[i] ?? false);
+      const current = prev !== null && prev.length === candleCount ? prev : basePattern;
+      const next = current.slice();
       next[index] = !next[index];
       return next;
     });
@@ -189,7 +196,7 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
           {copy.rules.diff.map((item) => (
             <div key={item.title}>
               <h4>{item.title}</h4>
-              <p>{item.body}</p>
+              <p>{fill(item.body, { count: candleCount })}</p>
             </div>
           ))}
         </div>

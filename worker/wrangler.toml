@@ -30,6 +30,8 @@ DEMO_WALLET_BALANCE = "250000000000000"
 DEMO_AUTOPLAY = "true"
 # 演示质押窗口时长（秒）
 DEMO_STAKE_SECONDS = "900"
+# 演示「解锁中」展示时长（秒）：R10 终态后先展示 ClaimUnlocked 再重置演示
+DEMO_UNLOCK_SECONDS = "1800"
 # 结算后预告期（演示加速，用于展示"距离下一轮质押开始"倒计时）
 DEMO_PREVIEW_SECONDS = "90"
 ALLOWED_ORIGINS = "*"

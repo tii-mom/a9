@@ -1,34 +1,14 @@
 #!/usr/bin/env node
-/** deploy_all — 按 deployPlan 顺序串联执行部署脚本（默认 dry-run；EXECUTE 需显式确认）。 */
+/** deploy_all — 按 deployPlan 串联执行（默认 dry-run）。模式：whole=整体 deploy-emulation；jetton=Jetton 分步。 */
 
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { str } from './lib/cli.mjs';
 import { loadAndValidate } from './lib/config.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, dryRunBanner, summary } from './lib/log.mjs';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const execute = process.env.OPS_EXECUTE === '1';
-const only = str(process.argv.slice(2).reduce((acc, token, index, all) => {
-  if (token === '--from') acc.from = all[index + 1];
-  if (token.startsWith('--from=')) acc.from = token.slice('--from='.length);
-  if (token === '--to') acc.to = all[index + 1];
-  if (token.startsWith('--to=')) acc.to = token.slice('--to='.length);
-  return acc;
-}, {}), 'from');
-
-const { params, errors, digest } = loadAndValidate();
-if (errors.length) {
-  for (const message of errors) fail(message);
-  process.exit(1);
-}
-
-section('deploy_all：测试网部署编排');
-dryRunBanner(execute);
-kv('配置哈希', digest);
-kv('登记表', process.env.OPS_REGISTRY || 'ops/config/testnet.registry.json');
-
 const args = process.argv.slice(2);
 const getArg = (name) => {
   for (let i = 0; i < args.length; i++) {
@@ -37,15 +17,40 @@ const getArg = (name) => {
   }
   return null;
 };
+
+const mode = getArg('mode') || 'whole';
+if (!['whole', 'jetton'].includes(mode)) {
+  console.error('未知模式：' + mode + '（支持 whole / jetton）');
+  process.exit(1);
+}
 const from = getArg('from');
 const to = getArg('to');
-const plan = params.deployPlan.filter((item) => item.script !== 'deploy_all.mjs');
+const { params, errors, digest } = loadAndValidate();
+if (errors.length) {
+  for (const message of errors) fail(message);
+  process.exit(1);
+}
+
+section('deploy_all：测试网部署编排（V7）');
+dryRunBanner(execute);
+kv('模式', mode === 'whole' ? 'whole（15 整体部署 deploy-emulation）' : 'jetton（仅 Jetton 分步 10/11）');
+kv('配置哈希', digest);
+kv('登记表', process.env.OPS_REGISTRY || 'ops/config/testnet.registry.json');
+
+const plan = params.deployPlan.filter((item) => {
+  if (item.script === 'deploy_all.mjs') return false;
+  const modes = item.modes || ['whole'];
+  return modes.includes(mode);
+});
 let started = !from;
 const executed = [];
 const failed = [];
 
 section('部署顺序');
 table(['step', 'id', 'script', '依赖'], plan.map((item) => [item.step, item.id, item.script, (item.dependsOn || []).join(',')]));
+detail(mode === 'whole'
+  ? 'whole 模式：15 整体部署包含 JettonMaster → mint 100 亿（mint-once，admin 同笔置 null）→ TeamVault → RoundController → SetJettonWallet → InitController；随后 40/55/50/60/90。'
+  : 'jetton 模式：只跑 10/11（Jetton 分步部署与 mint-once）；TV/RC 与绑定请用 15 整体部署。');
 
 for (const item of plan) {
   if (!started) {
@@ -55,7 +60,7 @@ for (const item of plan) {
   const childArgs = [join(scriptsDir, item.script)];
   if (execute) childArgs.push('--execute');
   if (!execute && item.id === 'verify') childArgs.push('--offline');
-  if (item.id === 'funding' && !getArg('skip-allocations')) childArgs.push('--all');
+  if (item.id === 'funding') childArgs.push('--all');
   section('step ' + item.step + ' — ' + item.id);
   detail('node ' + childArgs.join(' '));
   const result = spawnSync(process.execPath, childArgs, { stdio: 'inherit', env: process.env });
@@ -80,6 +85,6 @@ for (const item of plan) {
 section('编排结果');
 kv('执行步骤', executed.join(', ') || '（无）');
 kv('失败步骤', failed.join(', ') || '（无）');
-if (failed.length === 0) ok(execute ? '部署编排完成；立即运行 verify_deployment.mjs 与 60 地址簿核对。' : 'dry-run 编排完成；未发任何链上消息。');
-const code = summary({ 模式: execute ? 'EXECUTE' : 'DRY-RUN', 配置哈希: digest });
-process.exit(code || failed.length ? (failed.length ? 1 : 0) : 0);
+if (failed.length === 0) ok(execute ? '部署编排完成；立即运行 verify_deployment.mjs 与 60 地址簿核对。' : 'dry-run 编排完成；未发任何链上消息、未改写登记表。');
+const code = summary({ 模式: execute ? 'EXECUTE' : 'DRY-RUN', 部署模式: mode, 配置哈希: digest });
+process.exit(failed.length ? 1 : (code || 0));

@@ -1,8 +1,8 @@
 # 04 — 单密钥托管与权限操作手册（含紧急暂停 / 技术终止演练）
 
-**版本**：V6.2 · 2026-11-05
+**版本**：V7（时间参数）· 2026-11-05
 **Owner**：testnet-ops
-**决策依据**：docs/00 V6.2（不设多签、单密钥 owner 最小权限、RC 不可升级、地址不公开）、docs/06 §8、docs/10 §9 风险登记册
+**决策依据**：docs/00（V7 时间参数；不设多签、单密钥 owner 最小权限、RC 不可升级、地址不公开）、docs/06 §8、docs/10 §9 风险登记册
 **适用范围**：测试网全阶段；主网沿用同一套流程（参数与地址不同）
 
 > **风险声明（必须知情）**：项目**不设多签、无时间锁、RoundController 不可升级**。单私钥丢失/泄露将导致对应资金损失或管理员能力被夺；营销/流动性/团队收款为**个人热钱包**且地址不公开，私钥泄露即直接损失。这些风险已由项目方书面接受（docs/00 §2.6、docs/10 §9），本手册只做缓解与演练，不改变风险归属。
@@ -100,7 +100,7 @@
 | SetJettonWallet（0x52540016） | RC/TV 部署后、InitController 前，一次性 | admin 写入 canonical Jetton Wallet；之后不可改 |
 | CloseStaking | 报名窗口内/触价 | 正常到点自动关；手动仅兜底 |
 | PauseOracle / ResumeOracle | 数据故障/恢复 | 暂停不判负、不销毁 |
-| FinalizeRound | 18 根齐备/条件满足 | 必要时触发；正常任何人可触发 |
+| FinalizeRound | 24 根齐备/条件满足 | 必要时触发；正常任何人可触发 |
 | AbortTechnical | 连续暂停 14 天或观察超时 7 天 | 任何人可触发；owner 不独占 |
 
 ### 5.2 绝对禁止（合约层拒绝或不应存在）
@@ -150,11 +150,11 @@ node ops/scripts/80_admin_ops.mjs --action pause-oracle --round <N> --reason <co
 
 4. 核对：轮次状态 ORACLE_PAUSED；记录 pausedAt、最后有效 K 线、原因。
 5. 发布 pause 公告（05 手册）；启动 14 天计时。
-6. 恢复：确认数据源稳定后 resume-oracle；恢复后重收 18 根；发 resume 公告。
+6. 恢复：确认数据源稳定后 resume-oracle；恢复后重收 24 根（1h K 线）；发 resume 公告。
 
 ### 6.3 关窗 / 结算
 
-- 正常到点自动关窗/结算；仅在逾期或 keeper 故障时由 owner 兜底，且必须先确认窗口/18 根数据条件。
+- 正常到点自动关窗/结算；仅在逾期或 keeper 故障时由 owner 兜底，且必须先确认窗口/24 根数据条件。
 - 失败结算必须确认三笔 burn 全部 BurnAck 后才可对外公告；不得手工把状态改为 FAILED_PERMANENT。
 
 ### 6.4 开轮（R1 必须手动，R2~R10 自动）
@@ -190,7 +190,7 @@ node ops/scripts/80_admin_ops.mjs --action pause-oracle --round <N> --reason <co
 4. **核对（≤15 分钟）**：链上状态、最后交易、K 线/质押快照；截图与哈希归档。
 5. **公告（≤30 分钟）**：pause 模板；说明“已暂停、不判负、不销毁、退款条件”，不猜测原因/不承诺时间。
 6. **止损与定位**：隔离数据源/keeper；对比对账；与审计/合约负责人评估。
-7. **恢复**：满足条件后 resume；重收 18 根；发 resume 公告；复盘。
+7. **恢复**：满足条件后 resume；重收 24 根；发 resume 公告；复盘。
 8. **如果暂停无法缓解资金风险**：进入技术终止评估（§8）或紧急公告 + 前端下线；不得隐瞒。
 
 **禁止**：暂停期间结算/销毁；用暂停掩盖市场失败；未经双人确认操作。
@@ -324,4 +324,4 @@ node ops/scripts/80_admin_ops.mjs --action abort-technical --round <N>
 
 ---
 
-*本手册与 ops/scripts/70_bind_roles.mjs、80_admin_ops.mjs 及 docs/00 V6.2 权限口径一致；任何变更需 Lead 批准并更新版本。*
+*本手册与 ops/scripts/70_bind_roles.mjs、80_admin_ops.mjs 及 docs/00 权限口径一致；任何变更需 Lead 批准并更新版本。*

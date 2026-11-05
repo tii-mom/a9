@@ -1,4 +1,4 @@
-/* 链上交易面板（「我的战况」页） */
+/* 链上交易面板（「我的质押」页） */
 
 .chain-panel { margin-top: 18px; }
 .chain-head-meta { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
@@ -75,3 +75,59 @@
   .chain-input input { font-size: 16px; }
   .chain-sec-h { align-items: flex-start; flex-direction: column; gap: 4px; }
 }
+
+/* ---------- V8 奖励三态 / 邀请 ---------- */
+.reward-panel,
+.referral-panel { margin-top: 18px; }
+.reward-warning { border: 1px solid #6b2a10; background: linear-gradient(rgba(255, 91, 31, .08), rgba(255, 91, 31, .02)); color: var(--text); padding: 10px 12px; font-weight: 700; font-size: 13px; line-height: 1.55; margin: 4px 0 12px; }
+.reward-list { display: grid; gap: 10px; }
+.reward-row { border: 1px solid var(--line); background: var(--panel-2); padding: 12px; }
+.reward-row.settled { opacity: .92; }
+.reward-row-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.reward-row-h > b { font: 800 16px var(--f-disp); letter-spacing: .02em; }
+.reward-state { font: 600 11px var(--f-mono); letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--line-2); color: var(--text-2); }
+.reward-state.pending { color: var(--ember); border-color: #5a3f12; background: rgba(255, 182, 61, .07); }
+.reward-state.rolled { color: var(--fire); border-color: #6b2a10; background: rgba(255, 91, 31, .08); }
+.reward-state.early { color: var(--pass); border-color: #1d4a35; background: rgba(61, 220, 151, .08); }
+.reward-amount { margin-left: auto; font: 600 16px var(--f-mono); font-variant-numeric: tabular-nums; }
+.reward-amount small { color: var(--muted); font: 500 11px var(--f-mono); }
+.reward-meta { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12px; color: var(--text-2); }
+.reward-meta b { font-family: var(--f-mono); color: var(--text); }
+.reward-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.reward-btn { text-align: left; border: 1px solid var(--line-2); background: var(--bg-2); padding: 8px 10px; display: grid; gap: 3px; border-radius: 2px; }
+.reward-btn b { font: 700 13px var(--f-body); }
+.reward-btn small { font: 500 10px/1.4 var(--f-mono); color: var(--muted); overflow-wrap: anywhere; }
+.reward-btn:hover:not(:disabled) { border-color: var(--fire); }
+.reward-btn.active { border-color: var(--fire); background: rgba(255, 91, 31, .08); }
+.reward-btn:disabled { opacity: .45; cursor: not-allowed; }
+.reward-hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
+.reward-unlock { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.reward-unlock-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.reward-bar { height: 8px; background: var(--bg-2); border: 1px solid var(--line-2); margin: 8px 0 6px; }
+.reward-bar i { display: block; height: 100%; background: var(--pass); }
+.reward-unlock-meta { display: flex; gap: 10px 18px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); font-family: var(--f-mono); }
+.chain-net.active { color: var(--pass); border-color: #1d4a35; background: rgba(61, 220, 151, .07); }
+.invite-copy-grid { display: grid; gap: 8px; }
+.invite-copy-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.invite-copy-row code { font: 12px var(--f-mono); color: var(--text); background: var(--bg-2); border: 1px solid var(--line); padding: 4px 8px; overflow-wrap: anywhere; }
+.invite-bind { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
+.invite-bound,
+.invite-pending,
+.invite-manual { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.invite-pending { display: grid; gap: 6px; justify-items: start; }
+.invite-pending code,
+.invite-bound code { font: 12px var(--f-mono); color: var(--text); }
+.invite-lock { font-size: 12px; color: var(--pass); }
+.invite-input { display: flex; gap: 8px; flex: 1; min-width: 220px; }
+.invite-input input { flex: 1; min-width: 0; background: #0c0907; border: 1px solid var(--line-2); color: var(--text); padding: 8px 10px; font: 12px var(--f-mono); }
+.invite-input input::placeholder { color: #5c5145; }
+.invite-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.invite-stats .wide { grid-column: 1 / -1; }
+.invite-stats > div { display: grid; gap: 3px; }
+.invite-stats b { font: 600 13px var(--f-mono); color: var(--text); overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .reward-actions { grid-template-columns: 1fr; }
+  .reward-amount { width: 100%; margin-left: 0; }
+  .invite-input { min-width: 0; width: 100%; }
+}
+

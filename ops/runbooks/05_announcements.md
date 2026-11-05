@@ -1,10 +1,10 @@
 # 05 — A9 公告与沟通手册（六类 / 七模板）
 
-**版本**：V6.2 · 2026-11-05
+**版本**：V7（时间参数）· 2026-11-05
 **Owner**：testnet-ops（Comms 执行）
 **模板库**：ops/templates/announcements.json
 **渲染脚本**：ops/scripts/announcement.mjs
-**权威口径**：docs/00 V6.2、02_round_operations.md、03_monitoring_alerting.md
+**权威口径**：docs/00（V7 时间参数）、02_round_operations.md、03_monitoring_alerting.md
 
 ---
 
@@ -30,7 +30,7 @@
 | 3 | 成功 | success | 判定成功、三笔核对后 | 达标数、目标价、奖励、团队释放、领取方式 | Lead |
 | 4 | 失败 | fail | 判定失败、三笔 burn 确认后 | 达标数、三笔销毁、合计、永久关闭、同档重试 | Lead + 财务核对 |
 | 5 | 暂停 | pause | 进入 ORACLE_PAUSED | 暂停时间、原因、不判负/不销毁、退款条件 | Lead + 合约负责人 |
-| 6 | 恢复 | resume | 恢复观察 | 恢复时间、重收 18 根、目标价不变 | Lead |
+| 6 | 恢复 | resume | 恢复观察 | 恢复时间、重收 24 根（1h K 线）、目标价不变 | Lead |
 | 7 | 技术终止 | abort | TECHNICAL_ABORTED | 原因、100% 退款、不销毁、档位不变 | Lead + 项目方 |
 
 > 六类 = 开轮 / 报名截止 / 成功 / 失败 / 暂停恢复 / 技术终止；“暂停”和“恢复”拆成两个模板，故共 7 个模板。
@@ -90,7 +90,7 @@ node ops/scripts/announcement.mjs --type abort --round 2 --lang both --data abor
   "burnedPrincipalRaw": "241500000000000000",
   "burnedTotalRaw": "1061500000000000000",
   "nextRoundId": 3,
-  "closeReason": "72 小时报名窗口到期正常关闭"
+  "closeReason": "36 小时报名窗口到期正常关闭"
 }
 ~~~
 
@@ -122,7 +122,7 @@ node ops/scripts/announcement.mjs --type abort --round 2 --lang both --data abor
 | --- | --- | --- | --- |
 | 首次响应 | 发现后 30 分钟内 | 已发现、已暂停/隔离、不影响/影响范围、下一次更新时间 | pause / 临时声明 |
 | 进展更新 | 每 60 分钟（P0） | 已确认事实、已采取措施、待确认事项 | 临时声明 |
-| 恢复 | 恢复后 30 分钟内 | 恢复时间、影响、重收 18 根、目标价不变 | resume |
+| 恢复 | 恢复后 30 分钟内 | 恢复时间、影响、重收 24 根（1h K 线）、目标价不变 | resume |
 | 终止 | 条件满足并执行后 30 分钟内 | 原因、100% 退款、不销毁、档位不变 | abort |
 | 复盘 | P0/P1 24h 内 | 时间线、根因、影响、改进 | 官网长文/线程 |
 

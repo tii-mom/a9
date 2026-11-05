@@ -1,7 +1,7 @@
 {
-  "name": "A9 引信协议",
+  "name": "A9",
   "short_name": "A9",
-  "description": "TON 价格驱动型代币 · 12 根 K 线判定",
+  "description": "押多少你定，赌 72 小时内至少翻倍。赢了拿 7 亿枚，输了归零。",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0A0807",

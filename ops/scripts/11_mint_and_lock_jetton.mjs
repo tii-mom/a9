@@ -34,18 +34,19 @@ if (!master) {
   process.exit(finish({ 模式: 'DRY-RUN（未部署）' }));
 }
 if (!treasury && execute) {
-  fail('缺少 treasury 地址（--treasury / TON_TREASURY_ADDRESS / 登记表）');
+  fail('缺少 treasury 地址（TON_TREASURY_ADDRESS / 登记表 / 位置参数）');
   process.exit(finish());
 }
 
 const rendered = substitute(commandTemplate(params, 'mintAndLockJetton'), {
   contractsDir: params.toolchain.contractsDir,
+  master,
   treasury,
   totalSupplyRaw: params.token.totalSupplyRaw,
 });
 section('执行计划');
 detail('命令：' + rendered);
-detail('安全要求：mint 与关闭 mint 必须在同一部署窗口完成；关闭后不可再增发。');
+detail('安全要求：mint-once（op 0x00000015，金额 1e19）与 admin 置 null 必须同一笔交易完成；二次 mint 报 MintClosed(75)。');
 
 const result = runCommand(rendered, { execute });
 if (execute) {
@@ -75,7 +76,8 @@ if (execute) {
 }
 
 printNextSteps([
-  '下一步：node scripts/20_deploy_teamvault.mjs（TeamVault 以 controller=null 部署，稍后由 70 步骤 InitController）',
+  '分步 Jetton 仅用于组建测试；完整测试网部署走整体脚本：node scripts/15_deploy_contracts.mjs（acton deploy-emulation）。',
+  'burn_notification 标准 op 为 0x7bdd97de（旧别名 0x7bcdefa0 也接受）；链上对账按 0x7bdd97de 过滤。',
   '分配转账在 50_fund_vaults.mjs --all 统一执行；在此之前不要手工转出代币，避免账本对不上。',
 ]);
 process.exit(finish({ 模式: execute ? 'EXECUTE' : 'DRY-RUN' }));

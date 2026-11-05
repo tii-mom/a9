@@ -1,6 +1,6 @@
 # 03 — A9 测试网监控与告警方案
 
-**版本**：V6.2 · 2026-11-05
+**版本**：V7（时间参数）· 2026-11-05
 **Owner**：testnet-ops
 **关联**：ops/scripts/monitor_check.mjs、reconcile.mjs；04_key_custody_admin.md（操作与演练）；02_round_operations.md（轮次 SOP）
 
@@ -59,7 +59,7 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 | --- | --- | --- | --- | --- |
 | monitor.cron.heartbeat | Worker 心跳/更新时间 | API | > 5 min | 检查 cron/手动 tick；页面可能停更 |
 | monitor.roundN.candle_missing | 应见 K 线 - 已见 K 线 | API/链上 | > 1 根 | keeper 补提交；连续缺 2 根发暂停公告 |
-| monitor.roundN.finalize_overdue | 观察结束 1h 后仍 OBSERVING | API | > 1h | 触发/催促结算；18 根齐备后 <12 即失败（无中间态） |
+| monitor.roundN.finalize_overdue | 观察结束 1h 后仍 OBSERVING | API | > 1h | 触发/催促结算；24 根齐备后 ≥16 成功、≤15 失败（无中间态） |
 | monitor.round1.open_overdue | 部署完成后 1h 仍未开 R1 | 链上 | R1 无 PREVIEW，需 admin OpenRound | 检查 SetJettonWallet/InitController/TON gas；双人开轮 |
 | monitor.roundN.close_overdue | 报名截止 1h 后仍 STAKING_OPEN | API | > 1h | 检查关窗交易；必要时 owner 手动关窗（双人） |
 | monitor.oracle.paused | 预言机暂停/离线 | API/链上 | true | 发 pause 公告；定位数据源；计时 14 天 |
@@ -88,7 +88,7 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 - 触发暂停：数据缺失/来源不足/签名或时间戳异常/合约异常（docs/03 §10）。
 - **暂停不判负、不销毁、不计未达标**；暂停期间禁止结算。
 - 连续暂停 14 天 → 技术终止条件（见 04 手册 tech-abort），任何人可触发。
-- 恢复后重收完整 18 根，不缩短窗口。
+- 恢复后重收完整 24 根（1h K 线），不缩短窗口。
 - 暂停/恢复均为 owner 操作（双人），但**不改变目标价**；公告必须写明这一点。
 
 <a id="reconcile"></a>
@@ -140,7 +140,7 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 模板：ops/templates/shift-schedule.csv。
 
 - 班次：日班 08:00–20:00 UTC，夜班 20:00–08:00 UTC；每班 1 主 + 1 备。
-- 观察期（72h）与结算窗口必须 7×24 覆盖；报名期可降为 12h 覆盖但保持 30 分钟响应。
+- 观察期（24h）与结算窗口必须 7×24 覆盖；报名期（36h）可降为 12h 覆盖但保持 30 分钟响应。
 - 每班交接内容：轮次状态、K 线进度、最近告警、未确认动作、公告排期、待办操作。
 - 值班人不得单独执行 owner 写操作（见 04 手册双人规则）。
 - 连续值班不超过 12h；夜班后至少 12h 休息。
@@ -246,9 +246,9 @@ WantedBy=timers.target
 
 ## 12. 与合约实现的对应口径
 
-- 18 根齐备后 <12 即失败（无 7~11 中间态）；监控以链上 RoundView/Settled 事件为准。
+- 24 根齐备后 ≥16 成功、≤15 失败（无中间态）；监控以链上 RoundView/Settled 事件为准。
 - RC 只有一个 Jetton Wallet（本金+奖励），不存在独立 StakingVault/RewardVault；监控余额只查 RC/TV 两个 Jetton Wallet。
-- 测试网 BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）：监控需记录 ack 发送者，主网前必须替换为受审计方案。
+- 测试网 BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）：监控需记录 ack 发送者，主网前必须替换为受审计方案。burn_notification 标准 op=0x7bdd97de（旧别名 0x7bcdefa0 也接受），索引/对账按标准 op 过滤。
 - 晚开窗兜底会使 stakeOpenAt 重锚：监控三倒计时；若发现异常重锚，立即公告并复盘。
 
 ---

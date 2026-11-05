@@ -14,7 +14,7 @@
 | 5 | stakerCount | 本轮唯一质押地址数 | 链上 stakes 字典 / API | Ops | 与排行榜一致 |
 | 6 | avgStakeA9 | stakeTotal / stakerCount | 计算 | Ops | — |
 | 7 | top1ShareBps | 最大地址质押占比（bps） | 链上 stake + 计算 | Ops | ≤ 1000 bps（单地址上限） |
-| 8 | qualifiedCandles | 达标 K 线数（0..18） | 链上 RoundView | Ops | ≥12 成功 / ≤6 失败（18 根齐备） |
+| 8 | qualifiedCandles | 达标 K 线数（0..24） | 链上 RoundView | Ops | ≥16 成功 / ≤15 失败（24 根齐备，V7） |
 | 9 | result | SUCCESS / FAILURE / TECHNICAL_ABORT / 进行中 | 链上 RoundView.status | Ops | 与公告一致 |
 | 10 | rewardUnlockedA9 | 成功解锁奖励（7 亿） | 链上结算事件 | Ops/财务 | 成功轮必为 7 亿 |
 | 11 | rewardClaimedA9 | 已领取奖励合计 | 链上 ClaimReward/ClaimAll | 财务 | ≤ 7 亿（余数留金库） |

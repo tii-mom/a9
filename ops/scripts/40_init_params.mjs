@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { flag, str } from './lib/cli.mjs';
 import { RECORDS_DIR, writeJSON } from './lib/config.mjs';
 import { bootstrap, finish, printProtocolConfigExpected, printNextSteps, resolveContractAddress } from './lib/step.mjs';
-import { commandTemplate, runCommand, substitute } from './lib/toolchain.mjs';
+import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
@@ -50,7 +50,7 @@ if (!controller) {
   process.exit(finish({ 模式: 'DRY-RUN（未部署）', 快照: snapshotFile }));
 }
 
-if (execute) {
+if (execute && hasCommand(params, 'initParams')) {
   const rendered = substitute(commandTemplate(params, 'initParams'), {
     contractsDir: params.toolchain.contractsDir,
     initDataFile: join(RECORDS_DIR, 'round-controller.init.json'),
@@ -62,6 +62,8 @@ if (execute) {
     process.exit(finish());
   }
   ok('参数初始化命令执行完成');
+} else if (execute) {
+  warn('整体部署已完成 RC 初始化；本步骤只做链上参数校验，不发送初始化交易');
 }
 
 if (!online) {

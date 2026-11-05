@@ -9,23 +9,36 @@ import { sendTonConnectTransaction } from '../wallet';
 import { parseTonAddress, toRawAddress } from './address';
 import type { ChainConfig } from './config';
 import { explorerTxUrl } from './config';
-import { decodeClaimMessage, decodeJettonNotification } from './decode';
+import { decodeClaimMessage, decodeJettonNotification, decodeUserAction } from './decode';
 import { ChainError, chainError, toChainError } from './errors';
 import { RECEIPT_POLL_INTERVAL_MS, RECEIPT_TIMEOUT_MS } from './protocol';
 import { resolveJettonWalletAddress, waitForTransaction } from './rpc';
 import { saveChainTx, type StoredChainTx } from './storage';
 import {
   prepareClaimTransaction,
+  prepareClaimUnlockedTransaction,
+  prepareRewardActionTransaction,
+  prepareSetReferrerTransaction,
   prepareStakeTransaction,
   validateClaim,
+  validateRewardAction,
   validateStake,
   type ClaimKind,
   type PreparedTx,
+  type RewardActionKind,
   type TonConnectTxRequest,
   type WalletContext,
 } from './transactions';
 
-export type ChainTxKind = 'stake' | 'claimPrincipal' | 'claimReward' | 'claimAll';
+export type ChainTxKind =
+  | 'stake'
+  | 'claimPrincipal'
+  | 'claimReward'
+  | 'claimAll'
+  | 'claimRewardEarly'
+  | 'rollReward'
+  | 'setReferrer'
+  | 'claimUnlocked';
 
 export type ChainTxPhase =
   | 'idle'
@@ -91,11 +104,26 @@ interface RunContext {
   match: (tx: import('./rpc').OnchainTx) => boolean;
 }
 
+export interface SubmitRewardActionParams {
+  kind: RewardActionKind;
+  roundId: number;
+}
+
+export interface SubmitReferrerParams {
+  referrer: string;
+}
+
 export interface UseChainTx {
   state: ChainTxState;
   busy: boolean;
   submitStake: (params: SubmitStakeParams) => Promise<ChainTxResult | null>;
   submitClaim: (params: SubmitClaimParams) => Promise<ChainTxResult | null>;
+  /** V8：早领 50% / 滚存 */
+  submitRewardAction: (params: SubmitRewardActionParams) => Promise<ChainTxResult | null>;
+  /** V8：首次质押前绑定邀请人（一次性） */
+  submitSetReferrer: (params: SubmitReferrerParams) => Promise<ChainTxResult | null>;
+  /** V8：R10 终态后领取解锁池 */
+  submitClaimUnlocked: () => Promise<ChainTxResult | null>;
   reset: () => void;
 }
 
@@ -104,6 +132,10 @@ const KIND_LABEL: Record<ChainTxKind, string> = {
   claimPrincipal: '领取本金',
   claimReward: '领取奖励',
   claimAll: '合并领取',
+  claimRewardEarly: '早领 50%',
+  rollReward: '滚存奖励',
+  setReferrer: '绑定邀请人',
+  claimUnlocked: '领取解锁',
 };
 
 export function useChainTx(options: ChainTxOptions): UseChainTx {
@@ -299,6 +331,67 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     [begin],
   );
 
+  const submitRewardAction = useCallback(
+    async (params: SubmitRewardActionParams) => {
+      const { chain, wallet } = optionsRef.current;
+      return begin(params.kind, { roundId: params.roundId }, async () => {
+        validateRewardAction({ chain, wallet });
+        const prepared = prepareRewardActionTransaction({
+          chain,
+          wallet,
+          kind: params.kind,
+          roundId: params.roundId,
+        });
+        const expectedOp = prepared.meta.opcode;
+        const expectedRound = params.roundId;
+        const userRaw = toRawAddress(parseTonAddress(wallet.address));
+        const match = (tx: import('./rpc').OnchainTx): boolean => {
+          if (!tx.inSource || tx.inSource !== userRaw) return false;
+          const message = decodeUserAction(tx.inBody);
+          return !!message && message.op === expectedOp && message.roundId === expectedRound;
+        };
+        return { kind: params.kind, prepared, match } satisfies RunContext;
+      });
+    },
+    [begin],
+  );
+
+  const submitSetReferrer = useCallback(
+    async (params: SubmitReferrerParams) => {
+      const { chain, wallet } = optionsRef.current;
+      return begin('setReferrer', {}, async () => {
+        validateRewardAction({ chain, wallet });
+        const prepared = prepareSetReferrerTransaction({ chain, wallet, referrer: params.referrer });
+        const userRaw = toRawAddress(parseTonAddress(wallet.address));
+        const referrerRaw = prepared.meta.referrer;
+        const match = (tx: import('./rpc').OnchainTx): boolean => {
+          if (!tx.inSource || tx.inSource !== userRaw) return false;
+          const message = decodeUserAction(tx.inBody);
+          if (!message || message.op !== prepared.meta.opcode) return false;
+          if (!referrerRaw) return true;
+          return !!message.referrer && toRawAddress(message.referrer) === referrerRaw;
+        };
+        return { kind: 'setReferrer', prepared, match } satisfies RunContext;
+      });
+    },
+    [begin],
+  );
+
+  const submitClaimUnlocked = useCallback(async () => {
+    const { chain, wallet } = optionsRef.current;
+    return begin('claimUnlocked', {}, async () => {
+      validateRewardAction({ chain, wallet });
+      const prepared = prepareClaimUnlockedTransaction({ chain, wallet });
+      const userRaw = toRawAddress(parseTonAddress(wallet.address));
+      const match = (tx: import('./rpc').OnchainTx): boolean => {
+        if (!tx.inSource || tx.inSource !== userRaw) return false;
+        const message = decodeUserAction(tx.inBody);
+        return !!message && message.op === prepared.meta.opcode;
+      };
+      return { kind: 'claimUnlocked', prepared, match } satisfies RunContext;
+    });
+  }, [begin]);
+
   const reset = useCallback(() => {
     abortRef.current?.abort();
     setState(INITIAL);
@@ -307,7 +400,16 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
   const busy =
     state.phase === 'preparing' || state.phase === 'awaiting-signature' || state.phase === 'sent' || state.phase === 'confirming';
 
-  return { state, busy, submitStake, submitClaim, reset };
+  return {
+    state,
+    busy,
+    submitStake,
+    submitClaim,
+    submitRewardAction,
+    submitSetReferrer,
+    submitClaimUnlocked,
+    reset,
+  };
 }
 
 /** 交易阶段的本地化 key（i18n 用）。 */

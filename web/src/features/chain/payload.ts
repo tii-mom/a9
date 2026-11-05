@@ -85,9 +85,40 @@ export interface ClaimPayloadParams {
   roundId: number;
 }
 
-/** 领取（ClaimPrincipal / ClaimReward / ClaimAll）消息体。 */
+/**
+ * 单轮操作消息体：op:uint32 | queryId:uint64 | roundId:uint8（104 bit）。
+ * 适用：ClaimPrincipal 0x52540006 / ClaimReward 0x52540007 / ClaimAll 0x5254000E（roundId=0）
+ *       / V8 ClaimRewardEarly 0x52540017 / V8 RollReward 0x52540018。
+ */
 export function buildClaimPayloadCell(params: ClaimPayloadParams): ChainCell {
   const roundId = Number(params.roundId);
   if (!Number.isInteger(roundId) || roundId < 0 || roundId > 255) throw new Error('roundId 非法: ' + params.roundId);
   return beginCell().writeUint(params.op, 32).writeUint(params.queryId, 64).writeUint(roundId, 8).end();
 }
+
+/** V8 ClaimRewardEarly（0x52540017）：op:uint32 | queryId:uint64 | roundId:uint8（104 bit）。 */
+export function buildClaimRewardEarlyCell(queryId: bigint | number | string, roundId: number): ChainCell {
+  return buildClaimPayloadCell({ op: 0x52540017, queryId, roundId });
+}
+
+/** V8 RollReward（0x52540018）：op:uint32 | queryId:uint64 | roundId:uint8（104 bit）。 */
+export function buildRollRewardCell(queryId: bigint | number | string, roundId: number): ChainCell {
+  return buildClaimPayloadCell({ op: 0x52540018, queryId, roundId });
+}
+
+/** V8 SetReferrer（0x52540019）：op:uint32 | referrer:MsgAddress（299 bit，一次性、不可改）。 */
+export function buildSetReferrerCell(referrer: TonAddress): ChainCell {
+  return beginCell().writeUint(0x52540019, 32).writeAddress(referrer).end();
+}
+
+/** V8 ClaimUnlocked（0x5254001A）：op:uint32 | queryId:uint64（96 bit，R10 终态后线性解锁）。 */
+export function buildUnlockCell(queryId: bigint | number | string): ChainCell {
+  return beginCell().writeUint(0x5254001a, 32).writeUint(queryId, 64).end();
+}
+
+/** 别名（与合约 ABI 名称一致）。 */
+export const buildClaimRewardEarly = buildClaimRewardEarlyCell;
+export const buildRollReward = buildRollRewardCell;
+export const buildSetReferrer = buildSetReferrerCell;
+export const buildClaimUnlocked = buildUnlockCell;
+export const buildClaimUnlockedCell = buildUnlockCell;

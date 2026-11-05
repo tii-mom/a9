@@ -2,8 +2,8 @@
 /** 70 — 角色绑定：TeamVault.InitController(roundController) 一次性调用，并记录绑定关系。 */
 
 import { flag, requireConfirm } from './lib/cli.mjs';
-import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
-import { commandTemplate, runCommand, substitute } from './lib/toolchain.mjs';
+import { bootstrap, finish, printNextSteps, resolveAddress, resolveContractAddress, signerWallet } from './lib/step.mjs';
+import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { writeRegistry } from './lib/registry.mjs';
 import { addressEquals } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, detail } from './lib/log.mjs';
@@ -14,10 +14,11 @@ const { args, execute, params, registry } = bootstrap({
   dependsOn: ['jettonWallets', 'params'],
 });
 
-const teamVault = resolveContractAddress(registry, 'teamVault');
-const controller = resolveContractAddress(registry, 'roundController');
+const teamVault = resolveAddress(registry, params, 'teamVault', 'team-vault.addr');
+const controller = resolveAddress(registry, params, 'roundController', 'round-controller.addr');
 const rcWallet = resolveContractAddress(registry, 'roundControllerJettonWallet');
 const tvWallet = resolveContractAddress(registry, 'teamVaultJettonWallet');
+const signer = signerWallet(params);
 const registeredBinding = registry.bindings.teamVaultAcceptsOnly;
 const markBoundOnly = flag(args, 'mark-bound-only');
 
@@ -68,8 +69,18 @@ detail('InitController 只能由 TeamVault.admin 调用一次；controller 一�
 detail('执行前必须双人核对：TeamVault 地址、RoundController 地址、admin 钱包来源。');
 if (execute) requireConfirm('TeamVault.InitController（不可逆绑定）');
 
+if (!hasCommand(params, 'bindRoles')) {
+  if (execute) {
+    fail('缺少 bindRoles 命令模板（检查 config/testnet.params.json toolchain.commands）；或已由整体部署完成 InitController，用 --mark-bound-only 记录绑定');
+    process.exit(finish());
+  }
+  info('整体部署已包含 InitController；本步骤只做绑定记录（--mark-bound-only）与人工核对');
+  process.exit(finish({ 模式: 'DRY-RUN（整体部署路径）' }));
+}
+
 const rendered = substitute(commandTemplate(params, 'bindRoles'), {
   contractsDir: params.toolchain.contractsDir,
+  signerWallet: signer,
   teamVault,
   roundController: controller,
 });

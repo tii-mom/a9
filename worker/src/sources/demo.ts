@@ -14,13 +14,15 @@ import type { MarketSource } from './types';
 
 /** 每轮演示用的达标 K 线下标（R1 10/12 成功、R2 6/12 失败、R3+ 9/12 成功）。 */
 const QUALIFIED_PATTERN: Record<number, number[]> = {
-  1: [0, 1, 2, 4, 5, 6, 7, 9, 10, 11],
-  2: [0, 1, 3, 5, 8, 10],
+  // 24 根：R1 20 根达标（成功）、R2 12 根达标（失败）
+  1: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19],
+  2: [0,2,4,6,8,10,12,14,16,18,20,22],
 };
 /**
- * R3+ 默认模式：前 6 根 4 达标 / 2 未达标（与原型「4 hit · 2 miss」一致），12 根合计 9 根达标 → 成功。
+ * R3+ 默认模式：前 12 根 8 根达标（与 seed 一致），后 12 根再补 9 根 → 共 17/24 达标（成功），
+ * 用于演示「观察期继续推进后可能通过」。
  */
-const DEFAULT_PATTERN = [0, 1, 2, 4, 6, 7, 8, 10, 11];
+const DEFAULT_PATTERN = [0,1,2,4,6,7,8,10,12,13,14,15,16,17,18,19,20];
 
 function patternFor(roundId: number): number[] {
   return QUALIFIED_PATTERN[roundId] ?? DEFAULT_PATTERN;

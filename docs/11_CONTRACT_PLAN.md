@@ -1,6 +1,6 @@
 # 11 — 合约技术方案：语言、清单与官方复用策略
 
-**版本**：V6.1 · 2026-11-05
+**版本**：V7.0 · 2026-11-05
 **关联**：[docs/00_DECISIONS_V2.md](00_DECISIONS_V2.md)（V5 口径）、[docs/04_CONTRACT_ABI.md](04_CONTRACT_ABI.md)（接口）、[docs/06_DEPLOYMENT.md](06_DEPLOYMENT.md)（部署）
 
 ---
@@ -14,6 +14,13 @@
 | **Tact** | 高层合约语言（TS 风格） | 开发快、可读性好 | 编译器生成代码面更大、审计需看生成代码 | ⚠️ 备选，不推荐用于资金核心逻辑 |
 
 **推荐组合**：官方 Jetton 用 FunC 原样复用（不改一行）+ 自研 RoundController / TeamVault 用 Tolk 编写。消息 cell 交互，语言不同不影响互操作。
+
+> **V7 实施偏差（已落地，2026-11-05）**：本项目工具链只有 Acton/Tolk（无 FunC 编译器），因此 Jetton Master / Wallet **改为用 Tolk 复刻**，骨架取自 Acton 官方 jetton 模板（messages / storage / errors / jetton-utils / fees-management / sharding），语义对齐 TEP-74：
+> - mint：op `0x15`，仅 admin、金额必须 1e19、只允许一次，同一笔交易 `admin=null`（mintable=false），二次 mint 报 `MintClosed(75)`；
+> - transfer `0x0F8A7EA5` / internal_transfer `0x178D4519` / burn `0x595F07BC` / burn_notification `0x7bdd97de` / provide_wallet_address `0x2FCC2E05`；
+> - forward_payload 原样透传（136-bit StakePayload 形状做 hash 级断言）；错误码对齐 TEP-74（47/48/49/72/73/74/333）+ A9 mint 补充（75/76/77）；
+> - 代码 `contracts/contracts/jetton/`；测试 `contracts/tests/jetton.test.tolk`（18 例）；全量 **65 测试通过**；code hash `JettonMaster 0xAA7BC0B3…740C` / `JettonWallet 0x068E64CF…7D53`；
+> - 审计影响：Jetton 从「官方复用（免审）」变为「自研复刻（需审）」，审计范围 +2 个合约，见 §5。
 
 工具链：Acton（官方推荐的构建/测试/部署工具链）+ 锁定编译器版本 + CI 可重复构建。若审计机构只接受 FunC，则自研合约改用 FunC 重写（逻辑不变）。
 
@@ -40,9 +47,9 @@
 
 | # | 合约 | 来源 | 数量（实例） | 说明 |
 | --- | --- | --- | --- | --- |
-| 1 | Jetton Master | 官方复用（ton-blockchain/jetton-contract） | 1 | TEP-74，铸造 100 亿、关闭 mint |
-| 2 | Jetton Wallet | 官方复用（同上） | N ≈ 13 | 每个持币地址 1 个；协议侧约 13 个（奖励金库、质押金库、TeamVault、团队/营销/流动性收款、运营等）+ 用户钱包 |
-| 3 | **RoundController** | 自研（Tolk） | 1 | 轮次状态机 + 18 根 K 线计数 + 成功结算 + 失败结算 + 指向 TeamVault 的释放/销毁 + claimAll；预计 500~700 行 |
+| 1 | Jetton Master | **V7：Tolk 复刻**（骨架 = Acton 官方 jetton 模板，语义对齐 ton-blockchain/jetton-contract） | 1 | TEP-74，铸造 100 亿、同一笔交易关闭 mint |
+| 2 | Jetton Wallet | **V7：Tolk 复刻**（同上） | N ≈ 13 | 每个持币地址 1 个；协议侧约 13 个（奖励金库、质押金库、TeamVault、团队/营销/流动性收款、运营等）+ 用户钱包 |
+| 3 | **RoundController** | 自研（Tolk） | 1 | 轮次状态机 + 24 根 K 线计数 + 成功结算 + 失败结算 + 指向 TeamVault 的释放/销毁 + claimAll；预计 500~700 行 |
 | 4 | **TeamVault** | 自研（Tolk） | 1 | 托管 12 亿 Jetton Wallet（owner = TeamVault）；只接受 RC 指令，按轮释放/销毁 1.2 亿，幂等互斥；预计 150~250 行 |
 | 5 | Multisig v2 | 官方有，**不采用** | **0** | 项目不设多签（V4/V5） |
 | 6 | Lockup / Vesting | 官方有，**不采用** | **0** | 团队改为 TeamVault 轮次释放/销毁（V5） |
@@ -57,10 +64,10 @@
 
 | 步骤 | 执行方 | 链上动作 |
 | --- | --- | --- |
-| 开轮/关报名 | RoundController（单密钥 owner 触发） | 记录开轮时间、报名截止（报名窗口 72h，结算后立即开启） |
+| 开轮/关报名 | RoundController（单密钥 owner 触发） | 记录开轮时间、报名截止（报名窗口 36h，结算后立即开启） |
 | 质押 | 用户 | 标准 Jetton transfer 到本轮质押钱包（forward payload 写 roundId/nonce/riskVersion） |
-| 提交 K 线 | 任意白名单地址（测试网手动模式） | 提交 18 根 K 线数据（链下公开可复核） |
-| 判定/结算 | RoundController | 12/18 判定；成功：指令 TeamVault 释放 1.2 亿 + 开放 claimAll；失败：发起三笔 burn（含 TeamVault 销毁团队额度） |
+| 提交 K 线 | 任意白名单地址（测试网手动模式） | 提交 24 根 K 线数据（链下公开可复核） |
+| 判定/结算 | RoundController | 16/24 判定；成功：指令 TeamVault 释放 1.2 亿 + 开放 claimAll；失败：发起三笔 burn（含 TeamVault 销毁团队额度） |
 | 领取 | 用户 | claimAll（可跨轮累积，≤10 轮，合并一笔，用户付 gas） |
 | 开下一轮 | RoundController | 上一轮终态后**立即**开启（间隔 0） |
 
@@ -85,7 +92,7 @@
 
 ### 4.1 RoundController（约 500~700 行）
 
-1. 轮次状态机：UNOPENED → STAKING_OPEN（**72h**）→ STAKING_CLOSED → OBSERVING（72h / 18 根）→ SETTLING_SUCCESS / SETTLING_FAILURE → SUCCEEDED / FAILED_PERMANENT（含 ORACLE_PAUSED 分支）。
+1. 轮次状态机：UNOPENED → STAKING_OPEN（**36h**，12h PREVIEW 后）→ STAKING_CLOSED → OBSERVING（24h / 24 根）→ SETTLING_SUCCESS / SETTLING_FAILURE → SUCCEEDED / FAILED_PERMANENT（含 ORACLE_PAUSED 分支）。
 2. K 线记录与计数：仅接受 12 个固定 index、严格时间区间、去重；达标数 >= 12 通过。
 3. 成功结算：按质押比例开放领取 + 领回本金；指令 **TeamVault 释放 1.2 亿**到团队收款钱包。
 4. 失败结算：发出**三笔** burn（奖励 7 亿 + 指令 TeamVault 销毁团队 1.2 亿 + 全部本金），确认后置终态；0 人质押且通过时销毁 7 亿奖励。
@@ -116,9 +123,10 @@
 | --- | --- | --- |
 | 必审 | RoundController（自研） | 资金安全核心：三笔销毁、领取/claimAll、状态机不可逆、0 人质押分支、权限边界 |
 | 必审 | TeamVault（自研） | 12 亿托管、只认 RC 指令、释放/销毁互斥幂等 |
+| 必审 | **JettonMaster + JettonWallet（V7 起为 Tolk 复刻，不再是免审复用）** | mint-once 与 admin 置空原子性、burn_notification 扣 supply、forward_payload 透传、canonical wallet 校验、错误码 |
 | 必审 | 复用合约的集成方式 | Jetton 转账/销毁、owner 权限、payload 解析 |
 | 可选 | OracleAdapter（未来） | 签名验证 |
-| 预算 | **$12k~35k**（自研面 2 个合约） | 3 周~5 周 |
+| 预算 | **$15k~40k**（自研面 4 个合约：RC + TV + Jetton Master + Wallet） | 3 周~5 周 |
 | 交付 | 审计报告 + 修复复审 + 代码哈希 | 与部署版本一致 |
 
 > 注意：审计覆盖代码逻辑，**不覆盖单密钥托管、个人热钱包与地址不公开的运营风险**；该风险已由 V4/V5 接受，缓解见 docs/10 §9。
@@ -127,7 +135,7 @@
 
 ## 6. 实施顺序（与 docs/10 时间表对齐）
 
-1. **W1**：锁定 Jetton 官方 commit + 审计报告核对；确认「不部署多签/锁仓」的最终参数。
+1. **W1**：~~锁定 Jetton 官方 commit + 审计报告核对~~ → **V7 已改为 Tolk 复刻**，W1 改为「核对 Tolk 版 Jetton 与 TEP-74 参考实现的语义一致性 + 纳入审计范围」；确认「不部署多签/锁仓」的最终参数。
 2. **W2**：文档定稿 + 参数签字（含 **D-26 目标价语义**、D-25 已定的 pull claim）；Jetton 部署脚本与收款钱包地址登记（不公开）。
 3. **W3~W4**：RoundController + TeamVault（Tolk）实现 + 测试（本地 sandbox）。
 4. **W5**：Testnet 启动（前置：文档定稿 + 参数签字 + D-26 已定）→ 全流程演练（报名→观察→结算→TeamVault 释放/三笔销毁→claimAll→开下一轮），覆盖无人质押与 0 人通过分支。
@@ -138,7 +146,7 @@
 ## 7. 待确认
 
 1. 审计机构是否接受 Tolk（否则自研合约改 FunC）。
-2. **D-26 解锁窗口与目标价冲突**（最高优先级）：**方案 B+（Lead 推荐：固定阶梯 + 1h TWAP 闸门 + 触价提前关窗 + 24h 缓冲）** / A 相对翻倍 / C 短窗+随机截止，见 docs/00 §7；**未定案前不要按新语义实现**（当前 FIXED_LADDER）。
+2. **D-26 解锁窗口与目标价冲突**（最高优先级）：**方案 B+（Lead 推荐：固定阶梯 + 1h TWAP 闸门 + 触价提前关窗 + 12h 缓冲）** / A 相对翻倍 / C 短窗+随机截止，见 docs/00 §7；**未定案前不要按新语义实现**（当前 FIXED_LADDER）。
 3. 团队 / 营销 / 流动性**收款钱包地址**（由项目方部署前提供，**不对外披露**，仅向审计/交易所披露）。
 4. 预言机长期故障阈值（D-19）等其余上线参数。
 5. **D-28 失败同档重试 / D-29 R1 启动规则 / D-30 搭便车时间加权**（Lead 建议，待项目方确认，见 docs/00 §7.9~§7.11 与 docs/12 P0-5/P0-1/P1-3）；定案后需同步改 targetPrice 语义、首轮目标、奖励权重与测试。

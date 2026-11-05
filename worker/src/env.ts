@@ -18,6 +18,8 @@ export interface Env {
   DEMO_AUTOPLAY?: string;
   /** 演示质押窗口时长（秒，默认 900） */
   DEMO_STAKE_SECONDS?: string;
+  /** 演示模式「解锁中」展示时长（秒，默认 1800）：R10 终态后先展示 ClaimUnlocked 再重置演示 */
+  DEMO_UNLOCK_SECONDS?: string;
   DEMO_PREVIEW_SECONDS?: string;
   /** CORS 允许来源，'*' 或逗号分隔白名单 */
   ALLOWED_ORIGINS?: string;
@@ -51,7 +53,7 @@ export function uptimeSeconds(now = Date.now()): number {
 }
 
 /** D1 schema 版本，与 migrations 文件名一致，健康检查里暴露用于上线核对。 */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 6;
 
 /** Worker 默认语义化版本。 */
 export const DEFAULT_VERSION = '1.0.0';

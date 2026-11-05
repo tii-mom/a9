@@ -1,6 +1,11 @@
 /* Landing-only layout tweaks layered on top of the shared fuse.css (no shared-file edits).
    Loaded before fuse.css in the bundle graph, so every override uses a higher-specificity selector. */
 
+/* Narrative H1: the bet sentence and the payoff sentence each get their own line. */
+.hero h1 em {
+  display: block;
+}
+
 /* Keep anchor jumps / CTA scrolling clear of the sticky header (tape 32px + nav 52px). */
 #war,
 #cmd,
@@ -31,24 +36,32 @@
   }
 }
 
-/* The spec grew from 12 to 18 candles: 9×2 on desktop, 6×3 on small screens. */
-.board .cells {
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+/* 24 candles: 12×2 on desktop, 8×3 on tablet, 6×4 on small screens.
+   .fuse is the first child of .cells, so cell i is child i+1 → row starts at n*k+2. */
+@media (min-width: 1100px) {
+  .board .cells,
+  .sand .sand-cells {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .board .cells .cell:nth-child(12n + 2) {
+    border-top: 1px solid var(--line);
+  }
 }
-.sand .sand-cells {
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+
+@media (min-width: 641px) and (max-width: 1099px) {
+  .board .cells,
+  .sand .sand-cells {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+  .board .cells .cell:nth-child(8n + 2) {
+    border-top: 1px solid var(--line);
+  }
 }
-/* Row separators for the 18-cell grid (.fuse is the first child, cells start at nth-child(2)). */
-.board .cells .cell:nth-child(9n + 2) {
-  border-top: 1px solid var(--line);
-}
+
 @media (max-width: 640px) {
   .board .cells,
   .sand .sand-cells {
     grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-  .board .cells .cell:nth-child(9n + 2) {
-    border-top: 0;
   }
   .board .cells .cell:nth-child(6n + 2) {
     border-top: 1px solid var(--line);

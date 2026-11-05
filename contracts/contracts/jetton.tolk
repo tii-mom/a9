@@ -61,7 +61,27 @@ fun sendJettonTransfer(
 ): void {
     val body = buildJettonTransferBody(queryId, amount, recipient, responseDestination);
     val out = createMessage({
-        bounce: BounceMode.NoBounce,
+        // P0-3: bounceable so failures are observable and state can be rolled back.
+        bounce: BounceMode.Only256BitsOfBody,
+        value: ton("0.05"),
+        dest: jettonWallet,
+        body,
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
+}
+
+// P0-3 tracked variant: send_excesses goes back to the claiming contract so a
+// ReturnExcessesBack proves completion; a bounce proves failure and rolls back.
+fun sendTrackedJettonTransfer(
+    jettonWallet: address,
+    queryId: uint64,
+    amount: coins,
+    recipient: address,
+    responseDestination: address,
+): void {
+    val body = buildJettonTransferBody(queryId, amount, recipient, responseDestination);
+    val out = createMessage({
+        bounce: BounceMode.Only256BitsOfBody,
         value: ton("0.05"),
         dest: jettonWallet,
         body,
@@ -72,7 +92,8 @@ fun sendJettonTransfer(
 fun sendJettonBurn(jettonWallet: address, queryId: uint64, amount: coins, responseDestination: address): void {
     val body = buildJettonBurnBody(queryId, amount, responseDestination);
     val out = createMessage({
-        bounce: BounceMode.NoBounce,
+        // P0-2: bounceable; success is observed via ReturnExcessesBack in the RC.
+        bounce: BounceMode.Only256BitsOfBody,
         value: ton("0.05"),
         dest: jettonWallet,
         body,

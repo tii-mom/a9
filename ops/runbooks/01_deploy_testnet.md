@@ -1,8 +1,8 @@
 # 01 — A9 测试网部署 Runbook（TON testnet）
 
-**版本**：V6.2 · 2026-11-05
+**版本**：V7（时间参数）· 2026-11-05
 **Owner**：testnet-ops
-**权威口径**：docs/00_DECISIONS_V2.md（V6.2）、docs/06_DEPLOYMENT.md、docs/11_CONTRACT_PLAN.md
+**权威口径**：docs/00_DECISIONS_V2.md（V7 时间参数）、docs/06_DEPLOYMENT.md、docs/11_CONTRACT_PLAN.md
 **对应脚本**：ops/scripts/00_preflight.mjs → 60_verify_and_register.mjs → verify_deployment.mjs
 **默认模式**：所有脚本默认 **DRY-RUN**；只有 OPS_EXECUTE=1（写操作再加 OPS_CONFIRM=YES）才广播交易。
 
@@ -19,24 +19,23 @@ node ops/scripts/00_preflight.mjs
 # 1) 完整演练：所有步骤 dry-run，逐条核对命令与地址
 node ops/scripts/deploy_all.mjs
 
-# 2) 真实部署（每步会要求人工确认；建议逐步执行，不要一把梭）
-export OPS_EXECUTE=1
-node ops/scripts/10_deploy_jetton.mjs --execute
-node ops/scripts/11_mint_and_lock_jetton.mjs --execute
-node ops/scripts/20_deploy_teamvault.mjs --execute
-node ops/scripts/30_deploy_round_controller.mjs --execute
+# 2) 真实部署（推荐：整体 deploy-emulation；会部署 Jetton + mint + TV + RC + 绑定）
+export OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name>
+node ops/scripts/15_deploy_contracts.mjs --execute   # acton script scripts/deploy-emulation.tolk --net testnet
 node ops/scripts/40_init_params.mjs --execute --online
-node ops/scripts/65_set_jetton_wallets.mjs --execute
-OPS_CONFIRM=YES node ops/scripts/70_bind_roles.mjs --execute
-node ops/scripts/55_fund_ton.mjs --execute
-node ops/scripts/50_fund_vaults.mjs --execute --all
+OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
+OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
 node ops/scripts/60_verify_and_register.mjs --execute
 node ops/scripts/verify_deployment.mjs --online --save
 # 最后：开 R1（R1 无 PREVIEW，需 admin 手动 OpenRound）
-OPS_CONFIRM=YES node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
+OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name> node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
+
+# 备选：只做 Jetton 分步（10/11，位置参数），TV/RC 仍用 15 整体部署
+# node ops/scripts/10_deploy_jetton.mjs --execute
+# node ops/scripts/11_mint_and_lock_jetton.mjs --execute
 ~~~
 
-> 注意：**70_bind_roles.mjs 的 InitController 不可逆**（TeamVault.controller 一旦写入不可改），执行前必须双人核对两个地址；宁可停在 dry-run 也不要试错。
+> 注意：**整体部署会执行 InitController（不可逆，TeamVault.controller 一旦写入不可改）**；脚本签名前必须在硬件钱包屏幕核对 TeamVault/RoundController 两个地址。宁可停在 dry-run 也不要试错。
 
 ---
 
@@ -44,9 +43,9 @@ OPS_CONFIRM=YES node ops/scripts/80_admin_ops.mjs --action open-round --round 1 
 
 | # | 前置条件 | 检查方式 | 负责 |
 | --- | --- | --- | --- |
-| 1 | 参数已冻结并签字（V6.2：P0=116000、2×、18/72h/12、限额、技术终止） | node ops/scripts/00_preflight.mjs 全 PASS；参数哈希记入签字单 | 项目方 |
+| 1 | 参数已冻结并签字（V7：P0=116000、2×、12h/36h/24h、24 根/16、限额、技术终止） | node ops/scripts/00_preflight.mjs 全 PASS；参数哈希记入签字单 | 项目方 |
 | 2 | 合约源码已构建、单元/集成测试通过 | cd contracts && acton build && acton test | 合约负责人 |
-| 3 | 部署脚本已存在（contracts/scripts/deploy/*.tolk、contracts/scripts/ops/*.tolk） | ls contracts/scripts；与命令模板逐条比对 | 合约负责人 |
+| 3 | 部署脚本已存在（contracts/scripts/deploy-emulation.tolk、contracts/scripts/deploy/deploy_jetton_master.tolk、mint_and_lock_jetton.tolk） | ls contracts/scripts；与命令模板逐条比对 | 合约负责人 |
 | 4 | Acton 版本锁定（当前 1.1.0 / Tolk 1.4.1，与 contracts/Acton.toml 一致） | acton --version；ops/config/testnet.params.json 的 toolchain.pinnedVersion | 部署者 |
 | 5 | Acton 项目钱包已导入（助记词只本地交互输入） | cd contracts && acton wallet list | 部署者 |
 | 6 | 部署者钱包测试网 TON 余额足够（建议 ≥25 TON） | 浏览器/acton wallet 查询；00_preflight 会提示 | 部署者 |
@@ -66,6 +65,8 @@ OPS_CONFIRM=YES node ops/scripts/80_admin_ops.mjs --action open-round --round 1 
 | OPS_CONFIRM | YES | 不可逆/写操作二次确认 | 否 |
 | OPS_REGISTRY | ops/config/testnet.registry.json | 登记表路径（selftest 用临时文件） | 否 |
 | TON_DEPLOYER_WALLET | a9-deployer | Acton 项目钱包名（私钥在本地 keystore） | 否 |
+| A9_SIGNER_WALLET | a9-deployer / treasury | 广播脚本签名钱包名（fund_jetton/fund_ton/admin_op），缺省 TON_DEPLOYER_WALLET | 否 |
+| OPS_ALLOW_EMULATION | true | 本地验证广播（不真实上链，可打印 trace hash） | 否 |
 | TON_DEPLOYER_MNEMONIC | <24-word mnemonic> | **仅非 Acton 适配器**使用；由密码管理器/硬件钱包提供 | **是** |
 | TON_ADMIN_OWNER_ADDRESS | <admin owner address> | RC 单密钥 owner | 是（地址本身不敏感，但关联身份） |
 | TON_TREASURY_ADDRESS | <treasury address> | 初始 100 亿接收地址 | 是（不公开） |
@@ -95,12 +96,17 @@ cd contracts && acton build && acton test
 
 ~~~bash
 node ops/scripts/00_preflight.mjs
+node ops/scripts/deploy_all.mjs                     # whole：15 → 40 → 55 → 50 → 60 → 90（dry-run）
+node ops/scripts/deploy_all.mjs --mode jetton       # jetton：10 → 11（dry-run）
 node ops/scripts/10_deploy_jetton.mjs
 node ops/scripts/11_mint_and_lock_jetton.mjs
+node ops/scripts/15_deploy_contracts.mjs
+node ops/scripts/40_init_params.mjs
 node ops/scripts/20_deploy_teamvault.mjs
 node ops/scripts/30_deploy_round_controller.mjs
-node ops/scripts/40_init_params.mjs
+node ops/scripts/65_set_jetton_wallets.mjs
 node ops/scripts/70_bind_roles.mjs
+node ops/scripts/55_fund_ton.mjs
 node ops/scripts/50_fund_vaults.mjs --all
 node ops/scripts/60_verify_and_register.mjs
 node ops/scripts/verify_deployment.mjs --offline
@@ -109,14 +115,14 @@ node ops/scripts/verify_deployment.mjs --offline
 验收 dry-run 输出：
 
 - [ ] 每个脚本打印 [DRY-RUN]，退出码 0；没有发任何交易。
-- [ ] 40_init_params 生成 ops/records/params-snapshot.json 与 ops/records/round-controller.init.json，字段与 V6.2 一致。
+- [ ] 40_init_params 生成 ops/records/params-snapshot.json 与 ops/records/round-controller.init.json，字段与 V7 一致（12h/36h/24h、24 根 × 1h、阈值 16）。
 - [ ] 50_fund_vaults --all 显示五笔合计 = 100 亿 A9。
 - [ ] 命令模板中的 {contractsDir}、{treasury}、{initDataFile} 等全部被替换（无 {...} 残留）。
 - [ ] 登记表未被静默改写（60 在 dry-run 只校验，不落真实地址）。
 
 ---
 
-## 5. 部署步骤（逐步执行）
+## 5. 部署步骤（整体部署为主；Jetton 分步为备选）
 
 ### Step 0 — preflight
 
@@ -131,47 +137,46 @@ node ops/scripts/00_preflight.mjs
 - contracts/ 或 build/ 不存在：等合约负责人完成构建。
 - 未发现 Acton 钱包：cd contracts && acton wallet import（交互），或 acton wallet new（仅测试）。
 
-### Step 10 — Jetton Master（TEP-74）
+### Step 15 — 整体部署（推荐；Jetton + TeamVault + RC + 绑定一次完成）
+
+~~~bash
+node ops/scripts/15_deploy_contracts.mjs --execute
+# 等价：cd contracts && acton script scripts/deploy-emulation.tolk --net testnet
+~~~
+
+- 顺序：JettonMaster → mint 100 亿（**mint-once：op 0x00000015，金额必须 1e19，同一笔交易内 admin 置 null**，二次 mint 报 MintClosed(75)）→ TeamVault → RoundController → get_wallet_address → SetJettonWallet → InitController。
+- 该脚本是整体顺序部署，**没有分步子命令**；支持 --net testnet。
+- 脚本输出 JettonMaster / TeamVault / RoundController / RC Jetton Wallet / TV Jetton Wallet 地址；ops 的 15 脚本会解析这些地址写入登记表（失败时用 --from-log <日志> 重试，或 10/20/30 的 adopt 模式手工登记）。
+- 链上复核：total_supply=10000000000000000000、mintable=false、admin=null（verify_deployment 会检查）。
+- 成功后 TV/RC 已就位，跳过 Step 20/30/65/70；直接进入 Step 40。
+
+### Step 10 — Jetton Master（分步备选，位置参数）
 
 ~~~bash
 node ops/scripts/10_deploy_jetton.mjs --execute
+# 脚本实际执行：acton script scripts/deploy/deploy_jetton_master.tolk <treasury> 10000000000000000000
 ~~~
 
-- 部署参数来自 ops/config/testnet.params.json 的 token（A9 / A9 / 9 位）。
-- 成功后脚本从命令输出解析地址并写入 contracts.jettonMaster；解析失败时用 --adopt <address> 手工登记。
-- 立即验证：get_jetton_data 的 total_supply 应为 0（未铸造），mint 权限属于 treasury/部署者。
+- 构建产物：contracts/build/JettonMaster.json（Acton 输出 JSON，不是 boc）。
+- 部署后地址写入 contracts/deploy/jetton-master.addr（文本地址）；ops 10 脚本自动读取并登记，也可用 --adopt 手工登记。
+- 部署时 treasury 作为 admin；此时 total_supply=0。
 
-### Step 11 — 初始铸造 100 亿 + 关闭 mint
+### Step 11 — 初始铸造 100 亿 + 关闭 mint（分步备选）
 
 ~~~bash
 node ops/scripts/11_mint_and_lock_jetton.mjs --execute
+# 脚本实际执行：acton script scripts/deploy/mint_and_lock_jetton.tolk <master> <treasury> 10000000000000000000
 ~~~
 
-- 铸造 100 亿 A9 到 treasury（冷钱包）。
-- **必须**在同一窗口关闭 mint（admin 置空）；否则 verify_deployment 会 FAIL，不得继续。
-- 链上复核：total_supply = 10000000000000000000、mintable = false。
+- **mint-once**：op 0x00000015，金额必须 1e19；mint 与 admin 置 null 必须**同一笔交易**完成；二次 mint 会报 MintClosed(75)。
+- 链上复核：total_supply=10000000000000000000、mintable=false、admin=null。
+- burn_notification 标准 op 为 0x7bdd97de（旧别名 0x7bcdefa0 也接受）；链上对账按标准 op 过滤。
 
-### Step 20 — TeamVault（controller=null 部署）
+### Step 20/30/65/70 — 已由整体部署覆盖（仅保留 adopt/核对）
 
-~~~bash
-node ops/scripts/20_deploy_teamvault.mjs --execute
-~~~
-
-- 部署时 controller 必须为 **null**，jettonWallet 用占位地址（建议 admin）（contracts/README §7.2）。
-- 参数：admin、teamWallet、teamRoundRaw = 120000000000000000。
-- 当前 contracts/scripts 只提供 deploy-emulation.tolk：可用 cd contracts && acton script scripts/deploy-emulation.tolk --net testnet 一次部署 TV+RC 并打印地址，再用 --adopt 登记；或由合约负责人提供分步部署脚本后回填命令模板。
-- 此时**不要**注入 12 亿；先完成 RC 部署、SetJettonWallet 与 InitController，再注资。
-
-### Step 30 — RoundController
-
-~~~bash
-node ops/scripts/30_deploy_round_controller.mjs --execute
-~~~
-
-- 脚本先生成 ops/records/round-controller.init.json（addresses / vaults / econ / timing），再调用部署命令。
-- vaults.stakingJettonWallet 部署时用 admin 占位（contracts/README §5：地址环依赖），部署后必须由 65 步骤 SetJettonWallet(0x52540016) 写入真实 RC Jetton Wallet。
-- 关键常量：P0=116000、2×、PREVIEW 86400、报名 259200、18 根 × 14400、阈值 12、限额（10000 / 1000 bps / 2 亿）、技术终止（14 天 / 7 天）。
-- RC **不可升级**（无代理）；部署即终局，参数写错只能重新部署一套（见 §9）。
+- 整体 deploy-emulation 已部署 TeamVault 与 RoundController、写入 canonical Jetton Wallet、并完成 InitController；正常情况下**跳过**这些步骤。
+- 如需手工登记/核对：20/30 用 --adopt <address>；65 核对 RC/TV 钱包地址；70 用 --mark-bound-only 记录绑定并人工核对 get_config().controller。
+- 这些脚本在整体部署路径下不再发送分步部署交易（命令模板已移除）。
 
 ### Step 40 — 参数初始化校验
 
@@ -180,44 +185,26 @@ node ops/scripts/40_init_params.mjs --execute --online
 ~~~
 
 - 生成 ops/records/params-snapshot.json（配置哈希、opcodes、阶梯）。
+- 整体部署已完成 RC 初始化，本步骤只做链上校验，不发送初始化交易。
 - --online：调用 get_protocol_config 逐字段比对（17 个数值字段）；任一不匹配 → FAIL，禁止开轮。
-- stakingJettonWallet 的占位值由 65 步骤 SetJettonWallet 替换为真实 RC Jetton Wallet；40 只校验数值参数，地址字段用 Acton rpc 人工核对。
-
-### Step 65 — SetJettonWallet（RC / TeamVault，一次性）
-
-~~~bash
-node ops/scripts/65_set_jetton_wallets.mjs --execute
-~~~
-
-- 用 Jetton Master 的 get_wallet_address 得到 RC / TV 的 canonical Jetton Wallet，再由 admin 调 SetJettonWallet(0x52540016)。
-- **必须早于 InitController 与第一轮**；两个 setter 都只能 admin 调用、一次性。
-- 复核：get_protocol_config().stakingJettonWallet 与 get_team_vault_state().jettonWallet 应等于解析值。
-
-### Step 70 — 角色绑定（不可逆）
-
-~~~bash
-OPS_CONFIRM=YES node ops/scripts/70_bind_roles.mjs --execute
-~~~
-
-- 发送 InitController(roundController) 给 TeamVault，调用者必须是 TeamVault.admin。
-- 双人核对：TeamVault 地址、RC 地址、admin 钱包来源；核对后登记表写入 bindings.teamVaultAcceptsOnly。
-- 顺序：SetJettonWallet(RC) → SetJettonWallet(TV) → InitController；若 deploy-emulation 已代为 InitController，用 --mark-bound-only 只登记绑定并人工核对 get_config().controller。
-- 复核：get_config 的 controller 必须等于 RC；建议截图 + 交易哈希归档。
-- 失败/填错：controller 不可改 → 只能废弃 TeamVault，**在注资前**重新部署（注资后极难恢复）。
+- stakingJettonWallet 地址字段用 Acton rpc 人工核对（整体部署已 SetJettonWallet）。
 
 ### Step 55 — TON gas 充值（RC ≥20 TON / TeamVault ≥10 TON）
 
 ~~~bash
-node ops/scripts/55_fund_ton.mjs --execute
+OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
 ~~~
 
 - contracts/deploy/params.testnet.json 要求 RC ≥20 TON、TV ≥10 TON；每条跨合约指令约 0.05 TON。
 - 余额不足时跨合约消息（release/burn/ack）会失败，轮次卡在 SETTLING。
+- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> acton script scripts/deploy/fund_ton.tolk <toAddress> <amountTon 整数> --net testnet`；amountTon 为整数 TON（20/10），脚本自动加 1 TON 缓冲。
+- 本地验证广播：加 OPS_ALLOW_EMULATION=true（不真实上链，可打印 trace hash）；真实网络必须 --net testnet。
+- 地址优先读登记表，缺失时回退 contracts/deploy/{round-controller,team-vault}.addr。
 
 ### Step 50 — 注资与初始分配
 
 ~~~bash
-node ops/scripts/50_fund_vaults.mjs --execute --all
+OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
 ~~~
 
 五笔分配（合计 100 亿）：
@@ -233,6 +220,10 @@ node ops/scripts/50_fund_vaults.mjs --execute --all
 - TEP-74 转账目标是**接收者的 Jetton Wallet**，脚本会先解析再转；解析失败即终止（避免转错）。
 - 每笔成功后写 registry.funding，60 会核对五笔是否全部 CONFIRMED。
 - 可分步：先只做奖励 + 团队（不加 --all），确认后再补分配。
+- 流动性：5 亿 A9 全额转 liquidityWallet（不变）；冷启动池用其中 **2 亿 A9 + $232,000 USDT**（同价 $0.00116，占流动性额度 **40%**，剩余 **3 亿 A9** 后续加池）。
+- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> JETTON_MASTER_ADDRESS=<master> acton script scripts/deploy/fund_jetton.tolk <toJettonWallet> <amountRaw> --net testnet`。
+- master 也可由 contracts/deploy/jetton-master.addr 自动提供；toJettonWallet 是目标 Jetton Wallet（不是 owner 合约地址），脚本会先解析再转。
+- 广播前脚本校验 signer 的 A9 余额，不足会可读报错并 exit 1；每笔成功后写 registry.funding。
 
 ### Step 60 — 登记表定稿 + 地址簿
 
@@ -247,11 +238,15 @@ node ops/scripts/60_verify_and_register.mjs --execute
 ### Step 95 — 开 R1（R1 无 PREVIEW）
 
 ~~~bash
-OPS_CONFIRM=YES node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
+OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name> node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
 ~~~
 
 - contracts/README §3.2：R1 无 PREVIEW，OpenRound 交易中 stakeOpenAt = now，并锁定 target = max(P0×2^tier, 2×TWAP24h)。
 - 开轮前确认：TeamVault 绑定、SetJettonWallet、TON gas、奖励池/团队池已注资、公告已发、值班已就位。
+- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> ROUND_CONTROLLER_ADDRESS=<rc> acton script scripts/deploy/admin_op.tolk open-round 1 <twap24h> --net testnet`。
+- op 映射：open-round(extra=twap24h)、close-staking(extra=twap1h)、start-observation(roundId)、finalize-round(roundId)、pause-oracle(extra=reason)、resume-oracle、abort-technical、retry-pending(roundId)；set-jetton-wallet/init-controller 分别由 65/70 脚本调用（A9_TARGET_ADDRESS+A9_JETTON_WALLET_ADDRESS / TEAM_VAULT_ADDRESS+A9_CONTROLLER_ADDRESS）。
+- RC 地址优先读登记表，缺失时回退 contracts/deploy/round-controller.addr。
+- 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
 - 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
 
 ### Step 90 — 全量验收
@@ -270,7 +265,8 @@ node ops/scripts/verify_deployment.mjs --online --save
 
 若 Acton 部署脚本尚未交付或不可用：
 
-1. 由合约负责人在钱包/IDE 完成部署，记录地址、交易哈希、code hash。
+1. 由合约负责人在钱包/IDE 完成整体部署（deploy-emulation）或分步 Jetton 部署，记录地址、交易哈希、code hash。
+   若已有整体部署日志：node ops/scripts/15_deploy_contracts.mjs --from-log <日志> 可解析并登记地址（不重新部署）。
 2. 用 --adopt 登记（脚本只做 CRC 校验，不发交易）：
 
 ~~~bash
@@ -289,7 +285,7 @@ node ops/scripts/30_deploy_round_controller.mjs --adopt <roundController>
 ~~~text
 ops/config/testnet.addresses.template.json   // 人工填写模板（说明用途）
         │
-        ├─ 10/20/30 --adopt 或部署输出解析 ──► ops/config/testnet.registry.json（唯一事实来源）
+        ├─ 15 整体部署输出解析 / 10/20/30 --adopt ──► ops/config/testnet.registry.json（唯一事实来源）
         │
         └─ 60_verify_and_register ──► ops/records/address-book.testnet.{md,json}
 ~~~
@@ -305,10 +301,10 @@ ops/config/testnet.addresses.template.json   // 人工填写模板（说明用�
 
 对应 docs/06 §5 / docs/10 §10：
 
-- [ ] 成功轮：18 根齐备且 ≥12 达标 → 本金可领取、7 亿奖励可 claimAll、TeamVault 释放 1.2 亿且只释放一次；<12 即失败（contracts/README §9.2 裁决，无 7~11 中间态）。
+- [ ] 成功轮：24 根齐备且 ≥16 达标 → 本金可领取、7 亿奖励可 claimAll、TeamVault 释放 1.2 亿且只释放一次；<16 即失败（V7 口径：≥16 成功、≤15 失败，无中间态）。
 - [ ] 失败轮：三笔销毁（7 亿 + 1.2 亿 + 全部本金）→ total_supply 实际减少，三笔独立确认。
-- [ ] 无人质押轮：照常 18 根观察；失败销毁奖励 + 团队额度；通过时 0 人则销毁 7 亿（D-18b）。
-- [ ] 预言机暂停/恢复：暂停不判负、不销毁；恢复后重收满 18 根。
+- [ ] 无人质押轮：照常 24 根观察；失败销毁奖励 + 团队额度；通过时 0 人则销毁 7 亿（D-18b）。
+- [ ] 预言机暂停/恢复：暂停不判负、不销毁；恢复后重收满 24 根。
 - [ ] claimAll 跨轮（2~10 轮）合并一笔、幂等、重复调用不重复派发。
 - [ ] TeamVault 非 RC 指令被拒；同轮 release/burn 互斥幂等。
 - [ ] 技术终止：需 14 天暂停或观察超时 7 天才能触发；若测试网无法等待，使用独立的短参数测试部署演练，**不要**改主测试网参数。
@@ -320,11 +316,12 @@ ops/config/testnet.addresses.template.json   // 人工填写模板（说明用�
 
 1. **无独立 StakingVault / RewardVault 地址**：RC 只有一个 Jetton Wallet，同时托管质押本金 + 每轮 7 亿奖励；不要部署/登记不存在的 vault 地址。
 2. **单地址限额为固定硬顶 20,000,000 A9**（= 200M × 10%，contracts/README §9.1），不是动态 10%。
-3. **18 根齐备后 <12 即失败**（无 7~11 中间态，§9.2）；ops 公告与对账按此口径。
+3. **24 根齐备后 ≥16 成功、≤15 失败**（无中间态，V7 口径）；ops 公告与对账按此口径。
 4. **R1 无 PREVIEW**：需 admin 手动 OpenRound（带 twap24h）。
 5. **SetJettonWallet 一次性**（0x52540016），必须早于 InitController/第一轮。
-6. **Burn ack 信任模型（测试网）**：BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）；主网前必须改为受审计扩展或“标准 burn + 链下对账 + owner 确认”。
-7. **晚开窗兜底**：keeper 错过整个 72h 窗口时 OpenRound 会重锚 stakeOpenAt；正常路径不触发，监控三倒计时。
+6. **Burn ack 信任模型（测试网）**：BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）；burn_notification 标准 op 为 0x7bdd97de（旧别名 0x7bcdefa0 也接受），对账按标准 op 过滤；主网前必须改为受审计扩展或“标准 burn + 链下对账 + owner 确认”。
+7. **晚开窗兜底**：keeper 错过整个 36h 报名窗口时 OpenRound 会重锚 stakeOpenAt；正常路径不触发，监控三倒计时。
+8. **Jetton mint-once**：op 0x00000015，金额 1e19，admin 置 null 必须同笔交易；二次 mint 报 MintClosed(75)。verify_deployment 检查 total_supply=1e19 / mintable=false / admin=null / decimals=9 / symbol=A9。
 
 ---
 

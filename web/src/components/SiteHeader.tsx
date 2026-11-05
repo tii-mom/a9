@@ -5,10 +5,10 @@ import { useLang } from '../lib/lang';
 import { WalletButton } from '../features/wallet/WalletButton';
 
 const NAV = [
-  { href: '#war', zh: '战况', en: 'Battle' },
+  { href: '#war', zh: '本轮', en: 'Round' },
   { href: '#floor', zh: '成交流', en: 'Order Flow' },
   { href: '#ladder', zh: '轮次阶梯', en: 'Ladder' },
-  { href: '#rules', zh: '作战规则', en: 'Rules' },
+  { href: '#rules', zh: '规则', en: 'Rules' },
   { href: '#supply', zh: '筹码分配', en: 'Supply' },
   { href: '#risk', zh: '风险', en: 'Risk' },
 ];
@@ -46,9 +46,9 @@ export function SiteHeader({ tape, isLanding = false }: { tape?: ReactNode; isLa
       {tape}
       {!tape && <div className="tape" aria-hidden="true" />}
       <nav className="nav wrap" aria-label={lang === 'zh' ? '主导航' : 'Main navigation'}>
-        <Link className="logo" to="/" aria-label="A9 引信协议">
+        <Link className="logo" to="/" aria-label="A9">
           <Logo />
-          A9 <small>{lang === 'zh' ? '引信协议' : 'Ignition Protocol'}</small>
+          A9
         </Link>
         <div className="links">
           {NAV.map((n) =>
@@ -62,7 +62,7 @@ export function SiteHeader({ tape, isLanding = false }: { tape?: ReactNode; isLa
               </a>
             ),
           )}
-          <Link to="/me">{lang === 'zh' ? '我的战况' : 'My War'}</Link>
+          <Link to="/me">{lang === 'zh' ? '我的质押' : 'My Stake'}</Link>
           <Link to="/leaderboard">{lang === 'zh' ? '排行榜' : 'Leaderboard'}</Link>
         </div>
         <div className="nav-r">
@@ -84,7 +84,7 @@ export function SiteHeader({ tape, isLanding = false }: { tape?: ReactNode; isLa
           </button>
           <WalletButton />
           <Link className="btn fire sm" to="/#cmd">
-            {lang === 'zh' ? '立即参战' : 'Enter Battle'}
+            {lang === 'zh' ? '立即质押' : 'Stake Now'}
           </Link>
         </div>
       </nav>

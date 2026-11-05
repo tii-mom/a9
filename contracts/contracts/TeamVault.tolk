@@ -27,6 +27,7 @@ type TeamVaultAllowedMessage =
     | InitController
     | ReleaseTeamQuota
     | BurnTeamQuota
+    | ReturnExcessesBack
     | TopUpTons
 
 fun onInternalMessage(in: InMessage) {
@@ -60,7 +61,7 @@ fun onInternalMessage(in: InMessage) {
             val prev = st.rounds.get(roundId);
             if (prev.isFound) {
                 val state = prev.loadValue();
-                if (state.burned) {
+                if (!state.released) {
                     throw Errors.TeamRoundConflict;
                 }
                 // Idempotent duplicate: resend the acknowledgement, move nothing.
@@ -107,34 +108,68 @@ fun onInternalMessage(in: InMessage) {
                 if (state.released) {
                     throw Errors.TeamRoundConflict;
                 }
-                sendTeamBurnedAck(st, roundId, state.amountRaw, msg.burnId, msg.queryId);
+                if (state.burned) {
+                    // Already confirmed: idempotent ack resend.
+                    val burnIdRes = st.pendingBurnIds.get(roundId);
+                    assert (burnIdRes.isFound) throw Errors.BadBurnId;
+                    sendTeamBurnedAck(st, roundId, state.amountRaw, burnIdRes.loadValue(), msg.queryId);
+                }
+                // Pending burn: do not burn twice, wait for master confirmation.
                 return;
             }
 
             val params = st.params.load();
             val amount = params.teamRoundRaw;
             assert (amount > 0) throw Errors.ZeroTeamQuota;
+            val queryId = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
             st.rounds.set(roundId, TeamRoundState {
                 released: false,
-                burned: true,
+                burned: false,
                 amountRaw: amount,
-                queryId: msg.queryId,
+                queryId,
             });
-            st.totalBurnedRaw += amount;
-            st.burnedCount += 1;
+            st.pendingBurnIds.set(roundId, msg.burnId);
             st.save();
 
+            // P0-2 closure: excesses go back to TeamVault; only the Jetton Master's
+            // ReturnExcessesBack confirms the burn and triggers TeamBurnedAck.
             sendJettonBurn(
                 params.jettonWallet,
-                msg.queryId,
+                queryId,
                 amount as coins,
-                params.teamWallet,
+                contract.getAddress(),
             );
-            sendTeamBurnedAck(st, roundId, amount, msg.burnId, msg.queryId);
+        }
+        ReturnExcessesBack => {
+            var st = lazy TeamVaultStorage.load();
+            val params = st.params.load();
+            assert (in.senderAddress == params.jettonMaster) throw Errors.NotJettonMaster;
+            val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
+            val kind: uint8 = ((msg.queryId >> 8) & 0xff) as uint8;
+            assert (kind == BURN_QUERY_TEAM) throw Errors.BurnKindMismatch;
+            val prev = st.rounds.get(roundId);
+            if (!prev.isFound) {
+                return;
+            }
+            var state = prev.loadValue();
+            if (state.released || state.burned || state.queryId != msg.queryId) {
+                return;
+            }
+            state.burned = true;
+            st.rounds.set(roundId, state);
+            st.totalBurnedRaw += state.amountRaw;
+            st.burnedCount += 1;
+            val burnIdRes = st.pendingBurnIds.get(roundId);
+            assert (burnIdRes.isFound) throw Errors.BadBurnId;
+            val burnId = burnIdRes.loadValue();
+            // keep burnId in storage so later duplicate BurnTeamQuota can resend the ack
+            st.save();
+
+            sendTeamBurnedAck(st, roundId, state.amountRaw, burnId, msg.queryId);
             emitExternalEvent(TeamBurned {
                 roundId,
-                amountRaw: amount,
-                burnId: msg.burnId,
+                amountRaw: state.amountRaw,
+                burnId,
             });
         }
         TopUpTons => {
@@ -144,10 +179,34 @@ fun onInternalMessage(in: InMessage) {
     }
 }
 
-fun onBouncedMessage(_in: InMessageBounced) {
-    // TeamVault state is written before outgoing messages are sent and every
-    // instruction is idempotent, so a bounced child message is recovered by
-    // resending the same instruction from RoundController.
+fun onBouncedMessage(in: InMessageBounced) {
+    // P0-2 closure: a bounced team burn leaves the round retryable.
+    in.bouncedBody.skipBouncedPrefix();
+    if (in.bouncedBody.remainingBitsCount() < 96) {
+        return;
+    }
+    val op = in.bouncedBody.loadUint(32);
+    if (op != OP_JETTON_BURN) {
+        return;
+    }
+    val queryId: uint64 = in.bouncedBody.loadUint(64) as uint64;
+    val roundId: uint8 = ((queryId >> 16) & 0xff) as uint8;
+    val kind: uint8 = ((queryId >> 8) & 0xff) as uint8;
+    if (kind != BURN_QUERY_TEAM) {
+        return;
+    }
+    var st = lazy TeamVaultStorage.load();
+    val prev = st.rounds.get(roundId);
+    if (!prev.isFound) {
+        return;
+    }
+    val state = prev.loadValue();
+    if (state.released || state.burned || state.queryId != queryId) {
+        return;
+    }
+    st.rounds.delete(roundId);
+    st.pendingBurnIds.delete(roundId);
+    st.save();
 }
 
 fun requireController(st: TeamVaultStorage, sender: address) {

@@ -1,8 +1,8 @@
 # 10 — 上线与运营剩余工作清单（Launch Readiness）
 
-**版本**：V6.0 · 2026-11-05
+**版本**：V7.0 · 2026-11-05
 **对应代码**：`web/`（React 前端）+ `worker/`（Cloudflare Worker API + D1）+ `shared/`（API 契约）
-> **口径声明（V6）**：观察 **72h = 18 根 / 阈值 12（容错 6 根）**；目标价**开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**；**95% 闸门与 7 天提档已取消**；**24h PREVIEW 预告期已确认**；保留触价提前关窗；单轮 7 天 / 10 轮 70 天；三个前端倒计时；分配 70/8+5/12/5；P0 = $0.00116；冷启动 1 亿 A9 + $116,000；2× 最终确认；不允许取消质押。与 docs/00 冲突以其为准。
+> **口径声明（V7.0）**：观察 **24h = 24 根 × 1h / 阈值 16（容错 8 根）**；目标价**开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**；**95% 闸门与 7 天提档已取消**；**12h PREVIEW 预告期已确认**；保留触价提前关窗；单轮 3 天 / 10 轮 30 天；三个前端倒计时；分配 70/8+5/12/5；P0 = $0.00116；冷启动 2 亿 A9 + $232,000；2× 最终确认；不允许取消质押。与 docs/00 冲突以其为准。
 >
 > **结论先行**：**前端与后端服务层已经具备上线条件（演示数据模式）**；但协议本身的「主网可用」还差三大块硬工作——**智能合约+审计、预言机生产化、合规与经济模型冻结**。没有这三块，不得开放真实质押。
 
@@ -12,16 +12,18 @@
 
 | 层 | 状态 | 说明 |
 | --- | --- | --- |
-| 前端 UI（落地页 / 战况 / 指挥台 / 成交流 / 阶梯 / 沙盘 / 筹码 / 风险） | ✅ 已实现 | React 19 + Vite + TS，视觉 1:1 还原原型，中英双语 |
-| 应用页（我的战况 / 排行榜 / 运维后台） | ✅ 已实现 | 数据来自后端 API |
-| 后端 API（Cloudflare Worker + D1） | ✅ 已实现（演示数据源） | 19 个端点，状态机、K 线推进、销毁账本、admin 审计 |
-| 部署 | ✅ Cloudflare 单 Worker + D1（`*.workers.dev`） | 已可公网访问；自定义域名待绑 |
-| 数据源抽象 | ✅ `sources/demo.ts` + `sources/chain.ts` 桩 | 切真链只需实现 chain 适配器并改 `DATA_SOURCE=chain` |
-| 智能合约 | ❌ 未开发 | 自研 **RoundController + TeamVault 2 个**（文档 11）；官方复用 Jetton（TEP-74），不部署多签/锁仓 |
-| 预言机生产服务 | ❌ 未开发 | 文档 03 只给了数据格式与验证流程 |
+| 前端 UI（落地页 / 战况 / 指挥台 / 成交流 / 阶梯 / 沙盘 / 筹码 / 风险） | ✅ 已实现（V7：24 格 × 1h / 16 阈值） | React 19 + Vite + TS，视觉 1:1 还原原型，中英双语 |
+| 应用页（我的战况 / 排行榜 / 运维后台） | ✅ 已实现 | 数据来自后端 API；文案从 `/api/config` 动态取值 |
+| 前端接链（TON Connect 质押/领取） | ✅ 已实现（自研 Cell/BOC，与 `@ton/core` 字节一致） | 真实 payload：`StakeDeposit` 136bit / `ClaimAll` 104bit；含演示钱包兜底 |
+| 后端 API（Cloudflare Worker + D1） | ✅ 已实现（演示数据源，V7 参数已上线） | 19 个端点，状态机、K 线推进、销毁账本、admin 审计；`/api/config` 下发 24 根/16 阈值/12h+36h+24h |
+| 部署 | ✅ Cloudflare 单 Worker + D1 + 自定义域名 `a9.lat` / `www.a9.lat` | 已公网可访问（HTTPS）；cron `* * * * *` 驱动演示状态机 |
+| 数据源抽象 | ✅ `sources/demo.ts` 完整 + `sources/chain.ts` 桩（8 条 TODO） | 切真链需实现 chain 适配器并改 `DATA_SOURCE=chain` |
+| 智能合约 | ✅ 已实现（**未上链**） | `RoundController` + `TeamVault`（Tolk / Acton 1.1.0），47 个测试全绿，code hash 稳定；官方复用 Jetton（TEP-74） |
+| 测试网链上部署 | 🟡 脚本与 runbook 就绪，**未执行** | 合约已齐（含 Tolk 版 TEP-74 Jetton Master/Wallet，65 测试）；缺 2 项：①测试网 TON（RC ≥20 / TV ≥10）②6 个收款地址与参数签字（见 §2.6） |
+| 预言机生产服务 | ❌ 未开发 | 测试网用手动 K 线提交模式；文档 03 只给了数据格式与验证流程 |
 | BurnAck 主网化（V6.3） | 🟡 测试网以 jettonMaster 为 ack 权威 | 主网前必须换为 burn ack 扩展或「标准 burn + 链下对账 + owner 确认」（docs/04 §7） |
-| 审计 / 法务 / 经济模型冻结 | ❌ 未完成（**P0-2 经济闭环未解决**：2× + 100% 罚没 + 72h/18/12 下 EV ≈ −89%~−99%，见 docs/12/13） | V3~V6 已确认项已锁定；剩余 D-05~D-09、D-19、D-29 待定/待决策（D-11/D-12/D-13/D-28/D-30 已于 V6.1 定案） |
-| 运营体系（监控/值班/客服/透明页） | 🟡 部分 | 已有 admin 后台与健康检查；告警、值班、客服未建立 |
+| 审计 / 法务 / 经济模型冻结 | 🟡 审计待做；法务明确不做（D-34）；经济模型已冻结（2× + 100% 罚没 + V7 24h/24/16，通过率 0.01%~0.2%，EV 为负，已接受） | V7 已锁定全部参数；剩余 D-05~D-09、D-19、D-29 待定 |
+| 运营体系（监控/值班/客服/透明页） | 🟡 脚本与手册完备，未实跑 | `ops/` 脚本 12 个 + runbook 5 份 + 模板 8 份，selftest 全绿；告警通道、值班、客服未建立 |
 
 ---
 
@@ -57,7 +59,7 @@
 | D-24 | 合约升级策略 | ✅ RoundController 不可升级；管理员仅最小权限（V5） | 审计范围 | 项目方+技术 |
 | D-25 | 奖励领取方式 | ✅ pull claim：用户付 gas、跨轮累积、≤10 轮、合并一笔（V5） | 领取逻辑/是否自研 | 项目方+技术 |
 | D-26 | 解锁窗口与目标价冲突 | ✅ **V6 已定案**：目标价开窗锁定 `max(阶梯, 2×24h TWAP)`；**取消 95% 闸门与 7 天提档**；保留触价提前关窗 | 目标价语义、状态机、合约参数 | 项目方+经济顾问 |
-| D-27 | 开轮节奏/手动开轮/倒计时传播 | ✅ **V6 已定案**：结算→24h PREVIEW→自动开窗；不设常规手动开轮；三个前端倒计时；单轮 7 天/10 轮 70 天 | 开轮流程、状态机、前端倒计时 | 项目方+技术 |
+| D-27 | 开轮节奏/手动开轮/倒计时传播 | ✅ **V6 已定案**：结算→12h PREVIEW→自动开窗；不设常规手动开轮；三个前端倒计时；单轮 3 天/10 轮 30 天 | 开轮流程、状态机、前端倒计时 | 项目方+技术 |
 | D-28 | 失败后目标价语义 | ✅ **V6.1 已确认**：失败同档重试、成功升档；tier = 1 + 已成功轮数；10 轮 ≠ 10 档位 | 合约 targetPrice、状态机、前端阶梯 | 项目方+经济顾问 |
 | D-29 | 首轮（R1）启动规则 | ⚠️ **V5 待确认**：**Lead 推荐 A**（R1 目标 = 1.3~1.5×上市基准 TWAP）；B 7天报名+预热；C 空跑 | 首轮目标、上线运营、合约参数 | 项目方+经济顾问 |
 | D-30 | 搭便车/时间加权 | ✅ **V6.1 已确认**：第一版不做时间加权；保留后续可加 | 奖励权重、合约参数 | 项目方 |
@@ -75,7 +77,7 @@
 | 模块 | 工作内容 | 依赖 |
 | --- | --- | --- |
 | Jetton Master/Wallet | TEP-74 兼容 + 关闭 mint 或受限治理 + **burn acknowledgement 扩展**（用于链上确认销毁） | D-01/02 |
-| RoundController | 10 轮状态机、目标价开窗锁定公式（V6）、24h PREVIEW、观察边界、18 根 K 线计数、结算触发、claimAll（≤10 轮有界） | D-03/10/26 |
+| RoundController | 10 轮状态机、目标价开窗锁定公式（V6）、12h PREVIEW、观察边界、24 根 K 线计数、结算触发、claimAll（≤10 轮有界） | D-03/10/26 |
 | TeamVault | 托管 12 亿 Jetton Wallet（owner=TeamVault）；只接受 RC 指令；按轮 `ReleaseTeamQuota` / `BurnTeamQuota`，幂等互斥 | D-20 |
 | StakingVault | 接收 Jetton 转账 + payload 校验（roundId/nonce/riskVersion）+ 账本 + 成功返还 + 失败销毁 | D-11/12/13 |
 | RewardVault | 10 × 7 亿独立账本（合计 70 亿）+ claimAll 领取 + 失败销毁 + 余数留存 | D-14/16/25 |
@@ -91,7 +93,7 @@
 1. **数据采集器**：从 3+ 个白名单市场拉 4h 数据，计算 TWAP + 成交量 + 流动性 + 覆盖率（docs/03 §4）。
 2. **签名服务**：多个独立签名方（非项目多签合约，建议 3/5 阈值）各自部署，对 `OracleCandle` 摘要签名；私钥在 HSM/KMS，不落代码仓库。
 3. **提交器（keeper）**：任何人可提交，但需要有人跑；失败重试 + 监控。
-4. **pause/resume 守护**：数据缺失/源不足自动 `PauseOracle`，恢复后重新收满 18 根。
+4. **pause/resume 守护**：数据缺失/源不足自动 `PauseOracle`，恢复后重新收满 24 根。
 5. **可复核数据**：每根 K 线落对象存储（R2），公开 dataDigest，任何人可复算。
 6. 选型提醒：文档 08 列的是 TON 官方资料；**RedStone / Pyth 等第三方喂价在 TON 的可用性、签名格式、成本必须在选定前实际验证**，不能用「多源去中心化」话术代替实测。
 
@@ -132,6 +134,43 @@
 | CI/CD | GitHub Actions：typecheck → build → d1 migrate → deploy；生产部署需人工审批 |
 | 回滚 | Worker 版本回滚（`wrangler rollback`）+ D1 迁移前向兼容（只加列不删列） |
 
+### 2.6 测试网链上部署（V7：脚本就绪，未执行）
+
+**已完成**
+- 合约：`RoundController` + `TeamVault`，Tolk/Acton 1.1.0，47 个测试全绿，`acton check` 0 warning；code hash `RoundController 0xCA0FC4D4…C9B3` / `TeamVault 0xDDFEE8CA…09DD`（时间参数全部来自 storage config，改参数不改 hash）。
+- 参数：`contracts/deploy/params.testnet.json` 与 `ops/config/testnet.params.json` 已切 V7（12h + 36h + 24h、24 根 × 1h、16 阈值、单轮 72h、10 轮 30 天）。
+- 运维：`ops/scripts/` 12 步部署流水线（默认 dry-run，`OPS_EXECUTE=1` 才广播）、5 份 runbook、8 份模板、`verify_deployment.mjs` 对账。
+- 前端：TON Connect 真实质押/领取已实现并自测（BOC 与 `@ton/core` 字节一致），合约地址就位即可切真实网络。
+
+**已完成（原第 1 项硬缺口已补齐，V7 交付）**
+- **Jetton Master / Wallet 已用 Tolk 实现**：`contracts/contracts/jetton/`（JettonMaster / JettonWallet + messages/storage/errors/utils/fees/sharding），Acton 官方 jetton 模板骨架 + A9 mint-once 改造；`contracts/tests/jetton.test.tolk` 18 个用例（mint-once、权限、transfer、forward_payload 透传、burn+supply、伪造 internal_transfer、provide_wallet_address、get 方法、change_admin/content），全量 **65 测试通过**；code hash `JettonMaster 0xAA7BC0B3…740C` / `JettonWallet 0x068E64CF…7D53`。
+- mint：op `0x15`，仅 admin、金额必须 1e19（100 亿 × 1e9）、只允许一次，同一笔交易 `admin=null`（mintable=false），二次 mint 报 `MintClosed(75)`。
+- burn：wallet 发标准 `burn_notification 0x7bdd97de` → master 校验 canonical wallet 后扣 `total_supply`（测试网 BurnAck 权威即 jettonMaster）。
+- 部署脚本：`scripts/deploy-emulation.tolk` 已串起 JettonMaster → mint → TeamVault → RoundController → `get_wallet_address` 解析 → `SetJettonWallet` → `InitController`，无占位地址；分步脚本 `scripts/deploy/deploy_jetton_master.tolk` / `mint_and_lock_jetton.tolk`（位置参数）。
+
+**未完成（2 项硬缺口）**
+1. **测试网 TON 未充值**：`RoundController` 需 ≥20 TON、`TeamVault` 需 ≥10 TON（每条跨合约指令约 0.05 TON）。`acton wallet airdrop` 可从测试网 faucet 领（本机 acton 已装、faucet 通道可用），但需要先确定部署钱包。
+2. **6 个地址 + 参数签字**：`adminOwner / treasury / teamWallet / marketingWallet / liquidityWallet / teamInternalWallet`。测试网可全部用新生成的测试网钱包（私钥留本地 keystore），主网必须换成项目方硬件钱包。
+
+**执行顺序（≈ 半天，Jetton Master 补齐后）**
+```
+acton wallet new --name a9-deployer --version v4r2 --airdrop   # 或 import 已有助记词
+node ops/scripts/00_preflight.mjs                              # dry-run 体检
+node ops/scripts/10_deploy_jetton.mjs                          # Jetton Master
+node ops/scripts/11_mint_and_lock_jetton.mjs                   # 铸 100 亿 + 关 mint
+node ops/scripts/20_deploy_teamvault.mjs
+node ops/scripts/30_deploy_round_controller.mjs
+node ops/scripts/40_init_params.mjs
+node ops/scripts/65_set_jetton_wallets.mjs
+node ops/scripts/70_bind_roles.mjs
+node ops/scripts/55_fund_ton.mjs && node ops/scripts/50_fund_vaults.mjs
+node ops/scripts/60_verify_and_register.mjs
+node ops/scripts/verify_deployment.mjs                         # 对账
+```
+每步先 dry-run 看输出，确认后加 `OPS_EXECUTE=1` 重跑。部署完成后把地址写入 `ops/config/testnet.params.json` 的 `contracts` 段与 D1 `contracts` 表，前端与 `/api/config` 即可切真实网络。
+
+**注意**：已部署实例的 config 不可变（RC 不可升级），参数一旦写进 storage 只能重新部署。因此 **Jetton Master 补齐 + 参数签字完成后再执行第一次真实部署**，避免浪费测试网地址与 TON。
+
 ---
 
 ## 3. 安全与审计
@@ -162,12 +201,12 @@
 ## 5. 经济模型与做市
 
 1. **P0 确认**：V5.4 已定 **P0 = $0.00116**（USD_E8 = 116,000；1 GRAM = 1000 A9 × GRAM $1.16，FDV $11.6M）；主网前如按市场校准，按「先上流动性 → 公开基准期 → 多源 TWAP → 写链 + 公布数据与哈希」执行（docs/01 §4）。
-2. **冷启动池（V5.4 已确认）**：1 亿 A9 + $116,000 USDT @ $0.00116（与内盘价一致）；后续按 docs/01 §10 分阶段双边加池。
-2. **内盘与流动性（V5.5 定案 / V5.6 销售规则已确认）**：内盘销售 **8%（8 亿 A9，全售可募 $928,000 / 800,000 GRAM）**——可售 **硬上限 8 亿、不可超卖**，实际销量由项目方按市场决定、可分批，未售/撤回全部转**公开可查的团队内盘管理钱包**（仅加池/OTC/后续轮次公告后使用，不得二级直砸；合约不承担销售逻辑）；流动性 **5%（5 亿 A9，全额进池需 $580,000 USDT）**；冷启动池 1 亿 A9 + $116,000（占流动性 20%），初始流通 8% ≈ $928,000；建议按「分阶段双边加池」推进，避免深度不足又被砸盘或目标不可达。
+2. **冷启动池（V5.4 已确认）**：2 亿 A9 + $232,000 USDT @ $0.00116（与内盘价一致）；后续按 docs/01 §10 分阶段双边加池。
+2. **内盘与流动性（V5.5 定案 / V5.6 销售规则已确认）**：内盘销售 **8%（8 亿 A9，全售可募 $928,000 / 800,000 GRAM）**——可售 **硬上限 8 亿、不可超卖**，实际销量由项目方按市场决定、可分批，未售/撤回全部转**公开可查的团队内盘管理钱包**（仅加池/OTC/后续轮次公告后使用，不得二级直砸；合约不承担销售逻辑）；流动性 **5%（5 亿 A9，全额进池需 $580,000 USDT）**；冷启动池 2 亿 A9 + $232,000（占流动性 40%），初始流通 8% ≈ $928,000；建议按「分阶段双边加池」推进，避免深度不足又被砸盘或目标不可达。
 3. **做市/防砸盘**：失败销毁机制本身会制造抛压预期，必须提前设计做市与回购规则（并公开）。
 4. **压力测算**：假设第 1 轮质押池 3000 万~1 亿枚，失败时销毁规模、对流通盘与价格的影响。
 5. **激励一致性**：奖励按质押比例分配会诱导「越早质押越好」，需评估稀释与最后时刻狙击（D-14 已确认纯质押比例；快照/加权属后续优化）。
-6. **V5 待决策（D-26，最高优先级）**：报名窗口 72h 下，若现价已 ≥ 目标价则观察期几乎确定通过、无风险白拿 7 亿；**方案 B+（Lead 推荐：固定阶梯 + 1h TWAP 闸门 + 触价提前关窗 + 24h 缓冲）** / A 相对翻倍 / C 短窗+随机截止，见 docs/00 §7，定案前不得进入合约参数设计（保持 `FIXED_LADDER`）。
+6. **V5 待决策（D-26，最高优先级）**：报名窗口 36h 下，若现价已 ≥ 目标价则观察期几乎确定通过、无风险白拿 7 亿；**方案 B+（Lead 推荐：固定阶梯 + 1h TWAP 闸门 + 触价提前关窗 + 12h 缓冲）** / A 相对翻倍 / C 短窗+随机截止，见 docs/00 §7，定案前不得进入合约参数设计（保持 `FIXED_LADDER`）。
 6. **模拟盘**：主网上线前用 Testnet 跑完整 10 轮（可加速），公开结果。
 
 ---
@@ -183,7 +222,7 @@
 - 内容：上线公告、规则长图、风险提示视频/图文、每轮开轮与结算公告。
 - 数据看板：DAU、质押地址数、TVL、轮次通过率、销毁量、预言机延迟。
 
-**运营节奏（V6）**：每轮 = **24h 预告期 + 72h 报名 + 72h 观察 = 7 天**（结算/领取在轮内推进）；**10 轮 = 70 天**。需提前排期公告。
+**运营节奏（V6）**：每轮 = **12h 预告期 + 72h 报名 + 24h 观察 = 7 天**（结算/领取在轮内推进）；**10 轮 = 70 天**。需提前排期公告。
 
 ---
 
@@ -198,7 +237,7 @@
 | W6 | **Testnet 启动（前置：文档定稿 + 参数签字 + D-26 已定）**；完整演练（成功轮 + 失败轮 + 三笔销毁核对 supply + TeamVault 指令 + claimAll + 无人质押分支） |
 | W7~W8 | 第三方审计（第一轮）→ 修复 → 复审 |
 | W9 | 法律意见书定稿；风险披露 v1 定稿并与前端 payload 对齐；地区限制配置 |
-| W10 | 主网参数冻结、部署合约、注入 70 亿奖励池 + 12 亿 TeamVault 团队额度、建立冷启动池（1 亿 A9 + $116,000）、验证 10×7 亿 + 10×1.2 亿分账；P0 = $0.00116 公布；验证目标价逐轮写入事件 |
+| W10 | 主网参数冻结、部署合约、注入 70 亿奖励池 + 12 亿 TeamVault 团队额度、建立冷启动池（2 亿 A9 + $232,000）、验证 10×7 亿 + 10×1.2 亿分账；P0 = $0.00116 公布；验证目标价逐轮写入事件 |
 | W11 | 主网预演（小额质押、K 线提交、结算、销毁全链路）；监控/告警/值班就绪 |
 | W12 | Round 1 开放报名；上线公告；7×24 值守开始 |
 
@@ -214,7 +253,7 @@
 | 第三方审计（RoundController + TeamVault 自研面） | $12k~35k（一次性） |
 | 法务意见书 + 文书 | $5k~30k（一次性） |
 | 预言机/价格数据（如需商业源） | $200~2,000 / 月 |
-| 做市资金 | 由流动性 5%（5 亿 A9）+ 内盘募资（$928,000）中的一部分承担；冷启动先投 1 亿 A9 + $116,000 |
+| 做市资金 | 由流动性 5%（5 亿 A9）+ 内盘募资（$928,000）中的一部分承担；冷启动先投 2 亿 A9 + $232,000 |
 | 监控/Sentry/告警 | $0~100 / 月 |
 | 人力（合约 2 人 × 3 月 + 前端运维 0.5 人） | 按团队自估 |
 
@@ -243,15 +282,15 @@
 ## 10. 上线验收清单（全部 ✅ 才能开真实质押）
 
 - [ ] D-01~D-32 全部书面确认（V3~V5 已确认项见 docs/07 §1；**D-28 同档重试、D-29 R1 启动必须先定**；D-26/D-27/D-31/D-32 已定案），配置哈希生成并公布
-- [ ] 已确认项落实：观察窗口 18 根/72h/12 阈值；质押限额（10,000 A9 / 单地址≤10% / 本轮≤2亿）；技术终止（14天/7天、任何人可触发）；D-28 同档重试；D-30 无时间加权；目标价开窗锁定公式与 24h PREVIEW 已实现；**不允许取消质押**（仅技术终止退本金）且前端风险披露已写明
-- [ ] P0 = $0.00116 / 2× / 冷启动池（1 亿 A9 + $116,000）落实；目标价逐轮写入 + `TargetPriceSet` 事件可校验（不预存 10 轮价格）
+- [ ] 已确认项落实：观察窗口 24 根/24h/16 阈值；质押限额（10,000 A9 / 单地址≤10% / 本轮≤2亿）；技术终止（14天/7天、任何人可触发）；D-28 同档重试；D-30 无时间加权；目标价开窗锁定公式与 12h PREVIEW 已实现；**不允许取消质押**（仅技术终止退本金）且前端风险披露已写明
+- [ ] P0 = $0.00116 / 2× / 冷启动池（2 亿 A9 + $232,000）落实；目标价逐轮写入 + `TargetPriceSet` 事件可校验（不预存 10 轮价格）
 - [ ] 合约审计完成，无未解决 Critical/High
 - [ ] 代码哈希 = 审计版本；源码与 ABI 公开
 - [ ] Testnet 成功轮 / 失败轮 / 故障暂停恢复全部演练通过
 - [ ] 失败销毁**三笔**（奖励 7 亿 + 团队 1.2 亿 + 本金）后 Jetton Master `total_supply` 实际减少（链上核对）
 - [ ] 成功轮 TeamVault 释放 1.2 亿到账且每轮只释放一次；TeamVault 非 RC 指令被拒
 - [ ] claimAll 跨轮领取金额正确、幂等、合并一笔转账（≤10 轮）
-- [ ] 报名 72h / 间隔 0 与观察 72h 边界在链上核对精确
+- [ ] 报名 36h / 间隔 0 与观察 24h 边界在链上核对精确
 - [ ] 0 人质押且通过轮次：7 亿奖励实际销毁
 - [ ] 质押本金「返还」与「销毁」互斥，重复调用幂等
 - [ ] 预言机：多源、签名验证、覆盖率、暂停/恢复、数据公开可复核

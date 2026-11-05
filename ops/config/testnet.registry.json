@@ -3,10 +3,10 @@
   "chainId": -3,
   "status": "not_deployed",
   "configVersion": 1,
-  "paramsDigest": "sha256:0ac1aa27e0bb2bc581452e8ec07bd441276e77c42336ea9dcbaf1d3dd0397704",
+  "paramsDigest": null,
   "codeHashes": {},
-  "createdAt": "2026-11-05T07:24:58.926Z",
-  "updatedAt": "2026-11-05T07:25:33.989Z",
+  "createdAt": "2026-11-05T08:09:19.892Z",
+  "updatedAt": "2026-11-05T08:09:19.893Z",
   "contracts": {
     "jettonMaster": {
       "address": null,
@@ -118,61 +118,10 @@
   },
   "funding": [],
   "verification": {
-    "lastRunAt": "2026-11-05T07:25:33.988Z",
-    "healthy": true,
-    "checks": [
-      {
-        "name": "contract.jettonMaster",
-        "status": "FAIL",
-        "detail": "未登记地址"
-      },
-      {
-        "name": "contract.teamVault",
-        "status": "FAIL",
-        "detail": "未登记地址"
-      },
-      {
-        "name": "contract.roundController",
-        "status": "FAIL",
-        "detail": "未登记地址"
-      },
-      {
-        "name": "wallet.adminOwner",
-        "status": "WARN",
-        "detail": "未登记（部署前必须提供）"
-      },
-      {
-        "name": "wallet.treasury",
-        "status": "WARN",
-        "detail": "未登记（部署前必须提供）"
-      },
-      {
-        "name": "wallet.teamWallet",
-        "status": "WARN",
-        "detail": "未登记（部署前必须提供）"
-      },
-      {
-        "name": "wallet.marketingWallet",
-        "status": "WARN",
-        "detail": "未登记（部署前必须提供）"
-      },
-      {
-        "name": "wallet.liquidityWallet",
-        "status": "WARN",
-        "detail": "未登记（部署前必须提供）"
-      },
-      {
-        "name": "wallet.teamInternalWallet",
-        "status": "WARN",
-        "detail": "未登记（部署前必须提供）"
-      },
-      {
-        "name": "bindings.roundControllerUpgradeable",
-        "status": "PASS",
-        "detail": "不可升级（D-24）"
-      }
-    ],
-    "digest": "sha256:b56dfc9c569f33b106d0dc64ead3a924e5f168296510758bfdbcd78b1cfaf3f7"
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
   },
   "notes": [
     "初始登记表：尚未部署。部署时由 10/20/30/65/70/50/60 脚本写入地址，60 脚本定稿并生成地址簿。"

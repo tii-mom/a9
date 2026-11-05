@@ -1,5 +1,5 @@
 /**
- * A9 引信协议 Worker 入口：/api/* 走 API，其余交给 ASSETS（web/dist，SPA 回退）。
+ * A9 Worker 入口：/api/* 走 API，其余交给 ASSETS（web/dist，SPA 回退）。
  */
 import type { Env } from './env';
 import { markIsolateStarted } from './env';
@@ -32,6 +32,8 @@ import {
 import * as state from './state';
 import * as store from './store';
 import * as views from './views';
+import * as v8 from './v8';
+import { ownWeightFor, streakForRound } from './protocol';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 import type { ReconcileResult } from './state';
 import type { Env as WorkerEnv } from './env';
@@ -99,15 +101,45 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
     throw conflict('当前不在质押时间窗口内');
   }
 
+  // V8：连续轮次与权重（streak = 上轮+1 / 同轮保持 / 否则重置 1）
+  const myStakes = st.stakeRows.filter((row) => row.address === address);
+  const lastRound = myStakes.reduce((max, row) => Math.max(max, row.round_id), 0);
+  const lastStreak = myStakes
+    .filter((row) => row.round_id === lastRound)
+    .reduce((max, row) => Math.max(max, row.streak ?? 1), 0);
+  const streak = streakForRound(lastRound, lastStreak, roundId);
+  const weightRaw = ownWeightFor(amount, streak);
+
+  // V8：邀请人绑定（一次性、不可改；demo 允许首次质押时通过 body.referrer 绑定）
+  let referredBy: string | null = null;
+  const bound = await store.getReferralOf(env, address);
+  if (bound) {
+    referredBy = bound.referrer;
+  } else {
+    const rawReferrer = optionalString(body, 'referrer');
+    if (rawReferrer && rawReferrer !== address) {
+      const referrer = parseAddress(rawReferrer, 'referrer');
+      const back = await store.getReferralOf(env, referrer);
+      if (back && back.referrer === address) throw conflict('禁止互相绑定邀请');
+      const boundReferrer = await store.insertReferral(env, address, referrer, now);
+      if (boundReferrer) {
+        referredBy = referrer;
+        await store.logEvent(env, 'info', address.slice(0, 12), 'REFERRER_SET', 'referrer=' + referrer);
+      }
+    }
+  }
+
   const inserted = await store.insertStake(env, {
     roundId,
     address,
     amountRaw: amount,
-    weightRaw: amount,
+    weightRaw,
     nonce,
     riskDisclosureVersion: riskVersion,
     acceptFullPrincipalBurn: true,
     acceptedAt: now,
+    streak,
+    referredBy,
   });
   if (!inserted) throw conflict('重复的 deposit nonce，本次质押已忽略');
 
@@ -117,7 +149,7 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
     'info',
     `wallet:${address.slice(0, 8)}`,
     'STAKE_ACCEPTED',
-    `R${roundId} + ${amount.toString()} raw（nonce ${nonce.slice(0, 18)}）`,
+    `R${roundId} + ${amount.toString()} raw（streak=${streak} weight=${weightRaw.toString()} referral=${referredBy ?? '-'}）`,
   );
   bustCache();
   return okResponse({
@@ -129,10 +161,42 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
 async function handleClaim(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
   const body = await readJsonBody(request);
   const address = parseAddress(body.address);
-  const roundId = parseRoundId(body.roundId);
   const kind = requireString(body, 'kind');
-  if (kind !== 'principal' && kind !== 'reward') throw badRequest('kind 必须是 principal 或 reward');
+  if (kind !== 'principal' && kind !== 'reward' && kind !== 'unlock') {
+    throw badRequest('kind 必须是 principal / reward / unlock');
+  }
+  const roundsById = new Map(st.rounds.map((row) => [row.round_id, row]));
 
+  // V8 ClaimUnlocked：R10 任一终态后按 12×30 天线性领取
+  if (kind === 'unlock') {
+    const unlock = await v8.buildUnlockInfo(env, st.params, st.rewardRows, roundsById, address, st.now);
+    if (!unlock.active) throw conflict('解锁尚未开始：R10 终态后 12 个月线性解锁');
+    const claimAmount = toBigInt(unlock.claimableRaw);
+    if (claimAmount <= 0n) {
+      return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
+    }
+    const recordedUnlock = await store.recordClaim(env, {
+      roundId: st.params.roundCount,
+      address,
+      kind: 'unlock',
+      amountRaw: claimAmount,
+      claimedAt: st.now,
+    });
+    if (!recordedUnlock) {
+      const raced = await store.getClaim(env, st.params.roundCount, address, 'unlock');
+      return okResponse({ claimed: false, amountRaw: raced?.amount_raw ?? '0', alreadyClaimed: true });
+    }
+    await store.updateUnlockPool(
+      env,
+      { claimedRaw: (toBigInt(st.unlockPool.claimed_raw) + claimAmount).toString() },
+      st.now,
+    );
+    await store.logEvent(env, 'info', address.slice(0, 12), 'UNLOCK_CLAIMED', `${claimAmount.toString()} raw`);
+    bustCache();
+    return okResponse({ claimed: true, amountRaw: claimAmount.toString(), alreadyClaimed: false });
+  }
+
+  const roundId = parseRoundId(body.roundId);
   const round = st.rounds.find((item) => item.round_id === roundId);
   if (!round) throw notFound('轮次不存在');
   if (round.state === 'FAILED_PERMANENT') {
@@ -148,17 +212,57 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
     return okResponse({ claimed: false, amountRaw: already.amount_raw, alreadyClaimed: true });
   }
 
-  const roundTotal = toBigInt(round.total_accepted_stake_raw);
   const amount = stakeRows.reduce((sum, row) => sum + toBigInt(row.amount_raw), 0n);
   let claimAmount = 0n;
+
   if (kind === 'principal') {
     claimAmount = stakeRows.reduce(
       (sum, row) => sum + (row.principal_claimed === 1 ? 0n : toBigInt(row.amount_raw)),
       0n,
     );
   } else {
-    const reward = mulDivFloor(toBigInt(round.reward_budget_raw), amount, roundTotal);
-    claimAmount = stakeRows.some((row) => row.reward_claimed === 1) ? 0n : reward;
+    // V8：阶梯期奖励三态；旧 ClaimReward 按 EARLY 语义只付 50%，另一半进解锁池（无后门）
+    const lastRound = st.rounds.find((row) => row.round_id === st.params.roundCount);
+    const unlockStarted =
+      !!lastRound &&
+      (lastRound.state === 'SUCCEEDED' || lastRound.state === 'FAILED_PERMANENT' || lastRound.state === 'TECHNICAL_ABORTED') &&
+      st.unlockPool.start_at > 0;
+    if (unlockStarted) {
+      throw conflict('R10 已终态、解锁已开始：请改用 ClaimUnlocked 线性领取（旧 ClaimReward 已关闭）');
+    }
+    const rewardRow = st.rewardRows.find((row) => row.round_id === roundId && row.address === address);
+    if (rewardRow && rewardRow.state !== 0) {
+      return okResponse({
+        claimed: false,
+        amountRaw: rewardRow.state === 2 ? rewardRow.paid_raw : '0',
+        alreadyClaimed: true,
+        state: rewardRow.state,
+      });
+    }
+    const reward = rewardRow
+      ? toBigInt(rewardRow.reward_raw)
+      : mulDivFloor(toBigInt(round.reward_budget_raw), amount, toBigInt(round.total_accepted_stake_raw));
+    const paidBps = BigInt(10_000 - st.params.earlyClaimPenaltyBps);
+    claimAmount = (reward * paidBps) / 10_000n;
+    const lockedAmount = reward - claimAmount;
+    if (claimAmount <= 0n) {
+      return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
+    }
+    if (rewardRow) {
+      await store.updateRoundReward(env, {
+        roundId,
+        address,
+        state: 2,
+        paidRaw: claimAmount.toString(),
+        lockedRaw: lockedAmount.toString(),
+        now: st.now,
+      });
+    }
+    await store.updateUnlockPool(
+      env,
+      { totalLockedRaw: (toBigInt(st.unlockPool.total_locked_raw) + lockedAmount).toString() },
+      st.now,
+    );
   }
 
   if (claimAmount === 0n) {
@@ -179,8 +283,8 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
   await store.logEvent(
     env,
     'info',
-    `wallet:${address.slice(0, 8)}`,
-    kind === 'principal' ? 'PRINCIPAL_CLAIMED' : 'REWARD_CLAIMED',
+    address.slice(0, 12),
+    kind === 'principal' ? 'PRINCIPAL_CLAIMED' : 'REWARD_EARLY_CLAIMED',
     `R${roundId} ${claimAmount.toString()} raw`,
   );
   bustCache();
@@ -282,6 +386,12 @@ async function route(
       default:
         throw notFound('接口不存在');
     }
+  }
+
+  if (parts[0] === 'referral' && parts.length === 2) {
+    assertMethod(method, 'GET');
+    const address = parseAddress(decodeURIComponent(parts[1]));
+    return okResponse(await views.buildReferralResponse(env, st, address));
   }
 
   if (parts[0] === 'rounds' && parts.length >= 2) {

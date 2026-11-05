@@ -56,6 +56,7 @@ fun onInternalMessage(in: InMessage) {
             st.lastTransferDest = msg.transferRecipient;
             st.lastTransferAmount = msg.jettonAmount;
             st.save();
+
         }
         AskToBurn => {
             var st = lazy MockWalletStorage.load();

@@ -1,7 +1,7 @@
 import type { Candle, ProtocolConfig, RoundDetail, RoundState, RoundSummary } from '@shared/types';
 import { pad2 } from '../../lib/format';
 
-/** Round states where the round is live (battle board should focus it). */
+/** Round states where the round is live (the round board should focus it). */
 const ACTIVE_STATES: RoundState[] = [
   'STAKING_OPEN',
   'STAKING_CLOSED',
@@ -45,21 +45,13 @@ export function phaseOf(state: RoundState | null | undefined): Phase {
   }
 }
 
-export function targetFromConfig(cfg: ProtocolConfig | null, roundId: number | null): string | null {
-  if (!cfg || roundId === null) return null;
-  const p0 = Number(cfg.p0UsdE8);
-  const mult = Number(cfg.priceMultiplier) || 2;
-  if (!Number.isFinite(p0)) return null;
-  const target = p0 * Math.pow(mult, roundId);
-  if (!Number.isFinite(target)) return null;
-  return String(Math.round(target));
-}
-
-export function priceMultiplierOf(cfg: ProtocolConfig | null, roundId: number | null): number | null {
-  if (!cfg || roundId === null) return null;
-  const mult = Number(cfg.priceMultiplier) || 2;
-  const value = Math.pow(mult, roundId);
-  return Number.isFinite(value) ? value : null;
+/**
+ * 目标价档位由 API 提供（D-28：tier = 1 + 已成功轮数，失败不升档）。
+ * 前端禁止用 roundId 推导 2^n：R2 失败后 R3 仍是 4×P0，只有成功才升档。
+ */
+export function roundById(rounds: RoundSummary[] | null | undefined, roundId: number | null): RoundSummary | null {
+  if (!rounds || roundId === null) return null;
+  return rounds.find((round) => round.roundId === roundId) ?? null;
 }
 
 export interface BoardView {
@@ -72,6 +64,12 @@ export interface BoardView {
   missAllowance: number;
   failAt: number;
   targetUsdE8: string | null;
+  /** 本轮档位倍数（API 的 priceMultiplier = 2^tier，禁止前端自行推导） */
+  priceMultiplier: number | null;
+  /** 下一轮（用于结算卡片的「下一轮目标」展示） */
+  nextRoundId: number | null;
+  nextTargetUsdE8: string | null;
+  nextPriceMultiplier: number | null;
   priceUsdE8: string | null;
   candles: Candle[];
   hits: number;
@@ -98,12 +96,13 @@ export function deriveBoard(
   cfg: ProtocolConfig | null,
   focus: RoundSummary | null,
   detail: RoundDetail | null,
+  rounds: RoundSummary[] | null | undefined = null,
 ): BoardView {
   const state = detail?.state ?? focus?.state ?? null;
   const phase = phaseOf(state);
   const roundId = detail?.roundId ?? focus?.roundId ?? null;
-  const candleCount = cfg?.candleCount ?? 18;
-  const need = cfg?.minQualifiedCandles ?? 12;
+  const candleCount = cfg?.candleCount ?? 24;
+  const need = cfg?.minQualifiedCandles ?? 16;
   const missAllowance = Math.max(0, candleCount - need);
   const failAt = missAllowance + 1;
   const candles = detail?.candles ?? [];
@@ -113,7 +112,10 @@ export function deriveBoard(
   const live = phase === 'observe' && !!detail?.live;
   const liveProgress = detail?.live ? Math.min(1, Math.max(0, detail.live.progressBps / 10000)) : 0;
   const tentativeHit = !!detail?.live?.qualifiedTentative;
-  const targetUsdE8 = detail?.targetPriceUsdE8 ?? focus?.targetPriceUsdE8 ?? targetFromConfig(cfg, roundId);
+  const targetUsdE8 = detail?.targetPriceUsdE8 ?? focus?.targetPriceUsdE8 ?? null;
+  const priceMultiplier = detail?.priceMultiplier ?? focus?.priceMultiplier ?? null;
+  const nextRoundId = roundId !== null && (!cfg || roundId < cfg.roundCount) ? roundId + 1 : null;
+  const nextRound = roundById(rounds, nextRoundId);
   const priceUsdE8 = detail?.priceUsdE8 ?? null;
   const result: BoardView['result'] =
     state === 'SUCCEEDED' || state === 'SETTLING_SUCCESS'
@@ -134,6 +136,10 @@ export function deriveBoard(
     missAllowance,
     failAt,
     targetUsdE8,
+    priceMultiplier,
+    nextRoundId,
+    nextTargetUsdE8: nextRound?.targetPriceUsdE8 ?? null,
+    nextPriceMultiplier: nextRound?.priceMultiplier ?? null,
     priceUsdE8,
     candles,
     hits,

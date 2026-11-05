@@ -1,6 +1,7 @@
 /** 所有脚本共用的启动流程：参数校验 → 依赖检查 → 执行开关 → 汇总。 */
 
-import { loadAndValidate } from './config.mjs';
+import { existsSync, readFileSync } from 'node:fs';
+import { loadAndValidate, resolvePath } from './config.mjs';
 import { isExecute, parseArgs } from './cli.mjs';
 import { loadRegistry } from './registry.mjs';
 import { toolchainStatus } from './toolchain.mjs';
@@ -65,14 +66,14 @@ export function bootstrap({ id, title, dependsOn = [] }) {
 }
 
 export function printProtocolConfigExpected(params) {
-  section('预期链上配置（V6.2）');
+  section('预期链上配置（V7 时间参数）');
   kv('P0', params.price.p0UsdE8 + ' USD_E8（' + params.price.p0Usd + '）');
   kv('倍数', params.price.priceMultiplier + '×（不可变）');
   kv('目标价锁定', params.price.targetFormula);
-  kv('PREVIEW', params.timeline.previewSeconds + 's（24h）');
-  kv('报名窗口', params.timeline.stakeDurationSeconds + 's（72h）');
-  kv('观察窗口', params.timeline.candleCount + ' × ' + params.timeline.candleSeconds + 's = ' + params.timeline.observationSeconds + 's（72h），阈值 ' + params.timeline.minQualifiedCandles);
-  kv('单轮 / 10 轮', params.timeline.roundSeconds + 's（7 天）/ ' + params.timeline.roundsTotalSeconds + 's（70 天）');
+  kv('PREVIEW', params.timeline.previewSeconds + 's（12h）');
+  kv('报名窗口', params.timeline.stakeDurationSeconds + 's（36h）');
+  kv('观察窗口', params.timeline.candleCount + ' × ' + params.timeline.candleSeconds + 's = ' + params.timeline.observationSeconds + 's（24h），阈值 ' + params.timeline.minQualifiedCandles);
+  kv('单轮 / 10 轮', params.timeline.roundSeconds + 's（72h）/ ' + params.timeline.roundsTotalSeconds + 's（30 天）');
   kv('每轮奖励', params.rounds.roundRewardRaw + ' raw（7 亿 A9）');
   kv('团队每轮', params.rounds.teamRoundRaw + ' raw（1.2 亿 A9）');
   kv('质押限额', 'min ' + params.stakeLimits.minStakeRaw + ' / 单地址 ≤ ' + params.stakeLimits.maxStakePerAddressBps + ' bps / 本轮 ≤ ' + params.stakeLimits.maxTotalStakeRaw);
@@ -98,4 +99,27 @@ export function resolveWalletAddress(registry, key) {
   const wallet = registry.wallets[key];
   if (!wallet || !wallet.address) return null;
   return wallet.address;
+}
+
+/** 广播签名钱包名：A9_SIGNER_WALLET > TON_DEPLOYER_WALLET > params 默认。 */
+export function signerWallet(params) {
+  return (
+    process.env.A9_SIGNER_WALLET ||
+    (params.network.deployer.walletNameEnv ? process.env[params.network.deployer.walletNameEnv] : null) ||
+    params.network.deployer.walletNameDefault ||
+    'a9-deployer'
+  );
+}
+
+/** 读取 contracts/deploy/*.addr（部署脚本自动生成，纯地址 + 换行）。 */
+export function addressFromFile(params, fileName) {
+  const path = resolvePath(params.toolchain.contractsDir + '/deploy/' + fileName);
+  if (!existsSync(path)) return null;
+  const first = readFileSync(path, 'utf8').trim().split(String.fromCharCode(10))[0].trim();
+  return first || null;
+}
+
+/** 优先登记表地址；缺失时回退到 contracts/deploy/ 地址文件。 */
+export function resolveAddress(registry, params, key, fileName) {
+  return resolveContractAddress(registry, key) || (fileName ? addressFromFile(params, fileName) : null);
 }

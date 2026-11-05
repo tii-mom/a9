@@ -25,7 +25,7 @@ await page.waitForTimeout(3000);
 
 await step('hero 标题', async () => {
   const t = await page.locator('h1').first().innerText();
-  if (!t.includes('18 根 K 线点亮 12 根')) throw new Error('h1 文案不符: ' + t.slice(0, 60));
+  if (!/押多少你定/.test(t) || !/至少翻倍/.test(t)) throw new Error('h1 文案不符: ' + t.slice(0, 60));
   ok('hero 标题', t.replace(/\s+/g, ' ').slice(0, 30));
 });
 
@@ -35,13 +35,22 @@ await step('行情已接后端', async () => {
   ok('行情已接后端', px.trim());
 });
 
-await step('12 格 K 线', async () => {
+await step('24 格 K 线', async () => {
   const n = await page.locator('.cells .cell').count();
-  if (n !== 18) throw new Error('cell 数量 ' + n);
-  ok('18 格 K 线', '18 cells');
+  if (n !== 24) throw new Error('cell 数量 ' + n);
+  ok('24 格 K 线', '24 cells');
+});
+
+await step('观察窗口 24 根 / 阈值 16', async () => {
+  const body = await page.locator('body').innerText();
+  if (!/24\s*根/.test(body)) throw new Error('页面未出现 24 根');
+  if (!/16/.test(body)) throw new Error('页面未出现阈值 16');
+  ok('观察窗口 24 根 / 阈值 16', 'copy ok');
 });
 
 await step('沙盘推演交互', async () => {
+  const sn = await page.locator('.sand-cells .sc').count();
+  if (sn !== 24) throw new Error('沙盘格数 ' + sn);
   const first = page.locator('.sand-cells .sc').first();
   const before = await first.getAttribute('aria-pressed');
   await first.click();

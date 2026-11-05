@@ -7,6 +7,16 @@ license = "MIT"
 [toolchain]
 acton = "1.1.0"
 
+[contracts.JettonWallet]
+display-name = "JettonWallet"
+src = "contracts/jetton/JettonWallet.tolk"
+depends = []
+
+[contracts.JettonMaster]
+display-name = "JettonMaster"
+src = "contracts/jetton/JettonMaster.tolk"
+depends = ["JettonWallet"]
+
 [contracts.TeamVault]
 display-name = "TeamVault"
 src = "contracts/TeamVault.tolk"

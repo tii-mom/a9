@@ -16,7 +16,7 @@ import "test-utils"
 get fun `test TeamVault deploys with controller unset and correct params`() {
     val admin = testing.treasury("admin");
     val teamWallet = testing.treasury("team-wallet");
-    val vault = deployTeamVault(admin.address, teamWallet.address);
+    val vault = deployTeamVault(admin.address, teamWallet.address, testing.treasury("jetton-master").address);
 
     val st = teamVaultState(vault);
     expect(st.controller).toBeNull();
@@ -30,7 +30,7 @@ get fun `test SetJettonWallet is admin-only and must precede InitController`() {
     val admin = testing.treasury("admin");
     val notAdmin = testing.treasury("not-admin");
     val teamWallet = testing.treasury("team-wallet");
-    val vault = deployTeamVault(admin.address, teamWallet.address);
+    val vault = deployTeamVault(admin.address, teamWallet.address, testing.treasury("jetton-master").address);
     val mockOwner = testing.treasury("mock-owner");
     val wallet = deployMockWallet(mockOwner.address, ton("0"));
 
@@ -65,7 +65,7 @@ get fun `test InitController is admin-only and one-time`() {
     val notAdmin = testing.treasury("not-admin");
     val rc = testing.treasury("rc");
     val teamWallet = testing.treasury("team-wallet");
-    val vault = deployTeamVault(admin.address, teamWallet.address);
+    val vault = deployTeamVault(admin.address, teamWallet.address, testing.treasury("jetton-master").address);
 
     val r1 = sendInitController(vault, notAdmin.address, rc.address);
     expect(r1).toHaveFailedTx<InitController>({
@@ -119,7 +119,7 @@ get fun `test non-controller cannot release or burn`() {
 get fun `test release before initialization is rejected`() {
     val admin = testing.treasury("admin");
     val teamWallet = testing.treasury("team-wallet");
-    val vault = deployTeamVault(admin.address, teamWallet.address);
+    val vault = deployTeamVault(admin.address, teamWallet.address, testing.treasury("jetton-master").address);
     val wallet = deployMockWallet(vault.address, TEAM_ROUND_RAW as coins);
     expect(setTeamVaultWallet(vault, admin.address, wallet.address)).toHaveSuccessfulTx<SetJettonWallet>({
         from: admin.address,
@@ -215,17 +215,30 @@ get fun `test burn round 2 burns exactly 1.2e8 and acknowledges`() {
     val res = sendBurn(f.vault, f.rc, 2, burnId);
     expect(res).toHaveSuccessfulTx<BurnTeamQuota>({ from: f.rc, to: f.vault.address });
 
-    val st = teamVaultState(f.vault);
-    expect(st.totalBurnedRaw).toEqual(TEAM_ROUND_RAW);
-    expect(st.burnedCount).toEqual(1);
-    expect(st.totalReleasedRaw).toEqual(0 as uint128);
+    // pending until Jetton Master confirms: no totals, no ack yet
+    expect(teamRoundState(f.vault, 2).burned).toBeFalse();
+    val pendingSt = teamVaultState(f.vault);
+    expect(pendingSt.totalBurnedRaw).toEqual(0 as uint128);
+    expect(pendingSt.burnedCount).toEqual(0);
+    expect(res.findTransaction<TeamBurnedAck>({ from: f.vault.address, to: f.rc, success: true })).toBeNull();
 
     val ms = mockState(f.wallet);
     expect(ms.burnCount).toEqual(1);
     expect(ms.lastBurnAmount).toEqual(TEAM_ROUND_RAW as coins);
-    expect(ms.balance).toEqual(0 as coins);
 
-    val ackTx = res.findTransaction<TeamBurnedAck>({
+    val confirmRes = sendBurnConfirm(f.vault, f.jettonMaster, 2);
+    expect(confirmRes).toHaveSuccessfulTx<ReturnExcessesBack>({
+        from: f.jettonMaster,
+        to: f.vault.address,
+    });
+    val st = teamVaultState(f.vault);
+    expect(st.totalBurnedRaw).toEqual(TEAM_ROUND_RAW);
+    expect(st.burnedCount).toEqual(1);
+    expect(st.totalReleasedRaw).toEqual(0 as uint128);
+    expect(teamRoundState(f.vault, 2).burned).toBeTrue();
+    expect(mockState(f.wallet).balance).toEqual(0 as coins);
+
+    val ackTx = confirmRes.findTransaction<TeamBurnedAck>({
         from: f.vault.address,
         to: f.rc,
         success: true,
@@ -236,7 +249,7 @@ get fun `test burn round 2 burns exactly 1.2e8 and acknowledges`() {
     expect(ack.amountRaw).toEqual(TEAM_ROUND_RAW);
     expect(ack.burnId).toEqual(burnId);
 
-    val ev = res.findExternalOutMessage<TeamBurned>({ from: f.vault.address });
+    val ev = confirmRes.findExternalOutMessage<TeamBurned>({ from: f.vault.address });
     expect(ev).toBeNotNull();
     if (ev != null) {
         val body = match (ev!.body) {
@@ -258,11 +271,22 @@ get fun `test duplicate burn is idempotent (no second burn)`() {
         from: f.rc,
         to: f.vault.address,
     });
+    // duplicate while pending: no second burn, no ack
     expect(sendBurn(f.vault, f.rc, 3, burnId)).toHaveSuccessfulTx<BurnTeamQuota>({
         from: f.rc,
         to: f.vault.address,
     });
+    expect(mockState(f.wallet).burnCount).toEqual(1);
+    expect(teamVaultState(f.vault).totalBurnedRaw).toEqual(0 as uint128);
 
+    // confirm once, then a duplicate re-sends the ack but does not burn again
+    expect(sendBurnConfirm(f.vault, f.jettonMaster, 3)).toHaveSuccessfulTx<ReturnExcessesBack>({
+        from: f.jettonMaster,
+        to: f.vault.address,
+    });
+    val res3 = sendBurn(f.vault, f.rc, 3, burnId);
+    expect(res3).toHaveSuccessfulTx<BurnTeamQuota>({ from: f.rc, to: f.vault.address });
+    expect(res3.findTransaction<TeamBurnedAck>({ from: f.vault.address, to: f.rc, success: true })).toBeNotNull();
     val st = teamVaultState(f.vault);
     expect(st.totalBurnedRaw).toEqual(TEAM_ROUND_RAW);
     expect(st.burnedCount).toEqual(1);
@@ -337,6 +361,10 @@ get fun `test ten rounds: release 5 + burn 5 = 12e8 total`() {
                 from: f.rc,
                 to: f.vault.address,
             });
+            expect(sendBurnConfirm(f.vault, f.jettonMaster, i)).toHaveSuccessfulTx<ReturnExcessesBack>({
+                from: f.jettonMaster,
+                to: f.vault.address,
+            });
         }
         i += 1;
     }
@@ -349,4 +377,31 @@ get fun `test ten rounds: release 5 + burn 5 = 12e8 total`() {
     expect(mockState(f.wallet).transferCount).toEqual(5);
     expect(mockState(f.wallet).burnCount).toEqual(5);
     expect(mockState(f.wallet).balance).toEqual(0 as coins);
+}
+
+
+get fun `test bounced team burn is retryable and never acks`() {
+    val f = setupTeamVault((TEAM_ROUND_RAW * 2) as coins);
+    val burnId = 0xabc as uint256;
+    expect(sendBurn(f.vault, f.rc, 6, burnId)).toHaveSuccessfulTx<BurnTeamQuota>({
+        from: f.rc,
+        to: f.vault.address,
+    });
+    bounceTeamBurn(f.vault, f.wallet.address, 6);
+
+    // pending cleared, nothing burned, no ack
+    expect(teamRoundState(f.vault, 6).burned).toBeFalse();
+    expect(teamVaultState(f.vault).totalBurnedRaw).toEqual(0 as uint128);
+    expect(mockState(f.wallet).burnCount).toEqual(1);
+
+    // retry succeeds and confirms normally
+    val retry = sendBurn(f.vault, f.rc, 6, burnId);
+    expect(retry).toHaveSuccessfulTx<BurnTeamQuota>({ from: f.rc, to: f.vault.address });
+    val confirmRes = sendBurnConfirm(f.vault, f.jettonMaster, 6);
+    expect(confirmRes).toHaveSuccessfulTx<ReturnExcessesBack>({
+        from: f.jettonMaster,
+        to: f.vault.address,
+    });
+    expect(teamVaultState(f.vault).totalBurnedRaw).toEqual(TEAM_ROUND_RAW);
+    expect(confirmRes.findTransaction<TeamBurnedAck>({ from: f.vault.address, to: f.rc, success: true })).toBeNotNull();
 }

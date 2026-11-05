@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import type { MeResponse, ProtocolConfig, ProtocolStats } from '@shared/types';
 import { formatPct, formatUsdE8, pad2 } from '../../lib/format';
 import { useLang } from '../../lib/lang';
-import { priceMultiplierOf, targetFromConfig, type BoardView, type Phase } from './derive';
+import type { BoardView, Phase } from './derive';
 import { FuseCells } from './FuseCells';
 import { IcoNo, IcoOk } from './icons';
 import { fill, type LandingCopy } from './landing.i18n';
@@ -68,7 +68,8 @@ export function BattleBoard({
   const dirClass = price !== null && prev !== null ? (price >= prev ? 'up' : 'down') : '';
   const above = price !== null && target !== null ? price >= target : false;
   const gap = price !== null && target !== null && target > 0 ? price / target - 1 : null;
-  const mult = priceMultiplierOf(cfg, board.roundId);
+  // D-28：档位倍数由 API 提供（tier = 1 + 已成功轮数，失败不升档），禁止按 roundId 推导
+  const mult = board.priceMultiplier;
   const hits = board.hits;
   const miss = board.miss;
   const phase = board.phase;
@@ -148,9 +149,9 @@ export function BattleBoard({
 
   // result numbers
   const burnedTotalRaw = board.burnedRaw ?? String(BigInt(board.rewardBudgetRaw) + BigInt(board.totalStakeRaw));
-  const nextRoundId = board.roundId !== null && cfg && board.roundId < cfg.roundCount ? board.roundId + 1 : null;
-  const nextTarget = targetFromConfig(cfg, nextRoundId);
-  const nextMult = priceMultiplierOf(cfg, nextRoundId);
+  const nextRoundId = board.nextRoundId;
+  const nextTarget = board.nextTargetUsdE8;
+  const nextMult = board.nextPriceMultiplier;
 
   const showMine = connected && myStakeHuman > 0 && phase !== 'stake';
 

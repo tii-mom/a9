@@ -106,6 +106,52 @@ export function decodeClaimMessage(bodyBase64: string | null | undefined): Claim
   }
 }
 
+/** V8：用户 → RoundController 的通用操作消息（含新增 4 个 opcode）。 */
+export interface UserActionMessage {
+  op: number;
+  queryId: bigint | null;
+  roundId: number | null;
+  /** 仅 SetReferrer */
+  referrer: TonAddress | null;
+}
+
+const ROUND_ACTION_OPS: readonly number[] = [
+  OPCODES.CLAIM_PRINCIPAL,
+  OPCODES.CLAIM_REWARD,
+  OPCODES.CLAIM_ALL,
+  OPCODES.CLAIM_REWARD_EARLY,
+  OPCODES.ROLL_REWARD,
+];
+
+/** 解析用户操作消息体（回执匹配用；未知 op 返回 null）。 */
+export function decodeUserAction(bodyBase64: string | null | undefined): UserActionMessage | null {
+  if (!bodyBase64) return null;
+  let roots: ParsedCell[];
+  try {
+    roots = parseBocBase64(bodyBase64);
+  } catch {
+    return null;
+  }
+  const root = roots[0];
+  if (!root) return null;
+  try {
+    const slice = new CellSlice(root);
+    const op = slice.loadUintNumber(32);
+    if (op === OPCODES.SET_REFERRER) {
+      return { op, queryId: null, roundId: null, referrer: slice.loadAddress() };
+    }
+    if (op === OPCODES.CLAIM_UNLOCKED) {
+      return { op, queryId: slice.loadUint(64), roundId: null, referrer: null };
+    }
+    if (ROUND_ACTION_OPS.includes(op)) {
+      return { op, queryId: slice.loadUint(64), roundId: slice.loadUintNumber(8), referrer: null };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** 读取消息体 opcode（失败返回 null）。 */
 export function decodeOpcode(bodyBase64: string | null | undefined): number | null {
   if (!bodyBase64) return null;

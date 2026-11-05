@@ -1,5 +1,5 @@
 /**
- * 「我的战况」页的链上交易面板（自包含）：
+ * 「我的质押」页的链上交易面板（自包含）：
  *   - 合约/网络信息（来自 /api/config 下发）
  *   - 链上质押（Jetton transfer + StakePayload）
  *   - 链上领取（ClaimAll / ClaimPrincipal / ClaimReward）

@@ -1,6 +1,6 @@
 import type { ProtocolConfig, RoundSummary } from '@shared/types';
 import { formatUsdE8, pad2 } from '../../lib/format';
-import { ladderLetter, targetFromConfig, type LadderLetter } from './derive';
+import { ladderLetter, type LadderLetter } from './derive';
 import { IcoDot, IcoNo, IcoOk } from './icons';
 import { useLang } from '../../lib/lang';
 import { fill, type LandingCopy } from './landing.i18n';
@@ -56,9 +56,10 @@ export function RoundLadder({ cfg, rounds, copy }: Props) {
             const round = rounds.find((item) => item.roundId === roundId) ?? null;
             const letter = ladderLetter(round?.state);
             const tag = tagOf(letter);
-            const target = round?.targetPriceUsdE8 ?? targetFromConfig(cfg, roundId);
+            // D-28：目标价与档位倍数一律读 API（tier = 1 + 已成功轮数，失败不升档）
+            const target = round?.targetPriceUsdE8 ?? null;
             const rewardRaw = round?.rewardBudgetRaw ?? cfg?.roundRewardRaw ?? '0';
-            const mult = Math.pow(cfg?.priceMultiplier ?? 2, roundId);
+            const mult = round?.priceMultiplier ?? null;
             return (
               <div className={'lrow ' + letter} key={roundId}>
                 <span className="lr">{'R' + pad2(roundId)}</span>
@@ -67,9 +68,9 @@ export function RoundLadder({ cfg, rounds, copy }: Props) {
                   {tag.text}
                 </span>
                 <span className="lp">{target === null ? copy.common.dash : formatUsdE8(target)}</span>
-                <span className="lm">{'×' + mult}</span>
+                <span className="lm">{mult === null ? copy.common.dash : '×' + mult}</span>
                 <span className="lbar">
-                  <i style={{ width: roundId * 10 + '%' }} />
+                  <i style={{ width: Math.min(100, roundId * 10) + '%' }} />
                 </span>
                 <span className="lo">{outcomeOf(letter, rewardRaw)}</span>
               </div>

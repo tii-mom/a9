@@ -1,6 +1,6 @@
 # 02 --- 轮次状态机与结算流程
 
-> **口径声明（V6.1）**：V6.1 已确认 D-28 同档重试、D-30 不做时间加权、质押上下限（10,000 A9 / 单地址 ≤ 20,000,000 A9 固定硬顶 / 本轮≤2 亿 A9）、技术终止（暂停14天或观察超时7天，任何人可触发，退100%本金、不消耗档位）。**观察 72h = 18 根 4h / 阈值 12（容错 6 根）**；**目标价开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**、锁定后不可改；**取消 95% 闸门与 7 天提档**；**24h PREVIEW 预告期已确认**，结算→预告→自动开窗；保留触价提前关窗；时间线单轮 7 天 / 10 轮 70 天；P0 = $0.00116；分配 70/8+5/12/5；**不允许取消质押（仅技术终止退本金）**；奖励 pull claim。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V7.0）**：V6.1 已确认 D-28 同档重试、D-30 不做时间加权、质押上下限（10,000 A9 / 单地址 ≤ 20,000,000 A9 固定硬顶 / 本轮≤2 亿 A9）、技术终止（暂停14天或观察超时7天，任何人可触发，退100%本金、不消耗档位）。**观察 24h = 24 根 × 1h / 阈值 16（容错 8 根）**；**目标价开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**、锁定后不可改；**取消 95% 闸门与 7 天提档**；**12h PREVIEW 预告期已确认**，结算→预告→自动开窗；保留触价提前关窗；时间线单轮 3 天 / 10 轮 30 天；P0 = $0.00116；分配 70/8+5/12/5；**不允许取消质押（仅技术终止退本金）**；奖励 pull claim。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 状态定义
 
@@ -15,7 +15,7 @@
 
   `STAKING_CLOSED`                    质押窗口已关闭，等待观察开始
 
-  `OBSERVING`                         正在收集18根4小时价格观察数据
+  `OBSERVING`                         正在收集24根4小时价格观察数据
 
   `ORACLE_PAUSED`                     预言机数据异常，价格考核暂停
 
@@ -29,14 +29,14 @@
 
   `TECHNICAL_ABORTED`                 经定义的技术性终止；不属于价格失败，不销毁用户本金
 
-  `PREVIEW`                           **V6 已确认阶段**：结算后固定 24h 预告期，公布下一轮参数与倒计时；
+  `PREVIEW`                           **V6 已确认阶段**：结算后固定 12h 预告期，公布下一轮参数与倒计时；
                                       结束后**自动开窗**（无价格闸门），开窗交易锁定目标价
   ----------------------------------------------------------------------------------------
 
 终态只允许
 `SUCCEEDED`、`FAILED_PERMANENT`、`TECHNICAL_ABORTED`。普通管理员不得将终态改回活动状态。
 
-> **V6 已确认**：① 观察窗口固定 **18 根 / 72h / 12 阈值（容错 6 根）**；② **不允许取消质押**——状态机没有 cancel/withdraw 通道，唯一退款路径是 `TECHNICAL_ABORTED`（退还全部本金）。
+> **V6 已确认**：① 观察窗口固定 **24 根 / 24h / 16 阈值（容错 8 根）**；② **不允许取消质押**——状态机没有 cancel/withdraw 通道，唯一退款路径是 `TECHNICAL_ABORTED`（退还全部本金）。
 
 > **PREVIEW（预告期）说明（V6 已确认）**：结算后进入 **PREVIEW（固定 24h，链上可验证：`previewEnd = settledAt + 24h`）**，前端展示「距离下一轮质押开始」倒计时与分享卡片；期间不许质押；**结束后自动进入 `STAKING_OPEN`（无价格闸门）**，并在开窗交易中锁定目标价。**95% 闸门、7 天等待/提档已取消。**
 
@@ -49,7 +49,7 @@ UNOPENED
    v
 SUCCEEDED / FAILED_PERMANENT
    |
-   | PREVIEW 24h（V6 已确认：公布下一轮参数与倒计时）
+   | PREVIEW 12h（V6 已确认：公布下一轮参数与倒计时）
    v
 STAKING_OPEN
    |
@@ -61,7 +61,7 @@ STAKING_CLOSED
    v
 OBSERVING
    |                         |
-   | 有效18根，达标>=12        | 有效18根，达标<=11（18 根齐备即判定，无中间态）
+   | 有效24根，达标>=12        | 有效24根，达标<=11（24 根齐备即判定，无中间态）
    v                         v
 SETTLING_SUCCESS       SETTLING_FAILURE
    |                         |
@@ -103,17 +103,17 @@ OBSERVING -> ORACLE_PAUSED -> OBSERVING
 
 ## 4. 质押窗口（V6：24h 预告 + 72h 报名）
 
-V6 已确认：上一轮结算后进入 **24 小时预告期（PREVIEW）**，预告结束**自动开窗**；报名窗口 **72 小时（259,200 秒）**。
+V6 已确认：上一轮结算后进入 **12 小时预告期（PREVIEW）**，预告结束**自动开窗**；报名窗口 **72 小时（259,200 秒）**。
 
 参数： - `stakeOpenAt` - `stakeCloseAt` - `stakeDuration` - `stakeGap` - `roundId` - `prevSettledAt`
 
 时间定义：
 
 ``` text
-previewEnd   = prevSettledAt + PREVIEW_SECONDS        // 24h 预告期（V6）
+previewEnd   = prevSettledAt + PREVIEW_SECONDS        // 12h 预告期（V6）
 stakeOpenAt  = previewEnd                             // 预告结束自动开窗
-stakeCloseAt = stakeOpenAt + STAKE_DURATION_SECONDS   // 报名窗口 72h（触价可提前关窗）
-stakeDuration = stakeCloseAt - stakeOpenAt = 259,200  // 秒
+stakeCloseAt = stakeOpenAt + STAKE_DURATION_SECONDS   // 报名窗口 36h（触价可提前关窗）
+stakeDuration = stakeCloseAt - stakeOpenAt = 129,600  // 秒
 ```
 
 规则： 1. 只有 `STAKING_OPEN` 状态接受新质押。 2. 当前链上时间必须满足
@@ -122,7 +122,7 @@ stakeDuration = stakeCloseAt - stakeOpenAt = 259,200  // 秒
 同一地址可多次质押，但每笔必须使用不同
 nonce；合约将其聚合到该地址的总质押。 5.
 若没有任何有效质押，**本轮照常启动并进入观察**（V3 已裁决，见 §4.2）；不跳过轮次、不延长窗口、不视为价格失败。
-6. **R1 无 PREVIEW**：第 1 轮由管理员**手动 `OpenRound`** 开启（无 24h 预告期）；**R2~R10** 才走「结算 → 24h PREVIEW → 自动开窗」。
+6. **R1 无 PREVIEW**：第 1 轮由管理员**手动 `OpenRound`** 开启（无 12h 预告期）；**R2~R10** 才走「结算 → 12h PREVIEW → 自动开窗」。
 7. **晚开窗 liveness 兜底**：若 keeper 错过整个 72h 报名窗口，`OpenRound` 会把 `stakeOpenAt` 重锚为 `now`（正常路径不触发）。
 
 ### 4.1 V6 时间线与状态（已定稿）
@@ -140,39 +140,39 @@ STAKING_CLOSED
      |
      | observationStart = stakeCloseAt
      v
-OBSERVING（18 根 / 72h，不缩短）
+OBSERVING（24 根 / 72h，不缩短）
      |
-     | qualified >= 12 成功 / <= 11 失败（18 根齐备，无中间态）
+     | qualified >= 16 成功 / <= 15 失败（24 根齐备，无中间态）
      v
 SETTLING_SUCCESS / SETTLING_FAILURE
 ```
 
 - **无价格闸门、无 7 天等待/提档**（V6 取消）。
-- 提前关窗只是「提前进入 STAKING_CLOSED」，**观察窗口仍为 72h / 18 根**。
+- 提前关窗只是「提前进入 STAKING_CLOSED」，**观察窗口仍为 24h / 24 根**。
 - PREVIEW 期间不开放新质押；领奖不受影响。
 - 前端三个倒计时：距下一轮质押开始 / 距质押结束 / 距判定。
 
 ### 4.2 无人质押分支
 
 1.  报名窗口关闭时 `totalAcceptedStake == 0`，仍进入 `STAKING_CLOSED` → `OBSERVING`。
-2.  观察与判定与正常轮次一致（18 根 4 小时 K 线，≥12 根达标即通过）。
+2.  观察与判定与正常轮次一致（24 根 1 小时 K 线，≥16 根达标即通过）。
 3.  **失败**：照常销毁本轮 7 亿奖励（无本金可销毁），进入 `FAILED_PERMANENT`。
 4.  **通过**：奖励按质押比例分配；1 名质押人获得全部奖励；0 名质押人时本轮 **7 亿奖励销毁**（D-18b 已定：不回流、不留存、不补发）。
 
-## 5. 72 小时观察窗口的精确边界（V6）
+## 5. 24 小时观察窗口的精确边界（V6）
 
 V6 已确认：**报名窗口关闭即进入观察**（提前关窗则从提前关窗时刻开始），不做 4 小时边界取整。
 
-定义： - `CANDLE_SECONDS = 14,400` - `CANDLE_COUNT = 18` -
-`OBSERVATION_SECONDS = 259,200`
+定义： - `CANDLE_SECONDS = 3,600` - `CANDLE_COUNT = 24` -
+`OBSERVATION_SECONDS = 86,400`
 
 `observationStart = stakeCloseAt`
 
 第 i 根K线（i从0开始）： -
-`periodStart = observationStart + i × 14400` -
-`periodEnd = periodStart + 14400`
+`periodStart = observationStart + i × 3600` -
+`periodEnd = periodStart + 3600`
 
-第18根结束时间： `observationEnd = observationStart + 259200`
+第24根结束时间： `observationEnd = observationStart + 259200`
 
 主网如要求 K 线对齐 UTC 4 小时边界，应在**结算时**让 `prevSettledAt` 落在 UTC 4h 边界（从而
 `previewEnd = prevSettledAt + 24h` 也落在边界）；**不得对 `observationStart` 做额外 `ceil` 平移**（会产生空窗），提前关窗时同样以实际关窗时刻为观察起点。
@@ -191,8 +191,8 @@ V6 已确认：**报名窗口关闭即进入观察**（提前关窗则从提前�
 
 最终： `qualifiedCount = Σ (candleQualified[i] ? 1 : 0)`
 
--   `qualifiedCount >= 12`：进入 `SETTLING_SUCCESS`。
--   `qualifiedCount <= 11`：进入 `SETTLING_FAILURE`（18 根齐备；无中间态）。
+-   `qualifiedCount >= 16`：进入 `SETTLING_SUCCESS`。
+-   `qualifiedCount <= 15`：进入 `SETTLING_FAILURE`（24 根齐备；无中间态）。
 
 价格比较为包含等号，即 TWAP 恰好等于目标价也算达标。
 
@@ -208,7 +208,7 @@ V6 已确认：**报名窗口关闭即进入观察**（提前关窗则从提前�
 推荐处理： 1. 进入 `ORACLE_PAUSED`。 2.
 禁止继续使用不完整窗口做市场失败判定。 3. 记录故障时间、最后有效 candle
 和 oracle config hash。 4. 故障修复后，从新的UTC
-4小时边界重新收集完整18根K线。 5. 不因预言机故障销毁质押本金或奖励额度。
+4小时边界重新收集完整24根K线。 5. 不因预言机故障销毁质押本金或奖励额度。
 
 **V6.1 已确认（技术终止）**：**连续暂停 14 天** 或 **观察结束超时 7 天** → **任何人**可触发 `TECHNICAL_ABORTED`：退还 **100% 本金**，**不销毁奖励/团队额度**，**不消耗档位**；轮次不得被标记为市场失败。该逻辑需审计。
 
@@ -250,7 +250,7 @@ TON 合约之间异步交互，不得假设多个合约可以在同一原子事�
 
 ## 11. 后续轮次
 
-**R1** 由管理员手动 `OpenRound` 开启（无 PREVIEW）；**R2~R10**：上一轮进入 `SUCCEEDED` 或 `FAILED_PERMANENT` 后，进入 **24h PREVIEW 预告期**，随后**自动开窗**；报名窗口 72 小时。**单轮 7 天，10 轮 70 天。**
+**R1** 由管理员手动 `OpenRound` 开启（无 PREVIEW）；**R2~R10**：上一轮进入 `SUCCEEDED` 或 `FAILED_PERMANENT` 后，进入 **12h PREVIEW 预告期**，随后**自动开窗**；报名窗口 36 小时。**单轮 3 天，10 轮 30 天。**
 
 失败轮次不会导致价格阶梯重置： - Round 1 失败，Round 2 目标仍为 4×P0。 -
 Round 2 失败，Round 3 目标仍为 8×P0。 - 依此类推。

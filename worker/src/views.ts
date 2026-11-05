@@ -13,6 +13,7 @@ import type {
   OrderBookLevel,
   ProtocolConfig,
   ProtocolStats,
+  ReferralResponse,
   RoundDetail,
   RoundSummary,
   RoundState,
@@ -21,10 +22,11 @@ import type {
 } from '@shared/types';
 import type { Env } from './env';
 import { DEFAULT_VERSION, SCHEMA_VERSION, uptimeSeconds } from './env';
-import { isActive, isTerminal, priceMultiplierFor } from './protocol';
+import { isActive, isTerminal, priceMultiplierFor, projectedTierForRound, tierForRound } from './protocol';
 import * as store from './store';
 import type { CandleRow, RoundRow, TradeRow } from './store';
 import { getSource } from './sources';
+import * as v8 from './v8';
 import type { ReconcileResult } from './state';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 
@@ -38,10 +40,17 @@ function totals(row: RoundRow, state: ReconcileResult): { totalAcceptedStakeRaw:
 
 export function buildRoundSummary(row: RoundRow, state: ReconcileResult): RoundSummary {
   const aggregate = totals(row, state);
+  // D-28：档位随轮次落库（target_tier），禁止用 roundId 推导；旧数据才走兜底。
+  const tier =
+    row.target_tier > 0
+      ? row.target_tier
+      : row.state === 'UNOPENED'
+        ? projectedTierForRound(row.round_id, state.rounds)
+        : tierForRound(row.round_id, state.rounds);
   return {
     roundId: row.round_id,
     state: row.state,
-    priceMultiplier: priceMultiplierFor(row.round_id),
+    priceMultiplier: priceMultiplierFor(tier),
     targetPriceUsdE8: row.target_price_usd_e8,
     rewardBudgetRaw: row.reward_budget_raw,
     stakeOpenAt: row.stake_open_at,
@@ -51,6 +60,8 @@ export function buildRoundSummary(row: RoundRow, state: ReconcileResult): RoundS
     candlesSeen: row.candles_seen,
     qualifiedCandles: row.qualified_candles,
     totalAcceptedStakeRaw: aggregate.totalAcceptedStakeRaw,
+    totalWeightRaw: row.total_weight_raw ?? '0',
+    candleHash: row.candle_hash ?? null,
     stakerCount: aggregate.stakerCount,
     result: row.result,
     burnedRaw: row.burned_raw,
@@ -107,6 +118,14 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
     riskDisclosureVersion: params.riskDisclosureVersion,
     stakeDurationSeconds: params.stakeDurationSeconds,
     observationSeconds: params.observationSeconds,
+    previewSeconds: params.previewProtocolSeconds,
+    streakBonusBps: params.streakBonusBps,
+    streakMaxRounds: params.streakMaxRounds,
+    referralBonusBps: params.referralBonusBps,
+    referralCapMultiple: params.referralCapMultiple,
+    earlyClaimPenaltyBps: params.earlyClaimPenaltyBps,
+    rolloverCapPerAddressRaw: params.rolloverCapPerAddressRaw.toString(),
+    unlockDurationSeconds: params.unlockDurationSeconds,
     network: params.network,
     dataSource: params.dataSource,
     demo:
@@ -115,6 +134,7 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
             candleSeconds: params.demoCandleSeconds,
             speed: Math.max(1, Math.round(params.candleSeconds / params.demoCandleSeconds)),
             epochMs: params.demoEpochMs,
+            previewSeconds: params.previewSeconds,
           }
         : null,
     contracts: {
@@ -135,7 +155,7 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
     frozenParams: [
       { key: 'P0_USD_E8', label: 'P0 初始参考价', status: 'frozen', value: '$' + (Number(params.p0UsdE8) / params.usdPriceScale).toFixed(5) },
       { key: 'ROUND_REWARD_RAW', label: '每轮奖励预算', status: 'frozen', value: '700,000,000 A9 × 10 轮 = 7,000,000,000' },
-      { key: 'PRICE_LADDER', label: '价格阶梯 P0×2ⁿ', status: 'frozen', value: '10 轮 / 最高 1024×P0' },
+      { key: 'PRICE_LADDER', label: '目标价档位 P0×2^tier（D-28）', status: 'frozen', value: 'tier = 1 + 已成功轮数；失败不升档（同档重试），成功才升档；10 轮 ≠ 10 档位' },
       { key: 'MIN_QUALIFIED_CANDLES', label: '达标 K 线阈值', status: 'frozen', value: params.minQualifiedCandles + ' / ' + params.candleCount + '（不足即永久关闭并销毁本金）' },
       { key: 'BURN_SEMANTICS', label: '失败销毁语义', status: 'frozen', value: '本轮奖励 7 亿 + 团队额度 1.2 亿 + 本轮全部已接受质押本金（三笔 burn）' },
       { key: 'TOKEN_DECIMALS', label: 'Jetton 精度（D-02）', status: 'frozen', value: params.tokenDecimals + ' 位（已确认）' },
@@ -187,10 +207,15 @@ export async function buildStats(env: Env, state: ReconcileResult): Promise<Prot
   const supply = params.totalSupplyRaw > burned ? params.totalSupplyRaw - burned : 0n;
   const liquidity = toBigInt(state.kv.get('liquidity_usd_e8') ?? '180000000000000');
 
+  const roundsById = new Map(rounds.map((row) => [row.round_id, row]));
+  const unlockStats = await v8.buildUnlockStats(env, params, state.rewardRows, roundsById, now);
+
   return {
     supplyRaw: supply.toString(),
     burnedRaw: burned.toString(),
     lockedStakeRaw: locked.toString(),
+    lockedRewardRaw: unlockStats.lockedRewardRaw,
+    unlock: unlockStats.unlock,
     stakerCount: stakers,
     volume24hUsdE8: volume.toString(),
     liquidityUsdE8: liquidity.toString(),
@@ -288,20 +313,26 @@ export function buildLeaderboard(state: ReconcileResult, roundId: number): Leade
 }
 
 export async function buildMe(env: Env, state: ReconcileResult, address: string): Promise<MeResponse> {
+  const { params, now } = state;
   const rows = await store.listStakesForAddress(env, address);
   const claims = await store.listClaimsForAddress(env, address);
+  const rewardRows = await store.listRoundRewardsForAddress(env, address);
+  const roundsById = new Map(state.rounds.map((row) => [row.round_id, row]));
+  const rewardStateByRound = new Map(rewardRows.map((row) => [row.round_id, row.state]));
 
   const perRound = new Map<
     number,
-    { amount: bigint; weight: bigint; acceptedAt: number; principalClaimed: boolean; rewardClaimed: boolean }
+    { amount: bigint; weight: bigint; streak: number; acceptedAt: number; principalClaimed: boolean; rewardClaimed: boolean }
   >();
   for (const row of rows) {
     const current = perRound.get(row.round_id);
     const amount = toBigInt(row.amount_raw);
     const weight = toBigInt(row.weight_raw);
+    const streak = typeof row.streak === 'number' && row.streak > 0 ? row.streak : 1;
     if (current) {
       current.amount += amount;
       current.weight += weight;
+      current.streak = Math.max(current.streak, streak);
       current.acceptedAt = Math.min(current.acceptedAt, row.accepted_at);
       current.principalClaimed = current.principalClaimed && row.principal_claimed === 1;
       current.rewardClaimed = current.rewardClaimed && row.reward_claimed === 1;
@@ -309,6 +340,7 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
       perRound.set(row.round_id, {
         amount,
         weight,
+        streak,
         acceptedAt: row.accepted_at,
         principalClaimed: row.principal_claimed === 1,
         rewardClaimed: row.reward_claimed === 1,
@@ -323,6 +355,9 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
       address,
       amountRaw: entry.amount.toString(),
       weightRaw: entry.weight.toString(),
+      weightMultiplierBps: entry.amount > 0n ? Number((entry.weight * 10000n) / entry.amount) : 10_000,
+      streak: entry.streak,
+      rewardState: (rewardStateByRound.get(roundId) ?? 0) as MeResponse['stakes'][number]['rewardState'],
       principalClaimed: entry.principalClaimed,
       rewardClaimed: entry.rewardClaimed,
       acceptedAt: entry.acceptedAt,
@@ -334,12 +369,11 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
 
   let rewardTotal = 0n;
   for (const [roundId, entry] of perRound) {
-    const round = state.rounds.find((item) => item.round_id === roundId);
+    const round = roundsById.get(roundId);
     if (!round) continue;
-    const aggregate = state.stakeAgg.get(roundId);
-    const roundTotal = aggregate ? aggregate.totalRaw : toBigInt(round.total_accepted_stake_raw);
     if (round.state === 'SUCCEEDED') {
-      const reward = mulDivFloor(toBigInt(round.reward_budget_raw), entry.amount, roundTotal);
+      const rewardRow = rewardRows.find((row) => row.round_id === roundId);
+      const reward = rewardRow ? toBigInt(rewardRow.reward_raw) : legacyRewardEstimate(state, round, entry.amount);
       rewardTotal += reward;
       const principalRaw = entry.principalClaimed ? 0n : entry.amount;
       const rewardRaw = entry.rewardClaimed ? 0n : reward;
@@ -357,14 +391,68 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
   let stakedTotal = 0n;
   for (const entry of perRound.values()) stakedTotal += entry.amount;
 
+  const lastRound = roundsById.get(params.roundCount);
+  const unlockStarted = !!lastRound && isTerminal(lastRound.state) && state.unlockPool.start_at > 0;
+  const rewards = v8.buildRoundRewardsView(params, state.rounds, roundsById, rewardRows, state.stakeRows, unlockStarted);
+  const stakeStreak = v8.streakSummaryFromStakes(
+    state.stakeRows.filter((row) => row.address === address),
+  );
+  const ownReferral = await store.getReferralOf(env, address);
+  const inviteeRows = await store.listInvitees(env, address);
+  const relations = [...(ownReferral ? [ownReferral] : []), ...inviteeRows];
+  const referral = v8.buildReferralInfo(params, address, relations, state.stakeRows, state.rounds);
+  const unlock = await v8.buildUnlockInfo(env, params, state.rewardRows, roundsById, address, now);
+  const lockedReward = v8.lockedRewardFor(state.rewardRows, roundsById, address);
+
   return {
     address,
     stakes,
     claimable,
+    rewards,
+    stake: stakeStreak,
+    referral,
+    unlock,
     totals: {
       stakedRaw: stakedTotal.toString(),
       rewardRaw: rewardTotal.toString(),
       claimedRaw: claimedTotal.toString(),
+      lockedRewardRaw: lockedReward.toString(),
+    },
+  };
+}
+
+/** 旧数据（无 round_rewards）的奖励估算：按质押比例兜底。 */
+function legacyRewardEstimate(state: ReconcileResult, round: store.RoundRow, amount: bigint): bigint {
+  const aggregate = state.stakeAgg.get(round.round_id);
+  const roundTotal = aggregate ? aggregate.totalRaw : toBigInt(round.total_accepted_stake_raw);
+  return mulDivFloor(toBigInt(round.reward_budget_raw), amount, roundTotal);
+}
+
+/** GET /api/referral/:address：邀请关系 + 加成明细。 */
+export async function buildReferralResponse(
+  env: Env,
+  state: ReconcileResult,
+  address: string,
+): Promise<ReferralResponse> {
+  const { params } = state;
+  const ownReferral = await store.getReferralOf(env, address);
+  const inviteeRows = await store.listInvitees(env, address);
+  const relations = [...(ownReferral ? [ownReferral] : []), ...inviteeRows];
+  const referral = v8.buildReferralInfo(params, address, relations, state.stakeRows, state.rounds);
+  const invitees = v8.buildReferralInvitees(params, address, relations, state.stakeRows, state.rounds);
+  return {
+    address,
+    referrer: ownReferral?.referrer ?? null,
+    boundAt: ownReferral?.created_at ?? null,
+    invitees,
+    invitedCount: referral.invitedCount,
+    invitedStakeRaw: referral.invitedStakeRaw,
+    bonusThisRoundRaw: referral.bonusThisRoundRaw,
+    bonusTotalRaw: referral.bonusTotalRaw,
+    config: {
+      referralBonusBps: params.referralBonusBps,
+      referralCapMultiple: params.referralCapMultiple,
+      minStakeRaw: params.minStakeRaw.toString(),
     },
   };
 }

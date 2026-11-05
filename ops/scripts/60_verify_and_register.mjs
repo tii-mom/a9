@@ -18,6 +18,7 @@ const { execute, params, digest, registry } = bootstrap({
 
 registry.paramsDigest = digest;
 registry.configVersion = Number(params.meta.configVersion);
+const persist = execute;
 
 section('不变量复核');
 const allocation = verifyAllocationInvariant(params);
@@ -59,7 +60,8 @@ registry.verification = {
   checks: checks.map((item) => ({ name: item.name, status: item.status, detail: item.detail })),
   digest: registryDigest(registry),
 };
-writeRegistry(registry);
+if (persist) writeRegistry(registry);
+else warn('dry-run：登记表未写入（EXECUTE 时才落盘 paramsDigest/verification）');
 kv('paramsDigest', digest);
 kv('registryDigest', registry.verification.digest);
 kv('登记状态', registry.status);

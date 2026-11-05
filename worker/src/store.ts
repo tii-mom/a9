@@ -26,6 +26,8 @@ export interface ConfigRow {
 export interface RoundRow {
   round_id: number;
   state: RoundStateName;
+  /** D-28 档位：tier = 1 + 已成功轮数（失败不升档）；开轮时锁定，不随后续轮次变化 */
+  target_tier: number;
   target_price_usd_e8: string;
   reward_budget_raw: string;
   stake_open_at: number | null;
@@ -35,6 +37,10 @@ export interface RoundRow {
   candles_seen: number;
   qualified_candles: number;
   total_accepted_stake_raw: string;
+  /** V8：Σ(own weight + 邀请加成) */
+  total_weight_raw: string;
+  /** V8：K 线滚动哈希（链上只存此值） */
+  candle_hash: string | null;
   staker_count: number;
   result: 'SUCCESS' | 'FAILURE' | 'TECHNICAL_ABORT' | null;
   burned_raw: string | null;
@@ -59,10 +65,17 @@ export interface StakeRow {
   round_id: number;
   address: string;
   amount_raw: string;
+  /** V8 own weight（含 streak 加成，不含邀请加成） */
   weight_raw: string;
   nonce: string;
   risk_disclosure_version: number;
   accept_full_principal_burn: number;
+  /** V8 连续参与轮次（入账时判定） */
+  streak: number;
+  /** V8 奖励三态：0 PENDING / 1 ROLLED / 2 EARLY（按轮聚合同值） */
+  reward_state: number;
+  /** V8 绑定邀请人快照（入账时） */
+  referred_by: string | null;
   principal_claimed: number;
   reward_claimed: number;
   accepted_at: number;
@@ -72,7 +85,7 @@ export interface ClaimRow {
   id: number;
   round_id: number;
   address: string;
-  kind: 'principal' | 'reward';
+  kind: 'principal' | 'reward' | 'unlock';
   amount_raw: string;
   claimed_at: number;
 }
@@ -282,6 +295,8 @@ export async function finalizeFailure(env: Env, input: FinalizeFailureInput): Pr
 export interface OpenRoundInput {
   roundId: number;
   now: number;
+  /** 开轮档位（tier = 1 + 已成功轮数，D-28） */
+  targetTier: number;
   targetPriceUsdE8: string;
   rewardBudgetRaw: string;
   stakeOpenAt: number;
@@ -294,9 +309,12 @@ export async function openRound(env: Env, input: OpenRoundInput): Promise<boolea
   const changes = await run(
     env,
     `UPDATE rounds
-        SET state = 'STAKING_OPEN', stake_open_at = ?, stake_close_at = ?,
+        SET state = 'STAKING_OPEN', target_tier = ?, target_price_usd_e8 = ?,
+            stake_open_at = ?, stake_close_at = ?,
             observation_start = ?, observation_end = ?, updated_at = ?
       WHERE round_id = ? AND state = 'UNOPENED'`,
+    input.targetTier,
+    input.targetPriceUsdE8,
     input.stakeOpenAt,
     input.stakeCloseAt,
     input.observationStart,
@@ -335,13 +353,14 @@ export async function insertRounds(env: Env, rows: RoundRow[]): Promise<void> {
   const statements = rows.map((row) =>
     env.DB.prepare(
       `INSERT OR REPLACE INTO rounds
-        (round_id, state, target_price_usd_e8, reward_budget_raw, stake_open_at, stake_close_at,
+        (round_id, state, target_tier, target_price_usd_e8, reward_budget_raw, stake_open_at, stake_close_at,
          observation_start, observation_end, candles_seen, qualified_candles, total_accepted_stake_raw,
-         staker_count, result, burned_raw, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         total_weight_raw, candle_hash, staker_count, result, burned_raw, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       row.round_id,
       row.state,
+      row.target_tier,
       row.target_price_usd_e8,
       row.reward_budget_raw,
       row.stake_open_at,
@@ -351,6 +370,8 @@ export async function insertRounds(env: Env, rows: RoundRow[]): Promise<void> {
       row.candles_seen,
       row.qualified_candles,
       row.total_accepted_stake_raw,
+      row.total_weight_raw,
+      row.candle_hash,
       row.staker_count,
       row.result,
       row.burned_raw,
@@ -367,6 +388,12 @@ export interface StakeSeedRow {
   weight_raw: string;
   nonce: string;
   risk_disclosure_version: number;
+  /** V8 连续轮次（入账时判定） */
+  streak: number;
+  /** V8 邀请人快照 */
+  referred_by: string | null;
+  /** V8 奖励三态 */
+  reward_state: number;
   principal_claimed: number;
   reward_claimed: number;
   accepted_at: number;
@@ -378,8 +405,9 @@ export async function insertStakesBulk(env: Env, rows: StakeSeedRow[]): Promise<
     env.DB.prepare(
       `INSERT OR REPLACE INTO stakes
         (round_id, address, amount_raw, weight_raw, nonce, risk_disclosure_version,
-         accept_full_principal_burn, principal_claimed, reward_claimed, accepted_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+         accept_full_principal_burn, streak, reward_state, referred_by,
+         principal_claimed, reward_claimed, accepted_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       row.round_id,
       row.address,
@@ -387,6 +415,9 @@ export async function insertStakesBulk(env: Env, rows: StakeSeedRow[]): Promise<
       row.weight_raw,
       row.nonce,
       row.risk_disclosure_version,
+      row.streak,
+      row.reward_state,
+      row.referred_by,
       row.principal_claimed,
       row.reward_claimed,
       row.accepted_at,
@@ -397,7 +428,7 @@ export async function insertStakesBulk(env: Env, rows: StakeSeedRow[]): Promise<
 
 export async function insertClaimsBulk(
   env: Env,
-  rows: { round_id: number; address: string; kind: 'principal' | 'reward'; amount_raw: string; claimed_at: number }[],
+  rows: { round_id: number; address: string; kind: 'principal' | 'reward' | 'unlock'; amount_raw: string; claimed_at: number }[],
 ): Promise<void> {
   if (!rows.length) return;
   const statements = rows.map((row) =>
@@ -457,10 +488,243 @@ export async function clearDemoData(env: Env): Promise<void> {
     env.DB.prepare('DELETE FROM stakes'),
     env.DB.prepare('DELETE FROM burn_ledger'),
     env.DB.prepare('DELETE FROM candles'),
+    env.DB.prepare('DELETE FROM round_rewards'),
+    env.DB.prepare('DELETE FROM referrals'),
     env.DB.prepare('DELETE FROM rounds'),
     env.DB.prepare('DELETE FROM trades'),
     env.DB.prepare('DELETE FROM book_levels'),
+    env.DB.prepare("INSERT OR REPLACE INTO unlock_pool (id, start_at, total_locked_raw, claimed_raw, updated_at) VALUES (1, 0, '0', '0', 0)"),
   ]);
+}
+
+/* ------------------------------------------------------------------ *
+ * V8：每轮奖励三态（round_rewards）
+ * ------------------------------------------------------------------ */
+
+export interface RoundRewardRow {
+  round_id: number;
+  address: string;
+  /** own weight + 邀请加成（对齐合约 get_user_weight） */
+  weight_raw: string;
+  /** floor(rewardBudget × weight / totalWeight) */
+  reward_raw: string;
+  /** 0 PENDING / 1 ROLLED / 2 EARLY */
+  state: number;
+  paid_raw: string;
+  locked_raw: string;
+  rolled_raw: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function listRoundRewards(env: Env, roundId: number): Promise<RoundRewardRow[]> {
+  return all<RoundRewardRow>(env, 'SELECT * FROM round_rewards WHERE round_id = ? ORDER BY address ASC', roundId);
+}
+
+export async function listAllRoundRewards(env: Env): Promise<RoundRewardRow[]> {
+  return all<RoundRewardRow>(env, 'SELECT * FROM round_rewards ORDER BY round_id ASC, address ASC');
+}
+
+export async function listRoundRewardsForAddress(env: Env, address: string): Promise<RoundRewardRow[]> {
+  return all<RoundRewardRow>(env, 'SELECT * FROM round_rewards WHERE address = ? ORDER BY round_id ASC', address);
+}
+
+/** 结算时整轮重建（幂等；结算后 reward 金额不可变）。 */
+export async function replaceRoundRewards(env: Env, roundId: number, rows: RoundRewardRow[]): Promise<void> {
+  const statements = [env.DB.prepare('DELETE FROM round_rewards WHERE round_id = ?').bind(roundId)];
+  for (const row of rows) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO round_rewards
+           (round_id, address, weight_raw, reward_raw, state, paid_raw, locked_raw, rolled_raw, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        roundId,
+        row.address,
+        row.weight_raw,
+        row.reward_raw,
+        row.state,
+        row.paid_raw,
+        row.locked_raw,
+        row.rolled_raw,
+        row.created_at,
+        row.updated_at,
+      ),
+    );
+  }
+  await runBatches(env, statements);
+}
+
+export async function updateRoundReward(
+  env: Env,
+  input: { roundId: number; address: string; state?: number; paidRaw?: string; lockedRaw?: string; rolledRaw?: string; now: number },
+): Promise<void> {
+  const sets: string[] = ['updated_at = ?'];
+  const binds: Bind[] = [input.now];
+  if (input.state !== undefined) {
+    sets.push('state = ?');
+    binds.push(input.state);
+  }
+  if (input.paidRaw !== undefined) {
+    sets.push('paid_raw = ?');
+    binds.push(input.paidRaw);
+  }
+  if (input.lockedRaw !== undefined) {
+    sets.push('locked_raw = ?');
+    binds.push(input.lockedRaw);
+  }
+  if (input.rolledRaw !== undefined) {
+    sets.push('rolled_raw = ?');
+    binds.push(input.rolledRaw);
+  }
+  binds.push(input.roundId, input.address);
+  await run(env, `UPDATE round_rewards SET ${sets.join(', ')} WHERE round_id = ? AND address = ?`, ...binds);
+}
+
+/** 演示数据重建：整批写入每轮奖励三态。 */
+export async function insertRoundRewardsBulk(env: Env, rows: RoundRewardRow[]): Promise<void> {
+  if (!rows.length) return;
+  const statements = rows.map((row) =>
+    env.DB.prepare(
+      `INSERT OR REPLACE INTO round_rewards
+         (round_id, address, weight_raw, reward_raw, state, paid_raw, locked_raw, rolled_raw, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      row.round_id,
+      row.address,
+      row.weight_raw,
+      row.reward_raw,
+      row.state,
+      row.paid_raw,
+      row.locked_raw,
+      row.rolled_raw,
+      row.created_at,
+      row.updated_at,
+    ),
+  );
+  await runBatches(env, statements);
+}
+
+/* ------------------------------------------------------------------ *
+ * V8：邀请关系（一层、一次性绑定，对齐合约 extras.referrer）
+ * ------------------------------------------------------------------ */
+
+export interface ReferralRow {
+  address: string;
+  referrer: string;
+  created_at: number;
+}
+
+export async function listReferrals(env: Env): Promise<ReferralRow[]> {
+  return all<ReferralRow>(env, 'SELECT * FROM referrals ORDER BY created_at ASC');
+}
+
+export async function getReferralOf(env: Env, address: string): Promise<ReferralRow | null> {
+  return first<ReferralRow>(env, 'SELECT * FROM referrals WHERE address = ?', address);
+}
+
+export async function listInvitees(env: Env, referrer: string): Promise<ReferralRow[]> {
+  return all<ReferralRow>(env, 'SELECT * FROM referrals WHERE referrer = ? ORDER BY created_at ASC', referrer);
+}
+
+export async function insertReferralsBulk(env: Env, rows: ReferralRow[]): Promise<void> {
+  if (!rows.length) return;
+  const statements = rows.map((row) =>
+    env.DB.prepare('INSERT OR REPLACE INTO referrals (address, referrer, created_at) VALUES (?, ?, ?)').bind(
+      row.address,
+      row.referrer,
+      row.created_at,
+    ),
+  );
+  await runBatches(env, statements);
+}
+
+/** 返回 false 表示已绑定/非法（幂等拒绝）；调用方负责自邀/互绑校验。 */
+export async function insertReferral(env: Env, address: string, referrer: string, now: number): Promise<boolean> {
+  const changes = await run(
+    env,
+    'INSERT OR IGNORE INTO referrals (address, referrer, created_at) VALUES (?, ?, ?)',
+    address,
+    referrer,
+    now,
+  );
+  return changes > 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * V8：R10 后线性解锁池（单例）
+ * ------------------------------------------------------------------ */
+
+export interface UnlockPoolRow {
+  id: number;
+  start_at: number;
+  total_locked_raw: string;
+  claimed_raw: string;
+  updated_at: number;
+}
+
+export async function getUnlockPool(env: Env): Promise<UnlockPoolRow> {
+  const row = await first<UnlockPoolRow>(env, 'SELECT * FROM unlock_pool WHERE id = 1');
+  return row ?? { id: 1, start_at: 0, total_locked_raw: '0', claimed_raw: '0', updated_at: 0 };
+}
+
+export async function updateUnlockPool(
+  env: Env,
+  patch: { startAt?: number; totalLockedRaw?: string; claimedRaw?: string },
+  now: number,
+): Promise<void> {
+  const sets: string[] = ['updated_at = ?'];
+  const binds: Bind[] = [now];
+  if (patch.startAt !== undefined) {
+    sets.push('start_at = ?');
+    binds.push(patch.startAt);
+  }
+  if (patch.totalLockedRaw !== undefined) {
+    sets.push('total_locked_raw = ?');
+    binds.push(patch.totalLockedRaw);
+  }
+  if (patch.claimedRaw !== undefined) {
+    sets.push('claimed_raw = ?');
+    binds.push(patch.claimedRaw);
+  }
+  await run(env, `UPDATE unlock_pool SET ${sets.join(', ')} WHERE id = 1`, ...binds);
+}
+
+/** 演示数据重建：写入解锁池单例行。 */
+export async function setUnlockPool(
+  env: Env,
+  row: { startAt: number; totalLockedRaw: string; claimedRaw: string },
+  now: number,
+): Promise<void> {
+  await run(
+    env,
+    'INSERT OR REPLACE INTO unlock_pool (id, start_at, total_locked_raw, claimed_raw, updated_at) VALUES (1, ?, ?, ?, ?)',
+    row.startAt,
+    row.totalLockedRaw,
+    row.claimedRaw,
+    now,
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * V8：轮次总权重 / K 线滚动哈希
+ * ------------------------------------------------------------------ */
+
+export async function updateRoundWeightHash(
+  env: Env,
+  roundId: number,
+  totalWeightRaw: string,
+  candleHash: string | null,
+  now: number,
+): Promise<void> {
+  await run(
+    env,
+    'UPDATE rounds SET total_weight_raw = ?, candle_hash = ?, updated_at = ? WHERE round_id = ?',
+    totalWeightRaw,
+    candleHash,
+    now,
+    roundId,
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -526,12 +790,12 @@ export interface RoundAggregate {
 
 export type StakeAggregates = Map<number, RoundAggregate>;
 
-/** 一次查询取出全部质押，聚合出每轮总质押 / 去重地址数 / 地址明细（避免各处口径不一）。 */
-export async function listAllStakes(env: Env): Promise<StakeAggregateInputRow[]> {
-  return all<StakeAggregateInputRow>(env, 'SELECT round_id, address, amount_raw, accepted_at FROM stakes');
+/** 一次查询取出全部质押（V8 需要 weight/streak/referred_by 全字段）。 */
+export async function listAllStakes(env: Env): Promise<StakeRow[]> {
+  return all<StakeRow>(env, 'SELECT * FROM stakes');
 }
 
-export function buildStakeAggregates(rows: StakeAggregateInputRow[]): StakeAggregates {
+export function buildStakeAggregates(rows: StakeAggregateInputRow[] | StakeRow[]): StakeAggregates {
   const result: StakeAggregates = new Map();
   for (const row of rows) {
     let round = result.get(row.round_id);
@@ -592,6 +856,10 @@ export interface StakeInsertInput {
   riskDisclosureVersion: number;
   acceptFullPrincipalBurn: boolean;
   acceptedAt: number;
+  /** V8 连续轮次（入账时按 lastRound/count 推导） */
+  streak: number;
+  /** V8 邀请人快照 */
+  referredBy: string | null;
 }
 
 /** 返回 false 表示 nonce 重复（幂等拒绝）。 */
@@ -600,8 +868,9 @@ export async function insertStake(env: Env, input: StakeInsertInput): Promise<bo
     env,
     `INSERT OR IGNORE INTO stakes
        (round_id, address, amount_raw, weight_raw, nonce, risk_disclosure_version,
-        accept_full_principal_burn, principal_claimed, reward_claimed, accepted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
+        accept_full_principal_burn, streak, reward_state, referred_by,
+        principal_claimed, reward_claimed, accepted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?)`,
     input.roundId,
     input.address,
     input.amountRaw.toString(),
@@ -609,6 +878,8 @@ export async function insertStake(env: Env, input: StakeInsertInput): Promise<bo
     input.nonce,
     input.riskDisclosureVersion,
     input.acceptFullPrincipalBurn ? 1 : 0,
+    input.streak,
+    input.referredBy,
     input.acceptedAt,
   );
   return changes > 0;
@@ -637,14 +908,19 @@ export async function listClaimsForAddress(env: Env, address: string): Promise<C
   return all<ClaimRow>(env, 'SELECT * FROM claims WHERE address = ? ORDER BY round_id ASC, kind ASC', address);
 }
 
-export async function getClaim(env: Env, roundId: number, address: string, kind: 'principal' | 'reward'): Promise<ClaimRow | null> {
+export async function getClaim(
+  env: Env,
+  roundId: number,
+  address: string,
+  kind: 'principal' | 'reward' | 'unlock',
+): Promise<ClaimRow | null> {
   return first<ClaimRow>(env, 'SELECT * FROM claims WHERE round_id = ? AND address = ? AND kind = ?', roundId, address, kind);
 }
 
 /** 幂等领取：claims 唯一键兜底，并同步 stake 的领取标记。 */
 export async function recordClaim(
   env: Env,
-  input: { roundId: number; address: string; kind: 'principal' | 'reward'; amountRaw: bigint; claimedAt: number },
+  input: { roundId: number; address: string; kind: 'principal' | 'reward' | 'unlock'; amountRaw: bigint; claimedAt: number },
 ): Promise<boolean> {
   const results = await env.DB.batch([
     env.DB.prepare(

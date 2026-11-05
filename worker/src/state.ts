@@ -3,8 +3,9 @@
  *
  * 关键不可变语义（docs/02、docs/09 §6）：
  *  - UNOPENED → STAKING_OPEN → STAKING_CLOSED → OBSERVING → SETTLING_* → SUCCEEDED / FAILED_PERMANENT
- *  - ORACLE_PAUSED 不推进 K 线、不销毁本金、不判失败；恢复后重启完整 12 根窗口。
- *  - 12 根满后 qualified >= 8 才成功；否则两笔销毁（reward 7.5e8 + 本轮全部本金）且不可逆。
+ *  - ORACLE_PAUSED 不推进 K 线、不销毁本金、不判失败；恢复后重启完整观察窗口（V7：24 根）。
+ *  - 满 24 根后 qualified >= 16 才成功；否则三笔销毁（奖励 7 亿 + 团队额度 1.2 亿 + 本轮全部本金）且不可逆。
+ *  - 目标价档位按 D-28：tier = 1 + 已成功轮数，失败不升档（同档重试），成功才升档。
  *  - 所有推进都用 CAS（UPDATE ... WHERE state = 期望值）+ INSERT OR IGNORE，cron 与手动 tick 并发安全。
  *  - 轮次聚合（总质押 / 地址数 / 每地址明细）只从 stakes 表派生，一次查询聚合，四处接口共用。
  */
@@ -25,11 +26,24 @@ import {
   RISK_DISCLOSURE_VERSION,
   CANDLE_SECONDS,
   isTerminal,
+  priceMultiplierFor,
   targetPriceFor,
+  tierForOpening,
+  STREAK_BONUS_BPS,
+  STREAK_MAX_ROUNDS,
+  REFERRAL_BONUS_BPS,
+  REFERRAL_CAP_MULTIPLE,
+  EARLY_CLAIM_PENALTY_BPS,
+  ROLLOVER_CAP_PER_ADDRESS_RAW,
+  UNLOCK_DURATION_SECONDS,
+  MIN_STAKE_RAW,
+  MAX_TOTAL_STAKE_RAW,
+  DEFAULT_DEMO_UNLOCK_SECONDS,
   type Params,
 } from './protocol';
 import * as store from './store';
-import type { CandleRow, RoundRow, StakeAggregates } from './store';
+import type { CandleRow, RoundRewardRow, RoundRow, StakeAggregates, StakeRow, UnlockPoolRow } from './store';
+import * as v8 from './v8';
 import { getSource, type MarketSource } from './sources';
 import { resetDemoData } from './demo-cycle';
 import { ApiError, conflict } from './http';
@@ -41,6 +55,12 @@ export interface ReconcileResult {
   rounds: RoundRow[];
   /** 每轮质押聚合（总质押 / 去重地址数 / 地址明细）：所有接口的唯一事实源 */
   stakeAgg: StakeAggregates;
+  /** V8：完整质押行（含 weight/streak/referred_by），权重与邀请计算用 */
+  stakeRows: StakeRow[];
+  /** V8：每轮奖励三态账本 */
+  rewardRows: RoundRewardRow[];
+  /** V8：解锁池单例 */
+  unlockPool: UnlockPoolRow;
   /** 已落库 K 线（按轮分组），一次查询加载 */
   candlesByRound: Map<number, CandleRow[]>;
   now: number;
@@ -126,6 +146,17 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
       30,
       86_400,
     ),
+    previewProtocolSeconds: numberFrom(kv, 'stake_gap_seconds', STAKE_GAP_SECONDS),
+    streakBonusBps: numberFrom(kv, 'streak_bonus_bps', STREAK_BONUS_BPS),
+    streakMaxRounds: numberFrom(kv, 'streak_max_rounds', STREAK_MAX_ROUNDS),
+    referralBonusBps: numberFrom(kv, 'referral_bonus_bps', REFERRAL_BONUS_BPS),
+    referralCapMultiple: numberFrom(kv, 'referral_cap_multiple', REFERRAL_CAP_MULTIPLE),
+    earlyClaimPenaltyBps: numberFrom(kv, 'early_claim_penalty_bps', EARLY_CLAIM_PENALTY_BPS),
+    rolloverCapPerAddressRaw: bigintFrom(kv, 'rollover_cap_per_address_raw', ROLLOVER_CAP_PER_ADDRESS_RAW),
+    unlockDurationSeconds: numberFrom(kv, 'unlock_duration_seconds', UNLOCK_DURATION_SECONDS),
+    minStakeRaw: bigintFrom(kv, 'min_stake_raw', MIN_STAKE_RAW),
+    maxTotalStakeRaw: bigintFrom(kv, 'max_total_stake_raw', MAX_TOTAL_STAKE_RAW),
+    demoUnlockSeconds: clampInt(Number(env.DEMO_UNLOCK_SECONDS ?? kv.get('demo_unlock_seconds') ?? DEFAULT_DEMO_UNLOCK_SECONDS), 30, 86_400),
     previewSeconds:
       dataSource === 'demo'
         ? clampInt(Number(env.DEMO_PREVIEW_SECONDS ?? kv.get('demo_preview_seconds') ?? DEFAULT_DEMO_PREVIEW_SECONDS), 5, 86_400)
@@ -147,11 +178,13 @@ function parseAutoplay(env: Env, kv: Map<string, string>): boolean {
 
 /** 单次请求的完整状态快照：kv(1) + rounds(1) + stakes(1) + candles(1) = 4 次 D1 读取，无 N+1。 */
 export async function loadState(env: Env, now = Date.now()): Promise<ReconcileResult> {
-  const [kv, rounds, stakeRows, candleRows] = await Promise.all([
+  const [kv, rounds, stakeRows, candleRows, rewardRows, unlockPool] = await Promise.all([
     store.getKeyValues(env),
     store.listRounds(env),
     store.listAllStakes(env),
     store.listCandlesAll(env),
+    store.listAllRoundRewards(env),
+    store.getUnlockPool(env),
   ]);
   const params = buildParams(env, now, kv);
   return {
@@ -159,6 +192,9 @@ export async function loadState(env: Env, now = Date.now()): Promise<ReconcileRe
     kv,
     rounds,
     stakeAgg: store.buildStakeAggregates(stakeRows),
+    stakeRows,
+    rewardRows,
+    unlockPool,
     candlesByRound: groupCandles(candleRows),
     now,
     changed: false,
@@ -219,7 +255,7 @@ async function settleSuccess(env: Env, params: Params, round: RoundRow, now: num
     'info',
     'system',
     'SETTLING_SUCCESS',
-    `R${round.round_id} 12/12 根完成，${round.qualified_candles} 根达标（阈值 ${params.minQualifiedCandles}），进入成功结算`,
+    `R${round.round_id} ${params.candleCount}/${params.candleCount} 根完成，${round.qualified_candles} 根达标（阈值 ${params.minQualifiedCandles}），进入成功结算`,
   );
   const done = await store.finalizeSuccess(env, {
     roundId: round.round_id,
@@ -269,7 +305,7 @@ async function settleFailure(env: Env, params: Params, round: RoundRow, now: num
     'warn',
     'system',
     'SETTLING_FAILURE',
-    `R${round.round_id} 12/12 根完成，仅 ${round.qualified_candles} 根达标（阈值 ${params.minQualifiedCandles}），进入失败结算`,
+    `R${round.round_id} ${params.candleCount}/${params.candleCount} 根完成，仅 ${round.qualified_candles} 根达标（阈值 ${params.minQualifiedCandles}），进入失败结算`,
   );
   const done = await store.finalizeFailure(env, {
     roundId: round.round_id,
@@ -381,6 +417,32 @@ export async function reconcile(env: Env, now = Date.now()): Promise<ReconcileRe
     if (settled) changed = true;
   }
 
+  // 3) V8：总权重 / 成功轮奖励三态账本 / K 线滚动哈希（幂等）
+  if (await v8.syncV8Rounds(env, params, rounds, state.stakeRows, state.candlesByRound, now)) {
+    state.rewardRows = await store.listAllRoundRewards(env);
+    changed = true;
+  }
+
+  // 4) V8：R10 任一终态 → 写入解锁池 start_at（每个演示周期只写一次；重新 seed/重置后重新触发）
+  const lastRound = rounds.find((round) => round.round_id === params.roundCount);
+  if (lastRound && isTerminal(lastRound.state)) {
+    const marker = state.kv.get('unlock_start_round');
+    if (marker !== String(params.roundCount)) {
+      await store.updateUnlockPool(env, { startAt: now }, now);
+      await store.setMetrics(env, { unlock_start_round: String(params.roundCount), unlock_started_at: String(now) }, now);
+      state.kv.set('unlock_start_round', String(params.roundCount));
+      state.unlockPool = { ...state.unlockPool, start_at: now, updated_at: now };
+      await store.logEvent(
+        env,
+        'info',
+        'system',
+        'UNLOCK_STARTED',
+        `R${params.roundCount} 终态，解锁池开始 ${params.unlockDurationSeconds} 秒（12×30 天）线性释放`,
+      );
+      changed = true;
+    }
+  }
+
   return { ...state, changed };
 }
 
@@ -426,23 +488,39 @@ export async function advanceRound(env: Env, actor: string, now = Date.now()): P
   if (!next) throw conflict('下一轮不存在，请检查 rounds 初始化数据');
   if (next.state !== 'UNOPENED') throw conflict(`R${next.round_id} 不是 UNOPENED 状态，无法开启`);
 
-  const openedId = await openRoundAt(env, params, next.round_id, now, actor);
+  const openedId = await openRoundAt(env, params, rounds, next.round_id, now, actor);
   if (!openedId) throw conflict(`R${next.round_id} 开启失败（并发冲突），请刷新后重试`);
   return loadState(env, now);
 }
 
 /** 开启指定轮次（admin advance 与 demo autoplay 共用；CAS 保证并发幂等）。 */
-async function openRoundAt(env: Env, params: Params, roundId: number, now: number, actor: string): Promise<number> {
-  // V3：真实模式下一轮报名在「上一轮结算后 48h」开启；演示模式立即开启便于循环展示。
-  const stakeOpenAt = params.dataSource === 'demo' ? now : now + params.stakeGapSeconds * 1000;
+async function openRoundAt(
+  env: Env,
+  params: Params,
+  rounds: RoundRow[],
+  roundId: number,
+  now: number,
+  actor: string,
+): Promise<number> {
+  // D-28：开轮档位 = 1 + 已成功轮数；失败轮不升档（同档重试），成功轮才升档。
+  // 目标价 = P0 × 2^tier（链上开窗时再取 max(阶梯, 2 × 开窗 24h TWAP) 锁定）。
+  const successCount = rounds.filter((round) => round.state === 'SUCCEEDED').length;
+  const tier = tierForOpening(successCount);
+  const target = targetPriceFor(tier, params.p0UsdE8);
+
+  // V7 时间线：结算 → 12h PREVIEW → 36h 报名 → 24h 观察 → 判定（单轮 3 天 / 10 轮 30 天）。
+  // - R1 无 PREVIEW：手动开轮立即开启报名窗口；
+  // - demo：autoplay 已等待 demo 预告期，这里直接开窗，保持循环展示节奏。
+  const previewMs = roundId === 1 || params.dataSource === 'demo' ? 0 : params.previewSeconds * 1000;
+  const stakeOpenAt = now + previewMs;
   const stakeCloseAt = stakeOpenAt + stakeWindowMs(params);
   const observationStart = ceilTo(stakeCloseAt, params.candleMs);
   const observationEnd = observationStart + params.candleCount * params.candleMs;
-  const target = targetPriceFor(roundId, params.p0UsdE8);
 
   const opened = await store.openRound(env, {
     roundId,
     now,
+    targetTier: tier,
     targetPriceUsdE8: target.toString(),
     rewardBudgetRaw: params.roundRewardRaw.toString(),
     stakeOpenAt,
@@ -457,7 +535,8 @@ async function openRoundAt(env: Env, params: Params, roundId: number, now: numbe
     'info',
     actor,
     'ROUND_OPENED',
-    `R${roundId} 质押窗口开启：target=${target.toString()} USD_E8，window=${Math.round((stakeCloseAt - stakeOpenAt) / 1000)}s（source=${params.dataSource}）`,
+    `R${roundId} 质押窗口开启：tier=${tier}（${priceMultiplierFor(tier)}×P0）target=${target.toString()} USD_E8，` +
+      `window=${Math.round((stakeCloseAt - stakeOpenAt) / 1000)}s preview=${Math.round(previewMs / 1000)}s（source=${params.dataSource}）`,
   );
   return roundId;
 }
@@ -487,17 +566,27 @@ export async function autoplay(env: Env, now = Date.now()): Promise<{ acted: boo
     if (lastSettledAt > 0 && now - lastSettledAt < params.previewSeconds * 1000) {
       return { acted: false, action: null };
     }
-    const nextId = await openRoundAt(env, params, lastId + 1, now, 'cron');
+    const nextId = await openRoundAt(env, params, state.rounds, lastId + 1, now, 'cron');
     if (!nextId) return { acted: false, action: null };
     await store.logEvent(env, 'info', 'cron', 'DEMO_AUTOPLAY_OPEN', `R${nextId} 由演示自维持自动开启（上一轮 R${lastId} 已终态）`);
     return { acted: true, action: 'OPEN_NEXT_ROUND' };
   }
 
-  // 十轮全部终态 → 重置演示（120s 租约，避免 cron 与 admin tick 并发重复重建）
+  // V8：十轮全部终态后先保持「解锁中」一段时间（展示 ClaimUnlocked / 线性解锁进度），再重置演示
+  const unlockStarted = state.unlockPool.start_at;
+  if (unlockStarted > 0 && now - unlockStarted < params.demoUnlockSeconds * 1000) {
+    return { acted: false, action: 'UNLOCKING' };
+  }
+
+  // 重置演示（120s 租约，避免 cron 与 admin tick 并发重复重建）
   const lockAt = Number(state.kv.get('demo_reset_at') ?? '0');
   if (lockAt > 0 && now - lockAt < 120_000) return { acted: false, action: null };
   const cycle = Number(state.kv.get('demo_cycle') ?? '0') + 1;
-  await store.setMetrics(env, { demo_reset_at: String(now), demo_cycle: String(cycle) }, now);
+  await store.setMetrics(
+    env,
+    { demo_reset_at: String(now), demo_cycle: String(cycle), unlock_start_round: '0', unlock_started_at: '0' },
+    now,
+  );
   await resetDemoData(env, params, now);
   await store.logEvent(
     env,
@@ -536,7 +625,7 @@ export async function pauseOracle(env: Env, actor: string, reason: string, now =
   return loadState(env, now);
 }
 
-/** 管理端：恢复预言机 → 丢弃旧窗口，从当前时刻重启完整 12 根观察。 */
+/** 管理端：恢复预言机 → 丢弃旧窗口，从当前时刻重启完整观察窗口（V7：24 根 × 1h）。 */
 export async function resumeOracle(env: Env, actor: string, now = Date.now()): Promise<ReconcileResult> {
   const state = await loadState(env, now);
   const pausedRound = state.rounds.find((round) => round.state === 'ORACLE_PAUSED');
@@ -553,7 +642,7 @@ export async function resumeOracle(env: Env, actor: string, now = Date.now()): P
       'info',
       actor,
       'ORACLE_RESUME',
-      `R${pausedRound.round_id} 恢复：丢弃旧窗口，从 ${new Date(observationStart).toISOString()} 重启完整 ${state.params.candleCount} 根观察（不销毁本金）`,
+      `R${pausedRound.round_id} 恢复：丢弃旧窗口，从 ${new Date(observationStart).toISOString()} 重启完整 ${state.params.candleCount} 根观察窗口（不销毁本金、不消耗档位）`,
     );
   } else {
     await store.logEvent(env, 'info', actor, 'ORACLE_RESUME', '预言机恢复（无暂停中的轮次）');

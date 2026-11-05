@@ -1,157 +1,140 @@
-# web/src/features/chain — TON 测试网真实质押 / 领取（task-7）
+# web/src/features/chain — TON 测试网真实交易（质押 / 领取 / V8 奖励三态 / 邀请）
 
-把前端从「演示数据」升级为可对 TON 测试网合约发起真实交易。所有 UI / 交易逻辑都在本目录内；
-对外仅通过 `index.ts` 暴露，页面侧只挂一个 `<ChainMePanel />`。
+把前端从「演示数据」升级为可对 TON 测试网合约发起真实交易。所有链上 UI / 交易逻辑都在本目录内；
+对外通过 `index.ts` 暴露，页面侧挂 `<ChainMePanel />`（质押/领取）与 `<RewardReferralPanel />`（V8 奖励三态/邀请）。
 
-`@
+```
 chain/
-├─ index.ts            # 对外导出（组件 / hooks / ABI 常量 / 工具）
-├─ protocol.ts         # opcode、单位、gas、默认限额、uint64 nonce/queryId
-├─ payload.ts          # StakePayload / Jetton transfer / Claim 消息体构造
-├─ cell.ts             # 自包含 TON Cell + BOC 序列化 + BOC 解析 + CellSlice（无 @ton/core 依赖）
-├─ address.ts          # 友好地址 ↔ raw、CRC16、base64（url-safe / 标准）
-├─ decode.ts           # transfer_notification / Claim 消息解码（回执校验）
-├─ config.ts           # /api/config → ChainConfig（合约地址、网络、限额、浏览器、RPC 端点）
-├─ transactions.ts     # 前置校验 + TON Connect 消息构造
-├─ rpc.ts              # Jetton Wallet 解析、toncenter 交易查询、回执轮询
-├─ useChainTx.ts       # 交易状态机 hook（待签名/已发送/已上链/失败）
-├─ storage.ts          # 最近一笔交易本地记录（刷新后仍可见哈希链接）
-├─ i18n.ts             # 中英双语文案 + 错误码文案 + 阶段文案
-├─ TxStatus.tsx        # 交易状态行（阶段、哈希、错误、重试）
-├─ ChainMePanel.tsx    # 「我的战况」链上交易面板（质押 + 领取 + 降级）
-└─ chain.css           # 面板样式（沿用 fuse.css 变量与 .panel/.btn 体系）
-`@
+├─ index.ts              # 对外导出（组件 / hooks / ABI 常量 / 工具）
+├─ protocol.ts           # opcode、V8 常量、单位、gas、限额、事件 / get methods 名称
+├─ payload.ts            # StakePayload / Jetton transfer / Claim / V8 早领·滚存·邀请·解锁 消息体
+├─ cell.ts               # 自包含 TON Cell + BOC 序列化/解析 + CellSlice（无 @ton/core 依赖）
+├─ address.ts            # 友好地址 ↔ raw、CRC16、base64
+├─ decode.ts             # transfer_notification / Claim / V8 用户操作消息解码（回执校验）
+├─ config.ts             # /api/config → ChainConfig（合约/网络/限额/V8 权重参数/浏览器/RPC）
+├─ transactions.ts       # 前置校验 + TON Connect 消息构造（含 V8 四个新 opcode）
+├─ rpc.ts                # Jetton Wallet 解析、toncenter 交易查询、回执轮询
+├─ useChainTx.ts         # 交易状态机 hook（含 V8 submitRewardAction / submitSetReferrer / submitClaimUnlocked）
+├─ rewards.ts            # V8 奖励三态 / 解锁 / 邀请 / streak 数据适配与兜底
+├─ storage.ts            # 最近一笔交易本地记录
+├─ i18n.ts               # 中英双语文案（含 V8）
+├─ TxStatus.tsx          # 交易状态行
+├─ ChainMePanel.tsx      # 质押 + 旧领取面板
+├─ RewardReferralPanel.tsx # V8 奖励三态 + 解锁 + 邀请面板
+└─ chain.css             # 样式（沿用 fuse.css 变量与 .panel/.btn 体系）
+```
 
-## 1. 消息 ABI（V6.2 定稿，与 contracts/README.md §4 + contracts/deploy/abi/*.json 对齐）
+## 1. 消息 ABI（V8 定稿，与 contracts/README.md §4 对齐）
 
-> **ABI 定稿来源**：`contracts/README.md` §4 与 `contracts/deploy/abi/RoundController.json` / `TeamVault.json`（contract-dev，2026-11-05，47 个测试通过）；`docs/04_CONTRACT_ABI.md` §19 已对齐。本模块常量与之逐字段一致，并用 BOC/ton-core 对照做过字节级验证。
-> 自研合约只有 **RoundController + TeamVault**：没有独立的 StakingVault / RewardVault 地址。
-> 质押 Jetton 的 owner、三种领取消息的接收方都是 **RoundController**。
+> ABI 来源：contracts/README.md §4.1 + contracts/deploy/abi/*.json（contract-dev，V8 code hash 0xFB5250EE…54C84，87 测试）。
+> 自研合约只有 **RoundController + TeamVault**；质押 Jetton 的 owner、所有领取/奖励/邀请消息的接收方都是 **RoundController**。
 
-### 1.1 质押：TEP-74 Jetton transfer（`0x0f8a7ea5`）
+### 1.1 质押：TEP-74 Jetton transfer（0x0f8a7ea5）
 
-用户钱包 → **用户自己的 Jetton Wallet**（由 `get_wallet_address` 解析），forward payload 携带：
-
-`@
+```
 StakePayload（136 bit）
   op:uint32                      = 0x5254000F  STAKE_DEPOSIT
   version:uint8                  = 1
   roundId:uint8
   depositNonce:uint64            # 同一 (roundId, owner) 单调唯一
-  riskDisclosureVersion:uint16   # = /api/config.riskDisclosureVersion（测试网初始 1）
-  acceptFullPrincipalBurn:uint8  # 必须为 1（0 会被合约退款）
-`@
+  riskDisclosureVersion:uint16   # = /api/config.riskDisclosureVersion
+  acceptFullPrincipalBurn:uint8  # 必须为 1
+```
 
-Jetton transfer 参数：
+Jetton transfer：destination=RoundController，response_destination=用户，forward_ton_amount=0.05 TON，消息附带 0.20 TON。
 
-| 字段 | 值 |
-| --- | --- |
-| destination（Jetton owner） | RoundController |
-| response_destination | 用户钱包地址 |
-| custom_payload | 空 |
-| forward_ton_amount | 0.05 TON |
-| forward_payload | `Either Cell ^Cell` = 引用 StakePayload cell |
-| 消息附带 TON | 0.20 TON（gas + forward） |
+### 1.2 旧领取接口（语义按 V8 调整，opcode/字段不变）
 
-### 1.2 领取（用户 → RoundController，普通内部消息）
-
-`@
+```
 ClaimPayload（104 bit）
   op:uint32        # ClaimPrincipal 0x52540006 / ClaimReward 0x52540007 / ClaimAll 0x5254000E
-  queryId:uint64   # 回执关联（合约不做唯一性强制）
-  roundId:uint8    # ClaimAll 填 0 = 合约扫描全部已结算轮次（≤10 轮）
-`@
+  queryId:uint64
+  roundId:uint8    # ClaimAll 填 0 = 扫描 1..10
+```
 
-消息附带 0.10 TON。三种领取均幂等；ClaimAll 把本金 + 奖励合并为一笔 Jetton 转账。
+> V8：ClaimReward / ClaimAll 的奖励部分在阶梯期一律按 EARLY 语义只付 50%，另 50% 进 R10 后解锁池；ClaimPrincipal 仍 100%。R10 解锁开始后旧 ClaimReward 拒绝。
 
-### 1.3 事件与 get methods（本模块已登记常量，当前读取仍走后端）
+### 1.3 V8 新增 4 个 opcode（用户 → RoundController）
 
-- 事件 opcode（external-out，供索引器解析）：@@TargetPriceSet 0x52540101@@、@@RoundSettled 0x52540102@@、@@DepositAccepted 0x52540103@@、@@TechnicalAborted 0x52540104@@、@@TeamReleased 0x52540201@@、@@TeamBurned 0x52540202@@（见 @@EVENT_OPCODES@@）。
-- get methods（见 @@GET_METHODS@@）：RC @@get_protocol_config / get_current_round / get_success_count / get_round / get_round_status / get_round_target_price / get_round_candle / get_user_stake / get_round_total_stake / get_user_reward_estimate / get_claimable_all / get_round_burn_status@@；TV @@get_team_vault_state / get_round_state@@。
-- **目标价读取约定**：@@get_round_target_price@@ 在 PREVIEW / UNOPENED 期间返回 0，UI 必须显示「待开窗锁定」，不能当成 $0 目标价。
-- 当前轮次/可领取金额仍走后端 API（见 §6 限制）；后续接链读取时按上述方法名与 ABI 返回结构实现。
+| Opcode | 消息 | Body 布局（op 之后） | 位宽 | 说明 |
+| --- | --- | --- | --- | --- |
+| 0x52540017 | ClaimRewardEarly | queryId:u64, roundId:u8 | 104 | 立即领 floor(amount/2)，另一半进解锁池 → EARLY |
+| 0x52540018 | RollReward | queryId:u64, roundId:u8 | 104 | 全额进入下一轮质押 → ROLLED（受 20M/地址、200M/轮上限，超出转 PENDING） |
+| 0x52540019 | SetReferrer | referrer:MsgAddress | 299 | 首次质押前绑定邀请人，一次性不可改 |
+| 0x5254001A | ClaimUnlocked | queryId:u64 | 96 | R10 终态后按 12×30 天线性领取解锁池 |
+
+消息附带 0.10 TON；三者均发送到 RoundController。构造函数：`buildClaimRewardEarly / buildRollReward / buildSetReferrer / buildClaimUnlocked`（在 payload.ts）。
+
+### 1.4 事件与 get methods（常量已登记，当前 UI 数据仍走 worker API）
+
+- 事件 opcode：TargetPriceSet 0x52540101、RoundSettled 0x52540102、DepositAccepted 0x52540103、TechnicalAborted 0x52540104、TeamReleased 0x52540201、TeamBurned 0x52540202；V8 新增 RewardRolled 0x52540105、RewardEarly 0x52540106、ReferrerSet 0x52540107、UnlockClaimed 0x52540108。
+- RC get methods：get_protocol_config / get_current_round / get_success_count / get_round / get_round_status / get_round_target_price / get_round_candle / get_user_stake / get_round_total_stake / get_user_reward_estimate / get_claimable_all / get_round_burn_status；V8 新增 get_reward_state / get_unlock_info / get_referral / get_streak / get_user_weight / get_total_weight。
+- 目标价在 PREVIEW/UNOPENED 期间 getter 返回 0，UI 显示「待开窗锁定」。
+
 ## 2. 交易构造与发送
 
-- **Jetton Wallet 解析**（`rpc.ts`）：本地缓存 → tonapi `/v2/accounts/{owner}/jettons` → toncenter
-  `runGetMethod get_wallet_address`（三种参数编码兜底：raw / friendly / address-cell BOC）。
-- **发送**：复用 wallet 模块的 **单实例 TonConnectUI**（`sendTonConnectTransaction`，task-7 新增导出），
-  **不新建第二个实例**；消息带 `network`（testnet = `-3` / mainnet = `-239`）与 `from`（raw 地址）。
-- **boc**：payload 为自包含 Cell/BOC 序列化（无 index/CRC，TON 节点与钱包均可解析），标准 base64 传给 TON Connect。
-- **回执轮询**（`rpc.ts waitForTransaction`）：
-  1. 合约地址（RoundController）出现匹配交易 → 已上链（合约侧确认）：
-     - 质押匹配：解析 `transfer_notification` 的 forward payload，比对 `depositNonce`；
-     - 领取匹配：`in_msg.source` = 用户地址 + opcode + roundId；
-  2. 30s 内只观察到钱包外部交易 → 标记「已上链（等待合约回执）」并给出钱包交易哈希；
-  3. 超时 → 可重试的 `TX_TIMEOUT`，已发送状态不丢失（哈希仍展示）。
+- **Jetton Wallet 解析**：本地缓存 → tonapi `/v2/accounts/{owner}/jettons` → toncenter `runGetMethod get_wallet_address`（raw / friendly / address-cell BOC 三种编码兜底）。
+- **发送**：复用 wallet 模块的单实例 TonConnectUI（`sendTonConnectTransaction`）；消息带 network（testnet=-3 / mainnet=-239）与 from（raw 地址）。
+- **BOC**：payload 为自包含 Cell/BOC 序列化（无 index/CRC），标准 base64 传给 TON Connect。
+- **回执轮询**：合约侧匹配（质押用 transfer_notification 的 depositNonce；领取/奖励/邀请/解锁用 in_msg.source + opcode + roundId/referrer），30s 仅见钱包外部交易时标记「已上链等待合约回执」，超时给可重试 TX_TIMEOUT。
 
 ## 3. 状态机
 
-`idle → preparing → awaiting-signature → sent → confirming → confirmed`
-异常分支：`rejected`（钱包拒绝）/ `failed`（余额、网络、超时、配置等）。
+`idle → preparing → awaiting-signature → sent → confirming → confirmed`；异常分支 rejected / failed。
 
-错误码（UI 中英双语）：`CHAIN_NOT_CONFIGURED`、`WALLET_NOT_CONNECTED`、`DEMO_WALLET`、`TONCONNECT_UNAVAILABLE`、`WALLET_REJECTED`、`INSUFFICIENT_BALANCE`、`ROUND_NOT_OPEN`、`AMOUNT_INVALID/TOO_SMALL/TOO_LARGE`、`JETTON_WALLET_UNRESOLVED`、`NETWORK_ERROR`、`TX_TIMEOUT`、`BAD_CONFIG`。
+支持交易种类：stake、claimPrincipal、claimReward、claimAll、claimRewardEarly、rollReward、setReferrer、claimUnlocked。
 
 ## 4. 配置来源（/api/config）
 
-启用条件：`config.contracts.roundController` 与 `config.contracts.jettonMaster` 均非空，且 `config.network` 为 `testnet`/`mainnet`。否则整体降级：只显示「链上交易未启用」说明，页面原有演示流程（`/api/stake`、`/api/claim` 演示领取）完全不受影响。
+启用条件：contracts.roundController 与 contracts.jettonMaster 均非空，且 network 为 testnet/mainnet；否则整体降级为演示模式。
 
-后端可通过 `contracts` 的可选扩展字段覆盖（缺省用内置默认值，向后兼容）：
+V8 权重/三态参数（shared/types ProtocolConfig 已定稿）：streakBonusBps=1000、streakMaxRounds=10、referralBonusBps=2000、referralCapMultiple=10000、earlyClaimPenaltyBps=5000、rolloverCapPerAddressRaw=20000000000000000、unlockDurationSeconds=31104000。
 
-| 字段 | 说明 | 缺省 |
-| --- | --- | --- |
-| `explorerBaseUrl` | 浏览器根地址（交易/地址链接） | testnet `https://testnet.tonscan.org` / mainnet `https://tonscan.org` |
-| `toncenterBaseUrl` | toncenter 根地址 | `https://testnet.toncenter.com` / `https://toncenter.com` |
-| `toncenterApiKey` | 可选 API key（公共限流时提高配额） | 无 |
-| `tonapiBaseUrl` | tonapi 根地址 | `https://testnet.tonapi.io` / `https://tonapi.io` |
-| `minStakeRaw` | 单笔最低质押（raw） | `10,000 × 10^decimals` |
-| `maxTotalStakeRaw` | 本轮总质押上限（raw） | `200,000,000 × 10^decimals` |
-| `maxStakePerAddressRaw` | 单地址固定硬顶（raw） | `20,000,000 × 10^decimals`（V6.1 = 本轮总上限的 10%） |
-| `maxStakePerAddressBps` | 旧口径占比（bps，仅兼容保留） | `1000` |
+contracts 可选扩展：explorerBaseUrl、toncenterBaseUrl、toncenterApiKey、tonapiBaseUrl、minStakeRaw、maxTotalStakeRaw、maxStakePerAddressRaw、maxStakePerAddressBps（旧口径兼容）。
 
-> `shared/types.ts` 的 `contracts` 已包含主要地址字段；扩展字段由 Lead 决定是否正式纳入。前端读取时全部做了「存在即用、缺失即回退」处理，因此后端可以逐步补充。
+## 5. V8 奖励三态 / 权重 / 邀请 UI（/me）
 
-**质押限额（V6.1 定稿，contract-dev 2026-11-05 确认）**：
+### 5.1 奖励三态（RewardReferralPanel）
 
-- 合约公式：`perAddressCap = maxTotalStakeRaw × maxStakePerAddressBps / 10000` = `200,000,000 × 1000 / 10000 = 20,000,000 A9`；
-  这是**固定硬顶**（沿用 bps 字段只是为了用同一公式离线校验），**不是**「本轮当前总质押的 10%」动态比例——首个存款人也可以占满 100%（合约测试 `test first depositor and exact 20,000,000 A9 hard cap are accepted` 锁死）。
-- 本轮总上限 200,000,000 A9 独立校验；单地址按**累计**质押（本轮已有 + 本笔）校验。
-- 任一上限超出 → 合约把该笔**整笔原路退款**（本金不损失，但会消耗 gas），因此前端前置拦截并提示两个独立上限。
-- 前端默认按同一公式从 `maxTotalStakeRaw × maxStakePerAddressBps` 派生单地址上限；若后端显式下发 `maxStakePerAddressRaw`，以显式值为准。
+- 每轮一行：奖励金额 + 状态（未处理 / 已滚存 / 已早领）+ 可滚存 / 早领可得 / 进入解锁池金额。
+- 三个按钮：**滚存**（全额进下一轮，可能归零）、**早领 50%**（立即拿 X，另 X 锁到 R10 后）、**不动**（默认，锁到 R10 后 12 个月线性）。
+- 状态互斥：已滚存/已早领后按钮全部禁用并显示对应说明；不可回退。
+- 关键文案（写死，产品情绪核心）：「**滚存 = 把赢来的再押一次，可能归零。想落袋就选早领（拿 50%）。**」
+- 解锁进度：me.unlock 的 active / progressBps / claimableRaw；R10 后显示进度条 + 「可解锁 X / 12 个月线性」+ 领取解锁（ClaimUnlocked）按钮。
 
-## 5. 测试网联调步骤（合约部署 + /api/config 下发后）
+### 5.2 邀请
 
-1. 部署 Jetton Master / RoundController / TeamVault，把地址写入 D1 的 `kv`（`contract_jetton_master`、`contract_round_controller`...），确认 `GET /api/config` 返回 `network: \"testnet\"` 且两个地址非空。
-2. 确认 `config.riskDisclosureVersion` 与合约 config 一致（测试网初始 1；不一致会被退款）。
-3. 在钱包 App 中切到 **Testnet**（Tonkeeper → Settings → Network → Testnet），准备测试 TON 与测试 A9。
-4. 打开 `/me` → 连接真实 TON 钱包（非演示钱包）→「链上交易」面板出现测试网徽标与合约地址链接。
-5. 报名窗口内输入数量（≥ 最低限额）、勾选风险确认 → 签名：钱包应展示一条 Jetton transfer（接收方为**你的** Jetton Wallet，附带 0.2 TON，payload 以 `0x5254000F` 开头）。
-6. 状态机：待签名 → 已发送 → 已上链 → 已确认；面板给出交易哈希链接，合约侧匹配依据是 `transfer_notification` 中的 `depositNonce`。
-7. 结算后点「一键领取全部（ClaimAll）」→ 钱包展示一条消息到 RoundController（payload 以 `0x5254000E` 开头）；回执匹配 `in_msg.source = 用户地址 + opcode + roundId`。
-8. 验证幂等：重复点击 ClaimAll 不重复派发；重复质押 nonce 会被合约退款（交易仍可能成功上链）。
-9. 失败路径：钱包拒绝（rejected）、TON 余额不足（INSUFFICIENT_BALANCE）、非报名窗口（ROUND_NOT_OPEN）、Jetton Wallet 解析失败（JETTON_WALLET_UNRESOLVED）。
+- 邀请码 = 地址的友好编码（无后端注册表时也能被对方还原为地址）；邀请链接为 `/me?ref=<邀请码>`，进入 /me 时 `captureInviteFromLocation()` 幂等写入 localStorage（待绑定）。
+- 未绑定：显示待绑定邀请人（来自 ?ref=）或手动粘贴邀请码/地址 → 首次质押前发 SetReferrer（一笔交易）；已绑定显示「已绑定，不可修改」。
+- 展示：连续参与轮次与当前权重倍数（1.10×–2.00×）、已邀请人数、被邀请人本轮质押、本轮邀请加成。
+- 演示模式（无合约地址 / 演示钱包）：所有新按钮走本地模拟分支（不发链上交易），并显示「演示模式」提示。
 
-## 6. 已知限制 / 待决策
+数据字段全部来自 shared/types.ts（backend-dev 定稿）：RoundReward / UnlockInfo / ReferralInfo / MeResponse.rewards|stake|referral|unlock；字段缺失（后端灰度/旧演示数据）时由 `rewards.ts` 兜底（rewards 缺失时从 claimable.rewardRaw 推导 PENDING；unlock/referral 缺失时零值安全展示）。
 
-- **轮次元数据仍来自后端**：当前 `/api/rounds` 可能仍是演示数据源（`dataSource: demo`）。面板会显式提示「以后端/合约为准」，质押前置校验依赖该接口的 `state` 与窗口时间。正式联调需要 worker 的 chain 数据源（task-1 的 `worker/src/sources/chain.ts`）或索引器。
-- **可领取金额**：来自 `/api/me`（演示数据源时是演示金额）。合约侧 `get_claimable_all` 的读取需要索引器/worker 提供；当前 ClaimAll 不依赖金额即可安全调用（合约自行扫描）。
-- **Jetton Wallet 解析依赖公共 RPC**（tonapi / toncenter）。若被限流，UI 会提示重试；可在 `/api/config contracts` 中配置 `toncenterApiKey`。
-- **TON Connect 拒绝识别**：依据错误码 `300` 与文案匹配，不同钱包文案可能不同；未识别时归为 `UNKNOWN`，仍显示原始 detail。
-- **MePage 的只读提示与演示领取按钮**：`features/app/MePage.tsx` 原有「只读模式」文案、以及依赖 `/api/claim` 的演示领取按钮在链上模式启用后仍会显示（task-7 只允许在 MePage 加 import + 挂组件）。链上面板已加显式提示「本面板交易会真实上链，演示领取不上链」；建议后续由 app-dev/Lead 在 `config.contracts.roundController` 非空时隐藏演示领取按钮并更新只读文案。
+## 6. 测试网联调步骤（合约部署 + /api/config 下发后）
 
-## 7. 自测记录（2026-11-05）
+1. 部署 Jetton Master / RoundController / TeamVault，把地址写入 D1 kv，确认 GET /api/config 返回 network=testnet 且两个地址非空、V8 参数已下发。
+2. 钱包切 Testnet，准备测试 TON 与 A9；打开 /me 连接真实 TON 钱包（非演示钱包）。
+3. 质押：输入数量、勾选风险 → 钱包展示 Jetton transfer（0x0F8A7EA5，forward payload 0x5254000F）。
+4. 结算后：奖励三态面板出现该轮 → 选择滚存 / 早领 50% / 不动；确认回执匹配（source=用户 + opcode + roundId）。
+5. 邀请：先用被邀请钱包打开 `/me?ref=<邀请码>`，绑定邀请人（SetReferrer 0x52540019）后再首次质押；已绑定不可改。
+6. R10 终态后：解锁进度出现，点「领取解锁」发 ClaimUnlocked（0x5254001A），确认 claimableRaw 递减。
+7. 失败路径：钱包拒绝、gas 不足、R10 前 ClaimUnlocked 被拒（合约侧失败）、重复操作（互斥）均应有明确提示。
 
-- `tsc --noEmit`（web）：0 error；`vite build`：成功。
-- **离线 BOC / payload 校验**（用同机 `ton-core@0.63.1` 作对照实现，仅测试用，未加依赖）：
-  - StakePayload = 136 bit，cell hash 与 ton-core 一致；
-  - Jetton transfer：BOC 字节与 ton-core 序列化**完全一致**（`Cell.fromBase64` 可解析、hash 相同）；
-  - ClaimPayload = 104 bit，BOC 与 ton-core 一致；
-  - BOC 解析 → 反序列化字节级 round-trip 一致；
-  - `decodeJettonNotification` 能从 ton-core 构造的 `transfer_notification` 中还原 `depositNonce/roundId/sender`；
-  - 金额 `parse/format` 边界（逗号、精度溢出）通过。
-- **前置校验 / 交易构造**（Node 直跑纯 TS 模块）：demo 钱包、非报名窗口、低于最低额、超总上限、单地址超过 20,000,000 A9 硬顶、gas 不足均抛出对应错误码；
-  质押消息实测：op=`0x0F8A7EA5`、金额 coins 正确、destination=RoundController、response=用户、custom_payload 为空、
-  forward=0.05 TON、forward payload 为引用且解码回 `roundId/depositNonce/riskVersion/accept=1`；ClaimAll = `0x5254000E` + roundId 0；
-  地址非法时归为 `BAD_CONFIG`（不会把 CRC 原始异常抛给 UI）。
-- UI 冒烟（Playwright + mock `/api`）：`/me` 分别测「已配置测试网（1440 / 390）」与「未配置合约（1280）」，
-  校验面板文案、按钮禁用态（演示钱包）、dataSource=demo 提示、无横向溢出、无未捕获异常；
-  英文界面 1440 / 390 亦通过（1280 英文下的横向溢出由既有 SiteHeader 导航产生，与链上面板无关）。
+## 7. 已知限制 / 待决策
+
+- 轮次状态、奖励三态、解锁进度、邀请关系当前仍走后端 API；worker 尚未下发的 V8 字段已做兜底（见 §5.2 末）。
+- 目标价/奖励估算以合约 getter 为准；UI 展示数据来自 worker 索引。
+- Jetton Wallet 解析依赖 tonapi/toncenter 公共 RPC，可用 contracts.toncenterApiKey 提高配额。
+- 邀请码目前是地址编码（可直接被对方还原）；如后续引入短码注册表，只需替换 inviteCodeFor/parseInviteCode 两个函数。
+
+## 8. 自测记录
+
+- web tsc --noEmit：0 error；vite build：OK。
+- **V8 四个新 opcode 的 BOC 与 @ton/core 字节级对拍（仅本地验证，未加依赖）全部通过**：
+  - ClaimRewardEarly 0x52540017：104 bit，hash 一致，BOC 字节一致，示例 hex b5ee9c7201010101000f00001a52540017112233445566778803
+  - RollReward 0x52540018：104 bit，hash 一致，BOC 字节一致，示例 hex b5ee9c7201010101000f00001a52540018112233445566778803
+  - SetReferrer 0x52540019：299 bit，hash 一致，BOC 字节一致，示例 hex b5ee9c7201010101002800004b525400198015757575…（51 字节）
+  - ClaimUnlocked 0x5254001A：96 bit，hash 一致，BOC 字节一致，示例 hex b5ee9c7201010101000e0000185254001a1122334455667788
+- 历史（task-7）质押 Jetton transfer 的 BOC 与 ton-core 也做过逐字节一致校验。
+- UI（Playwright + mock /api）：/me 中英 × 1440/390 四张截图；三态行、三个按钮、解锁进度、邀请码/链接/待绑定/已绑定/连续轮次/权重/邀请加成全部渲染；旧字段缺失（legacy fallback）不报错；演示模式下滚存/早领/绑定/领取解锁四个动作均走本地模拟分支且无 pageerror。

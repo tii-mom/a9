@@ -144,7 +144,32 @@ export function sharePct(amountRaw: string, totalRaw: string): string {
   }
 }
 
-/** 秒 → 带小时提示（14400 → "14,400 s · 4h"）。 */
+/** V7 时间参数兜底（与合约/worker 一致）：12h 预告 / 36h 报名 / 24h 观察 / 24 根 × 1h / 阈值 16。仅在后端配置缺失时使用。 */
+export const TIMING_FALLBACKS = {
+  previewSeconds: 43_200,
+  stakeDurationSeconds: 129_600,
+  observationSeconds: 86_400,
+  candleSeconds: 3_600,
+  candleCount: 24,
+  minQualifiedCandles: 16,
+} as const;
+
+/** 模板填充："{candleCount} 根 / {need} 根" → vars 中的值；缺失变量渲染为空串。 */
+export function fillTemplate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (_match, key: string) => {
+    const value = vars[key];
+    return value === undefined || value === null ? '' : String(value);
+  });
+}
+
+/** 秒 → 小时展示值（整数不带小数；否则最多两位小数，去掉尾随 0）。 */
+export function hoursOf(seconds: number | null | undefined, fallbackSeconds: number): string {
+  const value = typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : fallbackSeconds;
+  const hours = value / 3600;
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/** 秒 → 带小时提示（3600 → "3,600 s · 1h"）。 */
 export function secondsHint(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const text = s.toLocaleString('en-US');

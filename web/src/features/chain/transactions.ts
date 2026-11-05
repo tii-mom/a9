@@ -8,7 +8,7 @@ import { parseTonAddress, toRawAddress, type TonAddress } from './address';
 import { toBocBase64 } from './cell';
 import type { ChainConfig } from './config';
 import { chainError, ChainError } from './errors';
-import { buildClaimPayloadCell, buildJettonTransferCell, buildStakePayloadCell } from './payload';
+import { buildClaimPayloadCell, buildJettonTransferCell, buildSetReferrerCell, buildStakePayloadCell, buildUnlockCell } from './payload';
 import {
   DEFAULT_CLAIM_MESSAGE_TON_NANO,
   DEFAULT_FORWARD_TON_NANO,
@@ -43,14 +43,30 @@ export interface WalletContext {
   tonBalance: string | null;
 }
 
-export type ChainTxKind = 'stake' | 'claimPrincipal' | 'claimReward' | 'claimAll';
+export type ChainTxKind =
+  | 'stake'
+  | 'claimPrincipal'
+  | 'claimReward'
+  | 'claimAll'
+  | 'claimRewardEarly'
+  | 'rollReward'
+  | 'setReferrer'
+  | 'claimUnlocked';
 
 export type ClaimKind = 'claimPrincipal' | 'claimReward' | 'claimAll';
+
+/** V8 单轮奖励操作。 */
+export type RewardActionKind = 'claimRewardEarly' | 'rollReward';
 
 const CLAIM_OPCODE: Record<ClaimKind, number> = {
   claimPrincipal: OPCODES.CLAIM_PRINCIPAL,
   claimReward: OPCODES.CLAIM_REWARD,
   claimAll: OPCODES.CLAIM_ALL,
+};
+
+const REWARD_ACTION_OPCODE: Record<RewardActionKind, number> = {
+  claimRewardEarly: OPCODES.CLAIM_REWARD_EARLY,
+  rollReward: OPCODES.ROLL_REWARD,
 };
 
 export interface PreparedTx {
@@ -64,6 +80,8 @@ export interface PreparedTx {
     queryId: string;
     contract: string;
     requiresJettonWallet: boolean;
+    /** 仅 SetReferrer：被邀请人地址（raw） */
+    referrer: string | null;
   };
 }
 
@@ -195,6 +213,7 @@ export async function prepareStakeTransaction(params: {
       queryId: '0',
       contract: chain.roundController,
       requiresJettonWallet: true,
+      referrer: null,
     },
   };
 }
@@ -236,8 +255,132 @@ export function prepareClaimTransaction(params: {
       queryId: queryId.toString(),
       contract: chain.roundController,
       requiresJettonWallet: false,
+      referrer: null,
     },
   };
+}
+
+/** V8：构造单轮奖励操作（ClaimRewardEarly / RollReward → RoundController）。 */
+export function prepareRewardActionTransaction(params: {
+  chain: ChainConfig;
+  wallet: WalletContext;
+  kind: RewardActionKind;
+  roundId: number;
+  queryId?: bigint;
+}): PreparedTx {
+  const { chain, wallet, kind } = params;
+  if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
+  const roundId = Number(params.roundId);
+  if (!Number.isInteger(roundId) || roundId <= 0 || roundId > 255) throw chainError('BAD_CONFIG', 'roundId 非法: ' + params.roundId);
+  const queryId = params.queryId ?? nextQueryId();
+  const payload = buildClaimPayloadCell({ op: REWARD_ACTION_OPCODE[kind], queryId, roundId });
+  return {
+    request: {
+      validUntil: validUntilSeconds(),
+      network: chain.chainId ?? undefined,
+      from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
+      messages: [
+        {
+          address: chain.roundController,
+          amount: DEFAULT_CLAIM_MESSAGE_TON_NANO.toString(),
+          payload: toBocBase64(payload),
+        },
+      ],
+    },
+    meta: {
+      kind,
+      opcode: REWARD_ACTION_OPCODE[kind],
+      roundId,
+      amountRaw: null,
+      depositNonce: null,
+      queryId: queryId.toString(),
+      contract: chain.roundController,
+      requiresJettonWallet: false,
+      referrer: null,
+    },
+  };
+}
+
+/** V8：构造绑定邀请人（SetReferrer → RoundController，一次性）。 */
+export function prepareSetReferrerTransaction(params: {
+  chain: ChainConfig;
+  wallet: WalletContext;
+  referrer: string;
+}): PreparedTx {
+  const { chain, wallet } = params;
+  if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
+  const referrer = requireTonAddress(params.referrer, 'referrer');
+  const self = requireTonAddress(wallet.address, 'wallet');
+  if (toRawAddress(referrer) === toRawAddress(self)) throw chainError('BAD_CONFIG', '不能绑定自己为邀请人');
+  const payload = buildSetReferrerCell(referrer);
+  return {
+    request: {
+      validUntil: validUntilSeconds(),
+      network: chain.chainId ?? undefined,
+      from: toRawAddress(self),
+      messages: [
+        {
+          address: chain.roundController,
+          amount: DEFAULT_CLAIM_MESSAGE_TON_NANO.toString(),
+          payload: toBocBase64(payload),
+        },
+      ],
+    },
+    meta: {
+      kind: 'setReferrer',
+      opcode: OPCODES.SET_REFERRER,
+      roundId: null,
+      amountRaw: null,
+      depositNonce: null,
+      queryId: '0',
+      contract: chain.roundController,
+      requiresJettonWallet: false,
+      referrer: toRawAddress(referrer),
+    },
+  };
+}
+
+/** V8：构造领取解锁池（ClaimUnlocked → RoundController，R10 终态后）。 */
+export function prepareClaimUnlockedTransaction(params: {
+  chain: ChainConfig;
+  wallet: WalletContext;
+  queryId?: bigint;
+}): PreparedTx {
+  const { chain, wallet } = params;
+  if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
+  const queryId = params.queryId ?? nextQueryId();
+  const payload = buildUnlockCell(queryId);
+  return {
+    request: {
+      validUntil: validUntilSeconds(),
+      network: chain.chainId ?? undefined,
+      from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
+      messages: [
+        {
+          address: chain.roundController,
+          amount: DEFAULT_CLAIM_MESSAGE_TON_NANO.toString(),
+          payload: toBocBase64(payload),
+        },
+      ],
+    },
+    meta: {
+      kind: 'claimUnlocked',
+      opcode: OPCODES.CLAIM_UNLOCKED,
+      roundId: null,
+      amountRaw: null,
+      depositNonce: null,
+      queryId: queryId.toString(),
+      contract: chain.roundController,
+      requiresJettonWallet: false,
+      referrer: null,
+    },
+  };
+}
+
+/** V8：奖励操作 / 邀请绑定 / 解锁 的共同前置校验（钱包、gas）。 */
+export function validateRewardAction(params: { chain: ChainConfig; wallet: WalletContext }): void {
+  assertWalletReady(params.chain, params.wallet);
+  assertGas(params.chain, params.wallet, MIN_CLAIM_TON_BALANCE);
 }
 
 /** 是否为 ChainError（供 hook / UI 判定）。 */
