@@ -745,3 +745,15 @@ fun setMockAutoAck(wallet: MockWalletHandle, enabled: bool) {
         body: SetMockAutoAck { autoAck: enabled },
     }))).toHaveSuccessfulTx<SetMockAutoAck>({ from: wallet.address, to: wallet.address });
 }
+
+
+fun bounceTeamRelease(vault: TeamVaultHandle, wallet: address, roundId: uint8) {
+    val q: uint64 = ((roundId as uint64) << 16) | ((RELEASE_QUERY_TEAM as uint64) << 8);
+    val body = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(OP_JETTON_TRANSFER, 32)
+        .storeUint(q, 64)
+        .endCell();
+    val msg = createMessage({ bounce: false, value: ton("0.1"), dest: vault.address, body }).bounced();
+    testing.processSingleTraceStep(wallet, msg);
+}

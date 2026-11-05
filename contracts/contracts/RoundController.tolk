@@ -466,20 +466,22 @@ fun handleOpenRound(sender: address, msg: OpenRound) {
 
 fun handleCloseStaking(sender: address, msg: CloseStaking) {
     var s = lazy Storage.load();
-    // P0-1: only admin/oracle may close (prevents fake touch-price early close).
-    requireAdminOrOracle(s, sender);
     val now: uint64 = blockchain.now() as uint64;
     val rd = ensureRoundExists(s, s.currentRoundId);
     assert (rd.status == STATUS_STAKING_OPEN) throw Errors.BadRoundStatus;
 
     var closeAt: uint64 = 0;
     if (now >= rd.stakeCloseAt) {
+        // M-1: the 36h window expiring is deterministic -> anyone may close.
         closeAt = rd.stakeCloseAt;
-    } else if (msg.twap1hUsdE8 >= rd.targetPriceUsdE8 && msg.twap1hUsdE8 > 0) {
-        // touch-price early close (V6 kept)
-        closeAt = now;
     } else {
-        throw Errors.TooEarly;
+        // Early (touch-price) close remains permissioned and still needs a valid TWAP.
+        requireAdminOrOracle(s, sender);
+        if (msg.twap1hUsdE8 >= rd.targetPriceUsdE8 && msg.twap1hUsdE8 > 0) {
+            closeAt = now;
+        } else {
+            throw Errors.TooEarly;
+        }
     }
 
     var updated = rd;
@@ -700,7 +702,8 @@ fun handleAbortTechnical(_sender: address, _msg: AbortTechnical) {
     val now: uint64 = blockchain.now() as uint64;
     val t = timing(s);
     assert (s.currentRoundId >= 1) throw Errors.BadRoundId;
-    val rd = ensureRoundExists(s, s.currentRoundId);
+    var targetId: uint8 = s.currentRoundId;
+    var rd = ensureRoundExists(s, targetId);
 
     var reason: uint8 = 0;
     if (rd.status == STATUS_ORACLE_PAUSED && s.pausedAt > 0 &&
@@ -712,36 +715,61 @@ fun handleAbortTechnical(_sender: address, _msg: AbortTechnical) {
         now >= rd.observationEnd + (t.techAbortObsTimeoutSeconds as uint64)
     ) {
         reason = ABORT_REASON_OBSERVATION_TIMEOUT;
-    } else {
+    } else if (
+        rd.status == STATUS_PREVIEW &&
+        rd.stakeOpenAt > 0 &&
+        now >= rd.stakeOpenAt + (t.techAbortPauseSeconds as uint64)
+    ) {
+        reason = ABORT_REASON_PREVIEW_TIMEOUT;
+    } else if (
+        rd.status == STATUS_STAKING_OPEN &&
+        rd.stakeCloseAt > 0 &&
+        now >= rd.stakeCloseAt + (t.techAbortObsTimeoutSeconds as uint64)
+    ) {
+        reason = ABORT_REASON_OBSERVATION_TIMEOUT;
+    } else if (isTerminal(rd.status) && targetId < MAX_ROUNDS) {
+        // M-1: currentRoundId only advances via OpenRound, so a pending next
+        // PREVIEW is the real stuck state after a settled round. After the
+        // preview timeout anyone may abort it and advance onto it, releasing
+        // rolled principal and allowing the protocol to reach R10/unlockStart.
+        val nextRes = s.rounds.get(targetId + 1);
+        if (nextRes.isFound) {
+            val nextRd = nextRes.loadValue();
+            if (nextRd.status == STATUS_PREVIEW && nextRd.stakeOpenAt > 0 &&
+                now >= nextRd.stakeOpenAt + (t.techAbortPauseSeconds as uint64)) {
+                targetId += 1;
+                rd = nextRd;
+                reason = ABORT_REASON_PREVIEW_TIMEOUT;
+            }
+        }
+    }
+    if (reason == 0) {
         throw Errors.TooEarly;
     }
 
+    s.currentRoundId = targetId;
     var updated = rd;
     updated.status = STATUS_TECHNICAL_ABORTED;
     updated.settledAt = now;
     s.lastSettledAt = now;
     s.pausedAt = 0;
-    if (s.currentRoundId == MAX_ROUNDS) {
+    if (targetId == MAX_ROUNDS) {
         var ex = s.extras.load();
         ex.unlockStart = now;
         s.extras = ex.toCell();
     }
-    s.rounds.set(s.currentRoundId, updated);
-    if (s.currentRoundId < MAX_ROUNDS && !s.rounds.exists(s.currentRoundId + 1)) {
+    s.rounds.set(targetId, updated);
+    if (targetId < MAX_ROUNDS && !s.rounds.exists(targetId + 1)) {
         var next = emptyRound();
         next.status = STATUS_PREVIEW;
         next.rewardBudgetRaw = econ(s).roundRewardRaw;
         next.stakeOpenAt = now + (timing(s).previewSeconds as uint64);
-        s.rounds.set(s.currentRoundId + 1, next);
+        s.rounds.set(targetId + 1, next);
     }
     s.save();
 
-    emitExternalEvent(TechnicalAborted { roundId: s.currentRoundId, reason, at: now });
+    emitExternalEvent(TechnicalAborted { roundId: targetId, reason, at: now });
 }
-
-// ===========================================================================
-// Staking (TEP-74 transfer_notification)
-// ===========================================================================
 
 fun handleTransferNotification(sender: address, msg: TransferNotification) {
     var s = lazy Storage.load();

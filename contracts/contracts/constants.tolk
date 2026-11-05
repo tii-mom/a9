@@ -74,6 +74,8 @@ const BURN_KIND_PRINCIPAL: uint8 = 3;
 // Technical abort reason codes
 const ABORT_REASON_PAUSE_TIMEOUT: uint8 = 1;
 const ABORT_REASON_OBSERVATION_TIMEOUT: uint8 = 2;
+// M-1: PREVIEW has no permissioned opener -> permissionless timeout escape.
+const ABORT_REASON_PREVIEW_TIMEOUT: uint8 = 3;
 
 // Rounds are hard-capped at 10 by the tokenomics (70% = 10 x 7%).
 const MAX_ROUNDS: uint8 = 10;
@@ -101,6 +103,7 @@ const CLAIM_KIND_UNLOCK: uint8 = 4;
 const BURN_QUERY_REWARD: uint8 = 1; // same value as BURN_KIND_REWARD
 const BURN_QUERY_PRINCIPAL: uint8 = 3; // same value as BURN_KIND_PRINCIPAL
 const BURN_QUERY_TEAM: uint8 = 2; // same value as BURN_KIND_TEAM
+const RELEASE_QUERY_TEAM: uint8 = 4; // TeamVault release confirmation query kind
 
 // ---------------------------------------------------------------------------
 // Errors

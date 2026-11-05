@@ -109,7 +109,7 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 cd contracts
 acton build --clear-cache    # 期望 0 error
 acton check                  # 期望 0 warning
-acton test                   # 期望 114 passed
+acton test                   # 期望 121 passed
 acton script scripts/deploy-emulation.tolk   # 期望 OK
 ```
 
@@ -145,12 +145,12 @@ acton script scripts/deploy-emulation.tolk   # 期望 OK
 
 | 合约 | 行数 | Code hash |
 | --- | --- | --- |
-| RoundController | 1,853 | 0x38DFE37D3F2A33D74141FA1D5267274BEDB402209D7A79B41EA76A8AF44CD127 |
-| TeamVault | 271 | 0x41AD560CF1B6F61935B492727B6354CE409291340CB7E7962D09BAA519E90212 |
+| RoundController | 1,881 | 0x9BE0035A77FE3231D09D69F9A1F49DECBBE52769EFA631FE6DABC91D1738AEB9 |
+| TeamVault | 314 | 0x7EF3B06F4F2B47B1B1DD03C0CBBA4427482D2AC6372671A43BD8B1CCBE5967C6 |
 | JettonMaster | 245 | 0x657C029A1BAB71815BC0AB3CF0E1958BFEFCFFAF644B307394E7A696550886E2 |
 | JettonWallet | 179 | 0x3E3D595A8BB95AB108340B7CB50E99135D5FBA9E1118F7B0F1B4CF0EB5066A96 |
 
-验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **114 passed** / `acton script scripts/deploy-emulation.tolk` OK。
+验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **121 passed** / `acton script scripts/deploy-emulation.tolk` OK。
 
 若审计方的 hash 与上表不一致，说明代码已被改动，请先与项目方确认版本。
 
@@ -200,3 +200,18 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 | F-09 | P2 | SetReferrer / SetJettonWallet 未校验空地址 | 三处加 createAddressNone() 校验 |
 
 新增测试文件 `contracts/tests/audit-fixes.test.tolk`（17 条），覆盖上述全部修复点与复现路径。
+
+---
+
+## 11. 架构评审修复记录（v8.3，架构评审后）
+
+架构评审（业务完整性 + 架构合理性）提出 2 项主网阻断 + 3 项建议 + 5 项不建议改。已修：
+
+| 编号 | 严重度 | 问题 | 修复 |
+| --- | --- | --- | --- |
+| M-1 | 主网阻断 | PREVIEW / STAKING_OPEN 无超时逃生舱 → 管理员失联即永久死锁，且永远到不了 R10 写 unlockStart | CloseStaking 自然到期放开为无权限；AbortTechnical 增加 PREVIEW/STAKING_OPEN 超时分支；current 已终态时可推进到超时的下一轮 PREVIEW 并终止 |
+| S-3 | P1 | TeamVault ReleaseTeamQuota 发 transfer 即置 released + ack，bounce 无回滚 → 团队额度永久滞留 | 改 pending 语义：等 ReturnExcessesBack（kind=RELEASE）确认后再 ack；bounce 清 pending 可重试 |
+
+未修（按评审建议）：S-1 补 5 个 external-out 事件（索引器改用解析入站交易）、S-2 多签地址（部署配置层面）、N-1~N-5 全部不动。
+
+主网前仍待补：**M-2 OracleAdapter**（3/5 多源验签，向 RC 转发 OpenRound/CloseStaking/SubmitCandle，RC 零修改）。

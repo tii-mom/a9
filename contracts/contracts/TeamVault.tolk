@@ -62,40 +62,39 @@ fun onInternalMessage(in: InMessage) {
             val prev = st.rounds.get(roundId);
             if (prev.isFound) {
                 val state = prev.loadValue();
-                if (!state.released) {
+                if (state.released) {
+                    // Idempotent duplicate: resend the acknowledgement, move nothing.
+                    sendTeamReleasedAck(st, roundId, state.amountRaw, msg.queryId);
+                    return;
+                }
+                val kind: uint8 = ((state.queryId >> 8) & 0xff) as uint8;
+                if (state.burned || kind == BURN_QUERY_TEAM) {
                     throw Errors.TeamRoundConflict;
                 }
-                // Idempotent duplicate: resend the acknowledgement, move nothing.
-                sendTeamReleasedAck(st, roundId, state.amountRaw, msg.queryId);
+                // Pending release already in flight: do not transfer twice.
                 return;
             }
 
             val params = st.params.load();
             val amount = params.teamRoundRaw;
             assert (amount > 0) throw Errors.ZeroTeamQuota;
+            val queryId = ((roundId as uint64) << 16) | ((RELEASE_QUERY_TEAM as uint64) << 8);
             st.rounds.set(roundId, TeamRoundState {
-                released: true,
+                released: false,
                 burned: false,
                 amountRaw: amount,
-                queryId: msg.queryId,
+                queryId,
             });
-            st.totalReleasedRaw += amount;
-            st.releasedCount += 1;
             st.save();
 
+            // S-3: pending until the wallet confirms; excesses come back to TV.
             sendJettonTransfer(
                 params.jettonWallet,
-                msg.queryId,
+                queryId,
                 amount as coins,
                 params.teamWallet,
-                params.teamWallet,
+                contract.getAddress(),
             );
-            sendTeamReleasedAck(st, roundId, amount, msg.queryId);
-            emitExternalEvent(TeamReleased {
-                roundId,
-                amountRaw: amount,
-                to: params.teamWallet,
-            });
         }
         BurnTeamQuota => {
             var st = lazy TeamVaultStorage.load();
@@ -144,9 +143,35 @@ fun onInternalMessage(in: InMessage) {
         ReturnExcessesBack => {
             var st = lazy TeamVaultStorage.load();
             val params = st.params.load();
-            assert (in.senderAddress == params.jettonMaster) throw Errors.NotJettonMaster;
             val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
             val kind: uint8 = ((msg.queryId >> 8) & 0xff) as uint8;
+            if (in.senderAddress == params.jettonWallet) {
+                // S-3: release transfer completed -> confirm and ack RC.
+                if (kind != RELEASE_QUERY_TEAM) {
+                    return;
+                }
+                val prev = st.rounds.get(roundId);
+                if (!prev.isFound) {
+                    return;
+                }
+                var rel = prev.loadValue();
+                if (rel.released || rel.burned || rel.queryId != msg.queryId) {
+                    return;
+                }
+                rel.released = true;
+                st.rounds.set(roundId, rel);
+                st.totalReleasedRaw += rel.amountRaw;
+                st.releasedCount += 1;
+                st.save();
+                sendTeamReleasedAck(st, roundId, rel.amountRaw, msg.queryId);
+                emitExternalEvent(TeamReleased {
+                    roundId,
+                    amountRaw: rel.amountRaw,
+                    to: params.teamWallet,
+                });
+                return;
+            }
+            assert (in.senderAddress == params.jettonMaster) throw Errors.NotJettonMaster;
             assert (kind == BURN_QUERY_TEAM) throw Errors.BurnKindMismatch;
             val prev = st.rounds.get(roundId);
             if (!prev.isFound) {
@@ -187,12 +212,30 @@ fun onBouncedMessage(in: InMessageBounced) {
         return;
     }
     val op = in.bouncedBody.loadUint(32);
-    if (op != OP_JETTON_BURN) {
+    if (op != OP_JETTON_BURN && op != OP_JETTON_TRANSFER) {
         return;
     }
     val queryId: uint64 = in.bouncedBody.loadUint(64) as uint64;
     val roundId: uint8 = ((queryId >> 16) & 0xff) as uint8;
     val kind: uint8 = ((queryId >> 8) & 0xff) as uint8;
+    if (op == OP_JETTON_TRANSFER) {
+        // S-3: release bounce -> clear pending, no ack, retryable.
+        if (kind != RELEASE_QUERY_TEAM) {
+            return;
+        }
+        var st = lazy TeamVaultStorage.load();
+        val prev = st.rounds.get(roundId);
+        if (!prev.isFound) {
+            return;
+        }
+        val rel = prev.loadValue();
+        if (rel.released || rel.burned || rel.queryId != queryId) {
+            return;
+        }
+        st.rounds.delete(roundId);
+        st.save();
+        return;
+    }
     if (kind != BURN_QUERY_TEAM) {
         return;
     }

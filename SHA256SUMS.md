@@ -21,10 +21,10 @@
 - `docs/15_LIQUIDITY_PLAN.md`: `943877361873e3bccdc8c7484e8ada14899130291e292a8a49f35bc41a526aaf`
 - `docs/16_REWARD_EXAMPLES.md`: `6ee07cf2479bd9d71fbd25f205519b9fe6831f6ec4e974bd39e7d05b97836062`
 - `docs/17_REWARD_V2.md`: `617a6ef8578029248953ca340e8f17d9fa49461dfd9d235a1b7fb20dd9add18a`
-- `docs/18_AUDIT_BRIEF.md`: `a44ed7ddb38543d6142e4e835cdbd0f285f56cccbfe9b2919c70fb82a8a44648`
-- `contracts/contracts/RoundController.tolk`: `73d9bed20aac85701758c458055e702414bc421fff37de6b674438b490098e94`
-- `contracts/contracts/TeamVault.tolk`: `b63ff7ab1b500b45e473c2fa93573963dd104fee3f9cbc0b8595d737c7da1c3d`
-- `contracts/contracts/constants.tolk`: `ebb458e3944324955c37f8c49f1548b8c14a4ff09f488831086c44e2de61849c`
+- `docs/18_AUDIT_BRIEF.md`: `e6d8524b8b9c36508ce4f32ca83b63eec72c6daabd465c43da7edf9011da7604`
+- `contracts/contracts/RoundController.tolk`: `ae074f36a1ecb455c87179a6b672ac0d29be7dad4f161633daa83ed4ec3677e5`
+- `contracts/contracts/TeamVault.tolk`: `e57f5e5ac43b5ae1d41bf2b4bee72ecdb8cb0c2b958660cf9d99450993e05e14`
+- `contracts/contracts/constants.tolk`: `ec7be046ebce1dfd0b4ea1eb420782fc3e22ab9fad3cf410c6a9745218756949`
 - `contracts/contracts/jetton.tolk`: `0accaf750fd0b61e509d7547cba193194f2ef70bfdb2cbbd1d7e06013dfcfb66`
 - `contracts/contracts/types.tolk`: `78964eb9006a5d9f6a1949d1c71a72f3caccaf5db06e042ed0d1b3943b905cd0`
 - `contracts/contracts/jetton/JettonMaster.tolk`: `9316ea256381a790433315640df5ad0487941ab94137787f7209e234ea1ca597`
