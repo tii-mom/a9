@@ -487,7 +487,54 @@ fun main() {
     }
     println("TeamVault.InitController -> {}", rcAddress);
 
-    println("TODO (ops): transfer 7,000,000,000 A9 to the RC Jetton Wallet and");
-    println("1,200,000,000 A9 to the TeamVault Jetton Wallet; seed TON gas balances.");
+    // --- 8. Fund the protocol Jetton wallets (fresh full deploy only) --------
+    if (resumeMaster == null) {
+        val adminWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [admin.address]);
+        val adminWalletData = net.runGetMethod<JettonWalletDataReply>(adminWallet, "get_wallet_data");
+        val rcFundRaw: uint128 = PARAM_ROUND_REWARD * 10; // 10 rounds of 700M A9
+        val tvFundRaw: uint128 = PARAM_TEAM_ROUND * 10;   // 10 rounds of 120M A9
+        if (adminWalletData.jettonBalance < (rcFundRaw + tvFundRaw) as coins) {
+            Assert.fail("admin A9 balance insufficient for protocol funding");
+        }
+        net.send(admin.address, createMessage({
+            bounce: true,
+            value: ton("0.3"),
+            dest: adminWallet,
+            body: AskToTransfer {
+                queryId: 1,
+                jettonAmount: rcFundRaw as coins,
+                transferRecipient: rcAddress,
+                sendExcessesTo: null,
+                customPayload: null,
+                forwardTonAmount: 0,
+                forwardPayload: beginCell().storeUint(0, 1).toSlice(),
+            },
+        })).waitForTrace();
+        net.send(admin.address, createMessage({
+            bounce: true,
+            value: ton("0.3"),
+            dest: adminWallet,
+            body: AskToTransfer {
+                queryId: 2,
+                jettonAmount: tvFundRaw as coins,
+                transferRecipient: tvAddress,
+                sendExcessesTo: null,
+                customPayload: null,
+                forwardTonAmount: 0,
+                forwardPayload: beginCell().storeUint(0, 1).toSlice(),
+            },
+        })).waitForTrace();
+        val rcWalletData = net.runGetMethod<JettonWalletDataReply>(rcJettonWallet, "get_wallet_data");
+        val tvWalletData = net.runGetMethod<JettonWalletDataReply>(tvJettonWallet, "get_wallet_data");
+        if (rcWalletData.jettonBalance != rcFundRaw as coins || tvWalletData.jettonBalance != tvFundRaw as coins) {
+            Assert.fail("protocol Jetton wallet funding verification failed");
+        }
+        println("Funded RC Jetton Wallet with {} raw A9, TV Jetton Wallet with {} raw A9", rcFundRaw, tvFundRaw);
+    } else {
+        println("resume mode: skipping A9 funding (existing master is assumed already funded)");
+    }
+
+    println("Deploy complete: contracts + wiring + A9 funding are on-chain.");
+    println("TODO (ops): seed extra TON gas balances if needed (RC >= 20 TON, TV >= 10 TON).");
     println("admin wallet now holds the 100e9 A9 supply (mint closed).");
 }
