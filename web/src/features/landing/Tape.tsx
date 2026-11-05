@@ -56,14 +56,14 @@ export function Tape({ cfg, stats, board, trades, copy }: Props) {
       </Item>
       <Item label={copy.tape.lit}>
         <span className={board.hits >= board.need ? 'ok' : ''}>
-          {board.hits} / {board.need}
+          {board.roundId === null ? '—' : `${board.hits} / ${board.need}`}
         </span>
       </Item>
       <Item label={copy.tape.miss}>
-        <span className={board.miss >= board.missAllowance ? 'bad' : ''}>{board.miss} / {board.failAt}</span>
+        <span className={board.miss >= board.missAllowance ? 'bad' : ''}>{board.roundId === null ? '—' : `${board.miss} / ${board.failAt}`}</span>
       </Item>
-      <Item label={copy.tape.stake}>{formatCompactToken(board.totalStakeRaw, decimals, lang) + ' A9'}</Item>
-      <Item label={copy.tape.burned}>{formatCompactToken(stats?.burnedRaw ?? '0', decimals, lang) + ' A9'}</Item>
+      <Item label={copy.tape.stake}>{board.roundId === null ? '—' : formatCompactToken(board.totalStakeRaw, decimals, lang) + ' A9'}</Item>
+      <Item label={copy.tape.burned}>{stats ? formatCompactToken(stats.burnedRaw, decimals, lang) + ' A9' : '—'}</Item>
       <Item label={copy.tape.volume}>{vol === null ? '—' : compactUsd(vol)}</Item>
       {[0, 1, 2, 3].map((i) => {
         const tr = trades[i];

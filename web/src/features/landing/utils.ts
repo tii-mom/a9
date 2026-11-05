@@ -31,13 +31,10 @@ export function shortAddr(addr: string | null | undefined): string {
 export function toRawUnits(value: string, decimals: number): string {
   const cleaned = value.trim().replace(/,/g, '');
   if (!cleaned) return '0';
-  const num = Number(cleaned);
-  if (!Number.isFinite(num) || num <= 0) return '0';
-  const fixed = num.toFixed(decimals);
-  const parts = fixed.split('.');
-  const whole = parts[0].replace(/^0+(?=\d)/, '');
-  const frac = (parts[1] ?? '').padEnd(decimals, '0').slice(0, decimals);
-  return whole + frac;
+  if (!/^\d+(?:\.\d*)?$/.test(cleaned) || !Number.isInteger(decimals) || decimals < 0) return '0';
+  const [whole, fraction = ''] = cleaned.split('.');
+  if (fraction.length > decimals && /[1-9]/.test(fraction.slice(decimals))) return '0';
+  return BigInt(whole + fraction.padEnd(decimals, '0').slice(0, decimals)).toString();
 }
 
 /** Compact number that respects the active language (format.ts compacts to 亿/万 only). */

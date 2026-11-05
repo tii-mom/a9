@@ -155,3 +155,15 @@
   .ap-action .ap-action-ctl { width: 100%; justify-content: flex-start; }
   .ap-action input { flex: 1; min-width: 0; }
 }
+
+/* Two compact KPI columns preserve a readable mobile overview. */
+@media(max-width:640px){
+ .ap-page .cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .ap-page .cards .card{padding:12px;min-width:0}
+ .ap-page .cards .card .v{font-size:clamp(16px,4.2vw,19px);line-height:1.3}
+ .ap-page .cards .lbl{font-size:11px;line-height:1.5;letter-spacing:.02em}
+ .ap-stat .ap-hint{font-size:11px;line-height:1.5}
+ .ap-page .ap-table-wrap{overscroll-behavior-x:contain}
+ .ap-rounds button{min-height:44px}
+ .ap-account .chain-panel .ap-panel-h{align-items:flex-start}
+}

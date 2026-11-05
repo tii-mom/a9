@@ -139,3 +139,17 @@
   .invite-input { min-width: 0; width: 100%; }
 }
 
+
+/* Consequential actions are reviewed in a keyboard-accessible native modal. */
+.chain-confirm{color:var(--text);background:var(--panel);border:1px solid var(--line-2);padding:24px;width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;box-sizing:border-box;box-shadow:0 24px 80px #0009}
+.chain-confirm::backdrop{background:#000b}
+.chain-confirm h3{margin:0 0 16px;font:800 22px var(--f-disp)}
+.chain-confirm-body{font-size:14px;line-height:1.65;color:var(--text-2)}
+.chain-confirm code{display:block;overflow-wrap:anywhere;font-size:13px;color:var(--ember)}
+.chain-confirm-values{display:grid;gap:10px;border-block:1px solid var(--line);padding:14px 0}
+.chain-confirm-values>div{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px}
+.chain-confirm-values dd{margin:0;font-family:var(--f-mono);color:var(--text);overflow-wrap:anywhere}
+.chain-confirm .chain-actions{justify-content:flex-end;margin-top:20px}
+.chain-input:focus-within{outline:2px solid var(--ember);outline-offset:3px}
+.chain-panel :is(input,button,summary,a):focus-visible,.chain-confirm button:focus-visible{outline:2px solid var(--ember);outline-offset:3px}
+@media(max-width:640px){.chain-confirm{padding:18px}.chain-confirm .chain-actions{display:grid;grid-template-columns:1fr;width:100%}.chain-confirm .btn,.chain-panel .btn,.chain-chip{min-height:44px}.chain-head-meta{justify-content:flex-start}.chain-addr{overflow-wrap:anywhere;max-width:100%}}

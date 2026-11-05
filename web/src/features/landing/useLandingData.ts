@@ -21,6 +21,9 @@ export interface LandingData {
   candleMs: number;
   loading: boolean;
   error: Error | null;
+  updatedAt: number | null;
+  stale: boolean;
+  flowHealth: { trades: string; book: string; stats: string };
   refreshAll: () => void;
 }
 
@@ -109,8 +112,12 @@ export function useLandingData(): LandingData {
     meQ.refresh();
   }, [configQ.refresh, statsQ.refresh, roundsQ.refresh, detailQ.refresh, tradesQ.refresh, bookQ.refresh, meQ.refresh]);
 
-  const error = configQ.error ?? statsQ.error ?? roundsQ.error ?? detailQ.error ?? null;
-  const loading = configQ.loading || statsQ.loading || roundsQ.loading;
+  const error = configQ.error ?? statsQ.error ?? roundsQ.error ?? detailQ.error ?? tradesQ.error ?? bookQ.error ?? meQ.error ?? null;
+  const loading = !configQ.data || !statsQ.data || !roundsQ.data;
+  const stamps = [configQ.updatedAt, statsQ.updatedAt, roundsQ.updatedAt, detailQ.updatedAt].filter((v): v is number => v !== null);
+  const updatedAt = stamps.length ? Math.max(...stamps) : null;
+  const stale = [statsQ.updatedAt, roundsQ.updatedAt, ...(roundId === null ? [] : [detailQ.updatedAt])].some((stamp) => stamp === null || now - stamp > 15000);
+  const health = (query: { error: unknown; updatedAt: number | null }) => query.error ? 'error' : query.updatedAt === null ? 'loading' : now - query.updatedAt > 15000 ? 'stale' : 'ready';
 
   return {
     wallet,
@@ -119,16 +126,19 @@ export function useLandingData(): LandingData {
     stats: statsQ.data,
     rounds: roundsQ.data ?? [],
     focus,
-    detail: detailQ.data,
+    detail: detailQ.data?.roundId === roundId ? detailQ.data : null,
     board,
     trades: tradesQ.data ?? [],
     book: bookQ.data,
-    me: meQ.data,
+    me: address && meQ.data?.address === address ? meQ.data : null,
     secondsRemaining,
     nextStakeSeconds,
     candleMs,
     loading,
     error: error instanceof Error ? error : null,
+    updatedAt,
+    stale,
+    flowHealth: { trades: health(tradesQ), book: health(bookQ), stats: health(statsQ) },
     refreshAll,
   };
 }

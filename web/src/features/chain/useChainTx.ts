@@ -3,7 +3,7 @@
  * 一次只跟踪一笔交易；重复提交会取消上一笔的轮询（不会重复发送）。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { RoundSummary } from '@shared/types';
 import { sendTonConnectTransaction } from '../wallet';
 import { parseTonAddress, toRawAddress } from './address';
@@ -48,6 +48,7 @@ export type ChainTxPhase =
   | 'awaiting-signature'
   | 'sent'
   | 'confirming'
+  | 'pending'
   | 'confirmed'
   | 'rejected'
   | 'failed';
@@ -138,6 +139,7 @@ export interface UseChainTx {
   submitClaimUnlocked: () => Promise<ChainTxResult | null>;
   /** v8.7：领取退款账本（ClaimPrincipal{roundId:0}） */
   submitClaimRefund: () => Promise<ChainTxResult | null>;
+  recheck: () => Promise<ChainTxResult | null>;
   reset: () => void;
 }
 
@@ -153,20 +155,36 @@ const KIND_LABEL: Record<ChainTxKind, string> = {
   claimRefund: '取回 A9',
 };
 
+const activeWallets = new Set<string>();
+const lockListeners = new Set<() => void>();
+const subscribeLocks = (listener: () => void) => { lockListeners.add(listener); return () => { lockListeners.delete(listener); }; };
+const notifyLocks = () => { for (const listener of lockListeners) listener(); };
+
 export function useChainTx(options: ChainTxOptions): UseChainTx {
+  const acquiredKey = useRef<string | null>(null);
+  const walletKey = `${options.chain.network}:${options.wallet.address}`;
+  const sharedBusy = useSyncExternalStore(subscribeLocks, () => activeWallets.has(walletKey), () => false);
+  const releaseLock = useCallback(() => {
+    if (acquiredKey.current === null) return;
+    activeWallets.delete(acquiredKey.current);
+    acquiredKey.current = null;
+    notifyLocks();
+  }, []);
   const [state, setState] = useState<ChainTxState>(INITIAL);
   const abortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const recoveryRef = useRef<{ context: RunContext; chain: ChainConfig; wallet: WalletContext; sinceSec: number } | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
+      releaseLock();
     };
-  }, []);
+  }, [releaseLock]);
 
   const patch = useCallback((next: Partial<ChainTxState>) => {
     if (!mountedRef.current) return;
@@ -174,14 +192,16 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
   }, []);
 
   const finish = useCallback(
-    async (context: RunContext) => {
-      const { chain, wallet } = optionsRef.current;
-      const sinceSec = Math.floor(Date.now() / 1000) - 5;
+    async (context: RunContext, recovering = false, origin?: { chain: ChainConfig; wallet: WalletContext }) => {
+      const saved = recovering ? recoveryRef.current : null;
+      const { chain, wallet } = saved ?? origin ?? optionsRef.current;
+      const sinceSec = saved?.sinceSec ?? Math.floor(Date.now() / 1000) - 5;
+      recoveryRef.current = { context, chain, wallet, sinceSec };
       const controller = new AbortController();
       abortRef.current = controller;
       let walletTx: import('./rpc').OnchainTx | null = null;
 
-      patch({ phase: 'sent', startedAt: Date.now() });
+      patch({ phase: 'sent', error: null, ...(recovering ? {} : { startedAt: Date.now() }) });
       const settle = await waitForTransaction({
         chain,
         targetAddress: context.prepared.meta.contract,
@@ -192,6 +212,7 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         intervalMs: RECEIPT_POLL_INTERVAL_MS,
         signal: controller.signal,
         onWalletTx: (tx) => {
+          if (!mountedRef.current || controller.signal.aborted || abortRef.current !== controller) return;
           walletTx = tx;
           patch({
             phase: 'confirming',
@@ -205,8 +226,10 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         },
       });
 
-      if (!mountedRef.current) return null;
+      if (!mountedRef.current || controller.signal.aborted || abortRef.current !== controller) return null;
       if (settle.stage === 'contract' && settle.tx) {
+        recoveryRef.current = null;
+        releaseLock();
         const result: ChainTxResult = {
           hash: settle.tx.hash,
           explorerUrl: explorerTxUrl(chain, settle.tx.hash),
@@ -214,7 +237,7 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
           utime: settle.tx.utime || null,
         };
         patch({ phase: 'confirmed', result, error: null });
-        persist(context, result);
+        persist(context, result, chain, wallet);
         optionsRef.current.onSettled?.(context.kind);
         return result;
       }
@@ -234,8 +257,8 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
           stage: 'wallet',
           utime: settle.tx.utime || null,
         };
-        patch({ phase: 'sent', result, error: null });
-        persist(context, result);
+        patch({ phase: 'pending', result, error: null });
+        persist(context, result, chain, wallet);
         optionsRef.current.onSettled?.(context.kind);
         return result;
       }
@@ -244,14 +267,13 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         '交易已签名发出，但暂未观察到链上确认',
         walletTx ? '可在浏览器中查看钱包交易，确认后刷新页面' : null,
       );
-      patch({ phase: 'failed', error });
+      patch({ phase: 'pending', error });
       return null;
     },
-    [patch],
+    [patch, releaseLock],
   );
 
-  const persist = useCallback((context: RunContext, result: ChainTxResult) => {
-    const { chain, wallet } = optionsRef.current;
+  const persist = useCallback((context: RunContext, result: ChainTxResult, chain: ChainConfig, wallet: WalletContext) => {
     try {
       const stored: StoredChainTx = {
         address: wallet.address,
@@ -271,6 +293,12 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
 
   const begin = useCallback(
     async (kind: ChainTxKind, meta: Partial<ChainTxState>, build: () => Promise<RunContext>) => {
+      const current = optionsRef.current;
+      const key = `${current.chain.network}:${current.wallet.address}`;
+      if (recoveryRef.current || activeWallets.has(key)) return null;
+      activeWallets.add(key);
+      acquiredKey.current = key;
+      notifyLocks();
       abortRef.current?.abort();
       patch({ ...INITIAL, ...meta, kind, phase: 'preparing' });
       try {
@@ -279,16 +307,17 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         patch({ phase: 'awaiting-signature' });
         await sendTonConnectTransaction(context.prepared.request as TonConnectTxRequest);
         if (!mountedRef.current) return null;
-        return await finish(context);
+        return await finish(context, false, current);
       } catch (error) {
         if (!mountedRef.current) return null;
         const chainErr = toChainError(error);
-        patch({ phase: chainErr.code === 'WALLET_REJECTED' ? 'rejected' : 'failed', error: chainErr });
+        if (!recoveryRef.current) releaseLock();
+        patch({ phase: recoveryRef.current ? 'pending' : chainErr.code === 'WALLET_REJECTED' ? 'rejected' : 'failed', error: chainErr });
         optionsRef.current.onSettled?.(kind);
         return null;
       }
     },
-    [finish, patch],
+    [finish, patch, releaseLock],
   );
 
   const submitStake = useCallback(
@@ -438,13 +467,22 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     });
   }, [begin]);
 
+  const recheck = useCallback(async () => {
+    const saved = recoveryRef.current;
+    if (!saved || saved.wallet.address !== optionsRef.current.wallet.address || saved.chain.network !== optionsRef.current.chain.network) return null;
+    abortRef.current?.abort();
+    try { return await finish(saved.context, true); } catch (error) { patch({ phase: 'pending', error: toChainError(error) }); return null; }
+  }, [finish, patch]);
+
   const reset = useCallback(() => {
     abortRef.current?.abort();
+    recoveryRef.current = null;
+    releaseLock();
     setState(INITIAL);
-  }, []);
+  }, [releaseLock]);
 
   const busy =
-    state.phase === 'preparing' || state.phase === 'awaiting-signature' || state.phase === 'sent' || state.phase === 'confirming';
+    sharedBusy || state.phase === 'preparing' || state.phase === 'awaiting-signature' || state.phase === 'sent' || state.phase === 'confirming' || state.phase === 'pending';
 
   return {
     state,
@@ -455,6 +493,7 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     submitSetReferrer,
     submitClaimUnlocked,
     submitClaimRefund,
+    recheck,
     reset,
   };
 }

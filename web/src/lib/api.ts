@@ -97,15 +97,20 @@ export interface QueryState<T> {
   data: T | null;
   error: ApiError | null;
   loading: boolean;
+  /** Time of the most recent successful response for these dependencies. */
+  updatedAt: number | null;
   refresh: () => void;
+  refetch: () => void;
 }
 
 /** Poll an endpoint on an interval (default 3s). Pauses when the tab is hidden. */
 export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { intervalMs?: number; enabled?: boolean } = {}): QueryState<T> {
   const { intervalMs = 3000, enabled = true } = opts;
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<{
+    deps: unknown[]; data: T | null; error: ApiError | null; loading: boolean; updatedAt: number | null;
+  }>({ deps: [...deps], data: null, error: null, loading: enabled, updatedAt: null });
+  const sameDeps = (previous: unknown[]) => previous.length === deps.length && previous.every((value, index) => Object.is(value, deps[index]));
+  const current = enabled && sameDeps(snapshot.deps);
   const [nonce, setNonce] = useState(0);
   const fnRef = useRef(fn);
   fnRef.current = fn;
@@ -113,24 +118,30 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
+    const requestDeps = [...deps];
+    const matches = (previous: unknown[]) => previous.length === requestDeps.length && previous.every((value, index) => Object.is(value, requestDeps[index]));
+    setSnapshot((previous) => enabled && matches(previous.deps)
+      ? { ...previous, loading: true }
+      : { deps: requestDeps, data: null, error: null, loading: enabled, updatedAt: null });
+    if (!enabled) return;
     let alive = true;
+    let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
     const run = async () => {
+      if (!alive || inFlight) return;
+      inFlight = true;
+      setSnapshot((previous) => ({ ...previous, loading: true }));
       try {
         const next = await fnRef.current();
         if (!alive) return;
-        setData(next);
-        setError(null);
+        setSnapshot({ deps: requestDeps, data: next, error: null, loading: false, updatedAt: Date.now() });
       } catch (e) {
         if (!alive) return;
-        setError(e instanceof ApiError ? e : new ApiError('NETWORK', String(e)));
+        const error = e instanceof ApiError ? e : new ApiError('NETWORK', String(e));
+        setSnapshot((previous) => ({ ...previous, error, loading: false }));
       } finally {
-        if (alive) setLoading(false);
+        inFlight = false;
       }
       if (alive && intervalMs > 0) timer = setTimeout(run, intervalMs);
     };
@@ -151,7 +162,14 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intervalMs, enabled, nonce, ...deps]);
 
-  return { data, error, loading, refresh };
+  return {
+    data: current ? snapshot.data : null,
+    error: current ? snapshot.error : null,
+    loading: enabled && (!current || snapshot.loading),
+    updatedAt: current ? snapshot.updatedAt : null,
+    refresh,
+    refetch: refresh,
+  };
 }
 
 export type { Claimable };

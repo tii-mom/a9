@@ -336,7 +336,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);padding-block:30px 120px
 
 .chroma,.badge,.nav-r .btn,.logo{white-space:nowrap}
 @media(max-width:640px){
-  .logo small,.nav-r .btn{display:none}
+  .logo small,.nav-r>.btn{display:none}
   .nav{gap:10px}
   .chroma{padding:4px 6px}
   .hero{padding-block:20px 18px}

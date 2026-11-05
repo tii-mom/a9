@@ -6,6 +6,17 @@
   display: block;
 }
 
+/* Grid children must shrink below their longest status label on narrow screens. */
+.hero .hero-in > * { min-width: 0; }
+.hero .eyebrow .pill { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.hero .eyebrow .pill i { flex-shrink: 0; }
+
+/* Override .hud position:relative, which otherwise turns sticky top into a layout offset. */
+.term > #cmd.cmd { top: auto; }
+@media (min-width: 1100px) {
+  .term > #cmd.cmd { position: sticky; top: calc(var(--header-height, 84px) + 16px); align-self: start; }
+}
+
 /* Keep anchor jumps / CTA scrolling clear of the sticky header (tape 32px + nav 52px). */
 #war,
 #cmd,
@@ -14,7 +25,7 @@
 #rules,
 #supply,
 #risk {
-  scroll-margin-top: 96px;
+  scroll-margin-top: calc(var(--header-height, 84px) + 16px);
 }
 
 @media (max-width: 640px) {
@@ -25,7 +36,7 @@
   #rules,
   #supply,
   #risk {
-    scroll-margin-top: 88px;
+    scroll-margin-top: calc(var(--header-height, 84px) + 16px);
   }
 }
 
@@ -67,3 +78,27 @@
     border-top: 1px solid var(--line);
   }
 }
+
+/* Timings and data provenance remain visible without competing with the action. */
+.hero .hero-timeline{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:0;margin:28px 0 0;border-top:1px solid var(--line);gap:20px}
+.hero-timeline li{padding:15px 0;display:grid;gap:5px;min-width:0}
+.hero-timeline li>span{font:11px var(--f-mono);color:var(--fire)}
+.hero-timeline b{font-size:13px;line-height:1.5}.hero-timeline small{font:11px/1.6 var(--f-mono);color:var(--muted)}
+.hero .hero-formula{font-size:clamp(25px,3vw,40px)}
+.data-health{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:14px;font:11px/1.6 var(--f-mono);color:var(--muted);border-top:1px solid var(--line)}
+.data-health.degraded{color:var(--ember)}
+.board .chart-wrap{height:auto;min-height:0;overflow:visible}
+.twap-chart{padding:8px 12px 12px}.twap-svg{display:block;width:100%;height:auto;max-height:300px;overflow:visible}
+.twap-grid{stroke:var(--line);stroke-width:1}.twap-target{stroke:var(--ember);stroke-width:1;stroke-dasharray:5 5}
+.twap-target-text{fill:var(--ember);font:10px var(--f-mono)}
+.twap-caption{font:11px/1.6 var(--f-mono);color:var(--muted);margin:8px 0}
+.twap-data summary{cursor:pointer;font:11px var(--f-mono);padding:8px 0;color:var(--text)}
+.twap-table-scroll{overflow-x:auto}.twap-data table{width:100%;font:11px/1.7 var(--f-mono);border-collapse:collapse;white-space:nowrap}.twap-data th,.twap-data td{text-align:left;padding:7px;border-bottom:1px solid var(--line)}
+#main-content:focus,#war:focus,#cmd:focus{outline:none}#cmd:focus-visible{outline:2px solid var(--fire);outline-offset:4px}
+.tabs [role=tab]:focus-visible,.twap-data summary:focus-visible{outline:2px solid var(--fire);outline-offset:-3px}
+.hero .btn,.cmd .btn{white-space:normal}
+.mcta .btn{width:100%;grid-column:1 / -1;justify-content:center}
+@media(max-width:640px){.hero .hero-timeline{gap:10px}.hero-timeline b{font-size:12px}.hero-timeline small{font-size:10px}.data-health{align-items:flex-start}.twap-svg{min-height:160px}.hero .facts{overflow-wrap:anywhere}}
+@media(prefers-reduced-motion:reduce){.hero *, .board *, .cmd *, .sand *{animation:none!important;transition:none!important}}
+
+.twap-svg text{fill:var(--muted);font:10px var(--f-mono)}.twap-svg .twap-target-text{fill:var(--ember)}

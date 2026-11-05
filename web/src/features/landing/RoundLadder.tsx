@@ -17,10 +17,14 @@ export function RoundLadder({ cfg, rounds, copy }: Props) {
   const decimals = cfg?.token.decimals ?? 9;
   const p0 = cfg ? '$' + (usdNum(cfg.p0UsdE8) ?? 0).toFixed(5) : copy.common.dash;
   const roundCount = cfg?.roundCount ?? 10;
-  const total = Math.max(10, roundCount);
+  const total = cfg ? roundCount : 0;
 
   const tagOf = (letter: LadderLetter) => {
     switch (letter) {
+      case 'P':
+        return { text: lang === 'zh' ? '结算中' : 'Settling', icon: <IcoDot /> };
+      case 'A':
+        return { text: lang === 'zh' ? '技术中止' : 'Technical abort', icon: <IcoNo /> };
       case 'S':
         return { text: copy.ladder.tagS, icon: <IcoOk /> };
       case 'F':
@@ -36,7 +40,9 @@ export function RoundLadder({ cfg, rounds, copy }: Props) {
 
   const outcomeOf = (letter: LadderLetter, amount: string) => {
     const value = formatCompactToken(amount, decimals, lang);
-    if (letter === 'S') return value + ' ' + copy.ladder.outClaim;
+    if (letter === 'A') return lang === 'zh' ? '本金不销毁' : 'Principal not burned';
+    if (letter === 'P') return value + ' ' + copy.ladder.outPending;
+    if (letter === 'S') return value + ' ' + (lang === 'zh' ? '已分配 · 有领取规则' : 'Allocated · claim rules apply');
     if (letter === 'F') return value + ' ' + copy.ladder.outBurned;
     if (letter === 'O' || letter === 'K') return value + ' ' + copy.ladder.outPending;
     return value + ' ' + copy.ladder.outLocked;
@@ -70,7 +76,7 @@ export function RoundLadder({ cfg, rounds, copy }: Props) {
                 <span className="lp">{target === null ? copy.common.dash : formatUsdE8(target)}</span>
                 <span className="lm">{mult === null ? copy.common.dash : '×' + mult}</span>
                 <span className="lbar">
-                  <i style={{ width: Math.min(100, roundId * 10) + '%' }} />
+                  <i style={{ width: Math.min(100, roundId / roundCount * 100) + '%' }} />
                 </span>
                 <span className="lo">{outcomeOf(letter, rewardRaw)}</span>
               </div>

@@ -8,6 +8,7 @@ import { fill, type LandingCopy } from './landing.i18n';
 import { formatCompactToken, intFmt, tokenNum, usdNum } from './utils';
 
 interface Props {
+  health: { trades: string; book: string; stats: string };
   cfg: ProtocolConfig | null;
   stats: ProtocolStats | null;
   board: BoardView;
@@ -18,8 +19,9 @@ interface Props {
 
 const barStyle = (width: number): CSSProperties => ({ ['--w' as string]: Math.max(0, Math.min(100, width)) + '%' }) as CSSProperties;
 
-export function OrderFlow({ cfg, stats, board, trades, book, copy }: Props) {
+export function OrderFlow({ health, cfg, stats, board, trades, book, copy }: Props) {
   const { lang } = useLang();
+  const status = (value: string) => value === 'error' ? (lang === 'zh' ? '刷新失败 · 保留上次数据' : 'Refresh failed · last data shown') : value === 'loading' ? copy.common.loading : value === 'stale' ? (lang === 'zh' ? '数据已过期' : 'Stale data') : cfg?.dataSource === 'demo' ? (lang === 'zh' ? '演示数据' : 'Demo data') : (lang === 'zh' ? '轮询更新' : 'Polling');
   const decimals = cfg?.token.decimals ?? 9;
   const [newId, setNewId] = useState<number | null>(null);
   const prevTop = useRef<number | null>(null);
@@ -44,16 +46,16 @@ export function OrderFlow({ cfg, stats, board, trades, book, copy }: Props) {
   const burned = tokenNum(stats?.burnedRaw ?? null, decimals);
   const stakePool = tokenNum(board.totalStakeRaw, decimals);
   const rewardPool = tokenNum(board.rewardBudgetRaw, decimals);
-  const ratio = stakePool > 0 ? rewardPool / stakePool : null;
+  const ratio = board.roundId !== null && stakePool > 0 ? rewardPool / stakePool : null;
 
   const statsCells = [
     { label: copy.flow.s24h, value: volume === null ? '—' : compactUsd(volume) },
     { label: copy.flow.liquidity, value: liquidity === null ? '—' : compactUsd(liquidity) },
-    { label: copy.flow.supply, value: formatCompactToken(stats?.supplyRaw ?? '0', decimals, lang) },
-    { label: copy.flow.burned, value: formatCompactToken(stats?.burnedRaw ?? '0', decimals, lang) },
-    { label: copy.flow.staked, value: formatCompactToken(board.totalStakeRaw, decimals, lang) },
-    { label: copy.flow.stakers, value: intFmt(board.stakerCount) },
-    { label: copy.flow.reward, value: formatCompactToken(board.rewardBudgetRaw, decimals, lang) },
+    { label: copy.flow.supply, value: stats ? formatCompactToken(stats.supplyRaw, decimals, lang) : '—' },
+    { label: copy.flow.burned, value: stats ? formatCompactToken(stats.burnedRaw, decimals, lang) : '—' },
+    { label: copy.flow.staked, value: board.roundId === null ? '—' : formatCompactToken(board.totalStakeRaw, decimals, lang) },
+    { label: copy.flow.stakers, value: board.roundId === null ? '—' : intFmt(board.stakerCount) },
+    { label: copy.flow.reward, value: board.roundId === null ? '—' : formatCompactToken(board.rewardBudgetRaw, decimals, lang) },
     { label: copy.flow.ratio, value: ratio === null ? '—' : ratio.toFixed(2) + ' ×' },
   ];
 
@@ -72,7 +74,7 @@ export function OrderFlow({ cfg, stats, board, trades, book, copy }: Props) {
           <div className="panel">
             <div className="ph">
               <span className="lbl">{copy.flow.tradesTitle}</span>
-              <span className="lbl">{volume === null ? '' : '24H ' + compactUsd(volume)}</span>
+              <span className="lbl">{status(health.trades)}</span>
             </div>
             <div className="ts-h">
               <span>{copy.flow.time}</span>
@@ -83,7 +85,7 @@ export function OrderFlow({ cfg, stats, board, trades, book, copy }: Props) {
             </div>
             <div id="ts">
               {trades.length === 0 ? (
-                <div className="empty">{copy.flow.empty}</div>
+                <div className="empty">{health.trades === 'loading' ? copy.common.loading : health.trades === 'error' ? copy.common.apiDown : copy.flow.empty}</div>
               ) : (
                 trades.map((trade) => (
                   <div
@@ -113,10 +115,10 @@ export function OrderFlow({ cfg, stats, board, trades, book, copy }: Props) {
           <div className="panel book">
             <div className="ph">
               <span className="lbl">{copy.flow.bookTitle}</span>
-              <span className="lbl">{copy.flow.internal}</span>
+              <span className="lbl">{status(health.book)}</span>
             </div>
             {book === null ? (
-              <div className="empty">{copy.flow.empty}</div>
+              <div className="empty">{health.book === 'loading' ? copy.common.loading : health.book === 'error' ? copy.common.apiDown : copy.flow.empty}</div>
             ) : (
               <div id="book">
                 {asks.map((level, i) => (
@@ -154,7 +156,7 @@ export function OrderFlow({ cfg, stats, board, trades, book, copy }: Props) {
           <div className="panel">
             <div className="ph">
               <span className="lbl">{copy.flow.statsTitle}</span>
-              <span className="lbl">{copy.flow.live}</span>
+              <span className="lbl">{status(health.stats)}</span>
             </div>
             <div className="stats" id="stats">
               {statsCells.map((cell) => (

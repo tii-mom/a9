@@ -8,11 +8,12 @@ import { clockText } from './derive';
 import { useLang } from '../../lib/lang';
 import { fill, type LandingCopy } from './landing.i18n';
 import type { LandingWallet } from './wallet';
-import { formatCompactToken, intFmt, pctFmt, shortAddr, toRawUnits, tokenNum, usdNum } from './utils';
+import { formatCompactToken, intFmt, shortAddr, toRawUnits, tokenNum, usdNum } from './utils';
 
 interface Props {
   cfg: ProtocolConfig | null;
   stats: ProtocolStats | null;
+  dataReady: boolean;
   board: BoardView;
   secondsRemaining: number | null;
   me: MeResponse | null;
@@ -24,14 +25,13 @@ interface Props {
   onRefresh: () => void;
 }
 
-export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, copy, tab, setTab, toast, onRefresh }: Props) {
+export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wallet, copy, tab, setTab, toast, onRefresh }: Props) {
   const { lang } = useLang();
   const decimals = cfg?.token.decimals ?? 9;
   const price = usdNum(board.priceUsdE8);
   const target = usdNum(board.targetUsdE8);
   const mult = board.priceMultiplier; // D-28 档位由 API 提供（失败不升档）
   const tonUsd = usdNum(cfg?.tonUsdE8 ?? null);
-  const liquidity = usdNum(stats?.liquidityUsdE8 ?? null);
   const roundId = board.roundId;
   const stakeOpen = board.state === 'STAKING_OPEN';
   const realWallet = wallet.connected && !wallet.demo;
@@ -41,64 +41,35 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
   const [stakeAmount, setStakeAmount] = useState('50000');
   const [risk, setRisk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [buyAdj, setBuyAdj] = useState({ ton: 0, fuse: 0 });
 
-  useEffect(() => {
-    setBuyAdj({ ton: 0, fuse: 0 });
-  }, [wallet.address]);
+  useEffect(() => { setRisk(false); }, [wallet.address, roundId, riskVersion]);
+  const onTabKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 'buy' : event.key === 'End' ? 'stake' : tab === 'buy' ? 'stake' : 'buy';
+    setTab(next);
+    document.getElementById(`tab-${next}`)?.focus();
+  };
 
   // ---- wallet display
   const tonBalance = wallet.tonBalance === null ? null : Number(String(wallet.tonBalance).replace(/,/g, ''));
   const fuseBalanceRaw = wallet.fuseBalance;
   const fuseBalance = tokenNum(fuseBalanceRaw, decimals);
-  const tonBalanceShown = tonBalance === null ? null : Math.max(0, tonBalance + buyAdj.ton);
-  const fuseBalanceShown = fuseBalance + buyAdj.fuse;
+  const tonBalanceShown = tonBalance === null ? null : Math.max(0, tonBalance);
+  const fuseBalanceShown = fuseBalance;
   const myPosition = me && roundId !== null ? me.stakes.find((s) => s.roundId === roundId) ?? null : null;
   const myStake = myPosition ? tokenNum(myPosition.amountRaw, decimals) : 0;
-  const totalStake = tokenNum(board.totalStakeRaw, decimals);
-  const rewardBudget = tokenNum(board.rewardBudgetRaw, decimals);
-
-  // ---- buy quote
-  const ton = Math.max(0, Number(payTon) || 0);
+  // Reference conversion only: no router quote or exchange execution is available.
+  const ton = Math.max(0, Number.isFinite(Number(payTon)) ? Number(payTon) : 0);
   const usd = ton * (tonUsd ?? 0);
-  const fee = usd * 0.003;
-  const impact = liquidity && liquidity > 0 ? (usd / (2 * liquidity)) * 0.5 : 0;
-  const quotePrice = price !== null ? price * (1 + impact) : null;
-  const fuseOut = quotePrice !== null && quotePrice > 0 ? (usd - fee) / quotePrice : null;
-
-  const onBuy = () => {
-    if (!wallet.connected) {
-      toast(copy.cmd.toastNeedWallet);
-      return;
-    }
-    if (ton <= 0) {
-      toast(copy.cmd.toastEnterAmount);
-      return;
-    }
-    if (!wallet.demo) {
-      toast(copy.cmd.toastBuyContract);
-      return;
-    }
-    if (tonBalance !== null && ton > tonBalance) {
-      toast(copy.cmd.toastInsufficientTon);
-      return;
-    }
-    if (fuseOut === null) {
-      toast(copy.cmd.toastEnterAmount);
-      return;
-    }
-    setBuyAdj((prev) => ({ ton: prev.ton - ton, fuse: prev.fuse + fuseOut }));
-    toast(fill(copy.cmd.toastBuyDemo, { amount: intFmt(fuseOut) }));
-  };
+  const quotePrice = price;
+  const fuseOut = quotePrice !== null && quotePrice > 0 ? usd / quotePrice : null;
 
   // ---- stake calc
   const stakeVal = Math.max(0, Number(stakeAmount) || 0);
-  const estReward = rewardBudget * stakeVal / (totalStake + stakeVal || 1);
-  const share = stakeVal / (totalStake + stakeVal || 1);
   const amountRaw = toRawUnits(stakeAmount, decimals);
-  const payload = 'round_id=R' + pad2(roundId ?? 0) + ' · amount_raw=' + amountRaw + ' · risk_disclosure_version=' + riskVersion + ' · accept_full_principal_burn=' + (risk ? 'true' : 'false') + ' · address=' + (wallet.address ?? '—');
 
-  const stakeDisabled = !stakeOpen || !wallet.connected || realWallet || stakeVal <= 0 || !risk || submitting || roundId === null;
+  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < 10000 || amountRaw === '0' || stakeVal + myStake > 20000000 || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || submitting || roundId === null;
   const stakeLabel = submitting
     ? copy.cmd.btnSubmitting
     : !stakeOpen
@@ -112,7 +83,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
             : copy.cmd.btnConfirm;
 
   const onStake = async () => {
-    if (!stakeOpen) {
+    if (!dataReady || !stakeOpen) {
       toast(copy.cmd.toastNotOpen);
       return;
     }
@@ -124,7 +95,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
       toast(copy.cmd.toastContractPending);
       return;
     }
-    if (stakeVal <= 0) {
+    if (!Number.isFinite(stakeVal) || stakeVal < 10000 || amountRaw === '0' || stakeVal + myStake > 20000000) {
       toast(copy.cmd.toastEnterAmount);
       return;
     }
@@ -132,7 +103,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
       toast(copy.cmd.toastRisk);
       return;
     }
-    if (fuseBalanceRaw !== null && stakeVal > fuseBalance) {
+    if (fuseBalanceRaw === null || stakeVal > fuseBalance) {
       toast(copy.cmd.toastInsufficientFuse);
       return;
     }
@@ -176,14 +147,14 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
         toast(copy.cmd.toastNeedWallet);
         return;
       }
-      setPayTon(String(tonBalance === null ? 0 : Math.floor(tonBalance)));
+      setPayTon(String(tonBalance === null ? 0 : Math.max(0, Math.floor((tonBalance - 0.1) * 100) / 100)));
       return;
     }
     setPayTon(value);
   };
 
   return (
-    <aside className="hud cmd" id="cmd" aria-label={copy.cmd.title}>
+    <aside className="hud cmd" id="cmd" tabIndex={-1} aria-label={copy.cmd.title}>
       <div className="cmd-head">
         <span className="lbl">{copy.cmd.title}</span>
         <button
@@ -207,27 +178,27 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
           </div>
           <div>
             <span className="lbl">{copy.cmd.fuse}</span>
-            <div className="v">{fuseBalanceRaw === null && buyAdj.fuse === 0 ? '—' : intFmt(fuseBalanceShown)}</div>
+            <div className="v">{fuseBalanceRaw === null ? '—' : intFmt(fuseBalanceShown)}</div>
           </div>
           <div>
             <span className="lbl">{copy.cmd.staked}</span>
-            <div className="v">{intFmt(myStake)}</div>
+            <div className="v">{me ? intFmt(myStake) : '—'}</div>
           </div>
         </div>
       ) : null}
 
-      <div className="tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === 'buy'} aria-controls="paneBuy" onClick={() => setTab('buy')}>
+      <div className="tabs" role="tablist" aria-label={copy.cmd.title} onKeyDown={onTabKey}>
+        <button type="button" id="tab-buy" role="tab" tabIndex={tab === 'buy' ? 0 : -1} aria-selected={tab === 'buy'} aria-controls="paneBuy" onClick={() => setTab('buy')}>
           {copy.cmd.tabBuy}
         </button>
-        <button type="button" role="tab" aria-selected={tab === 'stake'} aria-controls="paneStake" onClick={() => setTab('stake')}>
+        <button type="button" id="tab-stake" role="tab" tabIndex={tab === 'stake' ? 0 : -1} aria-selected={tab === 'stake'} aria-controls="paneStake" onClick={() => setTab('stake')}>
           {copy.cmd.tabStake}
           <span className={'tdot' + (stakeOpen ? '' : ' off')} />
         </button>
       </div>
 
       {tab === 'buy' ? (
-        <div id="paneBuy" role="tabpanel">
+        <div id="paneBuy" role="tabpanel" aria-labelledby="tab-buy" tabIndex={0}>
           <label className="f" htmlFor="payTon">
             <span className="lbl">{copy.cmd.payTon}</span>
             <div className="inp">
@@ -251,7 +222,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
             ))}
           </div>
           <div className="recv">
-            <span className="lbl">{copy.cmd.receive}</span>
+            <span className="lbl">{lang === 'zh' ? '参考换算数量' : 'Reference amount'}</span>
             <div className="mono">{fuseOut === null ? '—' : intFmt(fuseOut) + ' A9'}</div>
             <div className="sub">
               {fill(copy.cmd.receiveSub, {
@@ -262,36 +233,36 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
           </div>
           <dl className="kv">
             <div>
-              <dt>{copy.cmd.avgPrice}</dt>
+              <dt>{lang === 'zh' ? '参考价格' : 'Reference price'}</dt>
               <dd>{quotePrice === null ? '—' : formatUsdE8(String(Math.round(quotePrice * 1e8)))}</dd>
             </div>
             <div>
               <dt>{copy.cmd.impact}</dt>
-              <dd>{pctFmt(impact, 3)}</dd>
+              <dd>{lang === 'zh' ? '未报价' : 'Not quoted'}</dd>
             </div>
             <div>
-              <dt>{copy.cmd.fee}</dt>
-              <dd>{'$' + fee.toFixed(2)}</dd>
+              <dt>{lang === 'zh' ? '交易费 / Gas' : 'Trading fee / gas'}</dt>
+              <dd>—</dd>
             </div>
             <div>
               <dt>{copy.cmd.minReceive}</dt>
-              <dd>{fuseOut === null ? '—' : intFmt(fuseOut * 0.99) + ' A9'}</dd>
+              <dd>—</dd>
             </div>
           </dl>
-          <button className="btn fire full" type="button" onClick={onBuy}>
-            {copy.cmd.buyBtn}
+          <button className="btn full" type="button" disabled>
+            {lang === 'zh' ? '交易入口尚未开放' : 'Trading is not open'}
           </button>
           <p className="note">{copy.cmd.buyNote}</p>
         </div>
       ) : (
-        <div id="paneStake" role="tabpanel">
+        <div id="paneStake" role="tabpanel" aria-labelledby="tab-stake" tabIndex={0}>
           {!stakeOpen ? (
             <div className="lock">
               {board.phase === 'done' ? (
                 <>
                   <h3>{fill(copy.cmd.lockDoneTitle, { round: pad2(roundId ?? 0) })}</h3>
                   <p className="sub">
-                    {board.result === 'win' ? copy.cmd.lockDoneWin : copy.cmd.lockDoneLose}
+                    {board.result === 'win' ? copy.cmd.lockDoneWin : board.result === 'abort' ? copy.board.resultAbortBody : copy.cmd.lockDoneLose}
                   </p>
                   <Link className="btn fire" to="/me">
                     {copy.common.goMe}
@@ -299,7 +270,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                 </>
               ) : (
                 <>
-                  <h3>{fill(copy.cmd.lockClosedTitle, { round: pad2(roundId ?? 0) })}</h3>
+                  <h3>{board.phase === 'settling' ? (lang === 'zh' ? '结算处理中' : 'Settlement in progress') : board.phase === 'unopened' ? copy.board.phaseUnopened : fill(copy.cmd.lockClosedTitle, { round: pad2(roundId ?? 0) })}</h3>
                   <p className="sub">
                     {fill(copy.cmd.lockClosedBody, {
                       stakers: intFmt(board.stakerCount),
@@ -310,7 +281,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                     <dl className="kv">
                       <div>
                         <dt>{copy.cmd.lockClosedMine}</dt>
-                        <dd>{intFmt(myStake)} A9</dd>
+                        <dd>{me ? intFmt(myStake) : '—'} A9</dd>
                       </div>
                     </dl>
                   ) : null}
@@ -383,18 +354,20 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                 </div>
                 <div>
                   <dt>{copy.cmd.rewardEst}</dt>
-                  <dd className="ok">{intFmt(estReward) + ' A9'}</dd>
+                  <dd className="ok">{lang === 'zh' ? '待权重与结算确认' : 'Pending weights and settlement'}</dd>
                 </div>
                 <div>
                   <dt>{copy.cmd.share}</dt>
-                  <dd>{(share * 100).toFixed(3) + '%'}</dd>
+                  <dd>{lang === 'zh' ? '本金 × 连续参与加成 + 邀请权重' : 'Stake × streak multiplier + referral weight'}</dd>
                 </div>
               </dl>
               <label className="risk" htmlFor="riskOk">
                 <input id="riskOk" type="checkbox" checked={risk} onChange={(event) => setRisk(event.target.checked)} />
-                <span>{copy.cmd.riskText}</span>
+                <span>{fill(copy.cmd.riskText, { need: board.need, total: board.candleCount })}</span>
               </label>
-              <code className="payload">{payload}</code>
+              <p className="note">{lang === 'zh' ? '单笔最低 10,000 A9；单地址本轮最多 20,000,000 A9。成功奖励按最终权重分配，早领仅得 50%，其余进入解锁池。' : 'Minimum 10,000 A9; up to 20,000,000 A9 per address per round. Success rewards use final participation weights. Early claims pay 50%; the remainder enters the unlock pool.'}</p>
+              {!dataReady ? <p className="note" role="status">{lang === 'zh' ? '等待数据恢复后可提交' : 'Submission waits for fresh data'}</p> : null}
+              {stakeVal > fuseBalance && wallet.connected ? <p className="note bad">{copy.cmd.toastInsufficientFuse}</p> : null}
               <button className="btn fire full" type="button" disabled={stakeDisabled} onClick={onStake}>
                 {stakeLabel}
               </button>

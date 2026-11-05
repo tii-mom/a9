@@ -23,6 +23,8 @@ import { loadLastChainTx } from './storage';
 import { TxStatusView } from './TxStatus';
 import { useChainTx, type ChainTxKind } from './useChainTx';
 import type { WalletContext } from './transactions';
+import { ActionConfirm } from './ActionConfirm';
+import { QueryNotice } from './QueryNotice';
 import './chain.css';
 
 const QUICK_AMOUNTS = [10_000, 50_000, 100_000, 500_000];
@@ -91,7 +93,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
     [address, demo, walletStore.tonBalance],
   );
 
-  const { state, busy, submitStake, submitClaim, reset } = useChainTx({
+  const { state, busy, submitStake, submitClaim, recheck, reset } = useChainTx({
     chain,
     wallet: walletContext,
     onSettled: () => {
@@ -102,6 +104,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
 
   const [amountText, setAmountText] = useState('');
   const [riskAccepted, setRiskAccepted] = useState(false);
+  const [pendingClaim, setPendingClaim] = useState<{ kind: 'claimAll' | 'claimPrincipal' | 'claimReward'; roundId?: number; principal: bigint; reward: bigint; paid: bigint; items: Claimable[] } | null>(null);
 
   const decimals = chain.tokenDecimals;
   const amountRaw = parseAmountToRaw(amountText, decimals);
@@ -129,20 +132,26 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
           ? d.errors.AMOUNT_TOO_LARGE
           : null;
 
+  const dataReady = !!roundsQuery.data && !!meQuery.data && !error && !roundsQuery.error && !meQuery.error && raw?.dataSource === 'chain';
   const canStake =
-    chain.configured && !!openRound && amountRaw !== null && amountRaw > 0n && riskAccepted && !demoWallet && !busy;
-  const canClaim = chain.configured && !demoWallet && !busy;
+    chain.configured && dataReady && !walletNetworkMismatch && !amountHint && !!openRound && amountRaw !== null && amountRaw > 0n && riskAccepted && !demoWallet && !busy;
+  const canClaim = chain.configured && dataReady && !walletNetworkMismatch && !demoWallet && !busy;
 
   const handleStake = useCallback(() => {
-    if (!openRound || amountRaw === null || amountRaw <= 0n) return;
+    if (!canStake || !openRound || amountRaw === null || amountRaw <= 0n) return;
     void submitStake({ round: openRound, amountRaw, myStakeRaw });
-  }, [amountRaw, myStakeRaw, openRound, submitStake]);
+  }, [canStake, amountRaw, myStakeRaw, openRound, submitStake]);
 
   const handleClaim = useCallback(
     (kind: 'claimAll' | 'claimPrincipal' | 'claimReward', roundId?: number) => {
-      void submitClaim({ kind, roundId: roundId ?? null });
+      if (!canClaim) return;
+      const selected = claimable.filter((item) => roundId === undefined || item.roundId === roundId);
+      const principal = kind === 'claimReward' ? 0n : selected.reduce((sum, item) => sum + BigInt(item.principalRaw), 0n);
+      const reward = kind === 'claimPrincipal' ? 0n : selected.reduce((sum, item) => sum + BigInt(item.rewardRaw), 0n);
+      const paid = kind === 'claimPrincipal' ? 0n : selected.reduce((sum, item) => sum + BigInt(item.rewardRaw) / 2n, 0n);
+      setPendingClaim({ kind, roundId, principal, reward, paid, items: selected });
     },
-    [submitClaim],
+    [canClaim, claimable],
   );
 
   const handleRetry = useCallback(() => {
@@ -184,7 +193,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
       <section className="panel chain-panel chain-off">
         <div className="ap-panel-h">
           <h3>{d.unconfiguredTitle}</h3>
-          <span className="lbl">DEMO</span>
+          <span className="lbl">{demoWallet ? 'DEMO' : (lang === 'zh' ? '未启用' : 'UNAVAILABLE')}</span>
         </div>
         <div className="ap-pad">
           <p className="note">{reason}</p>
@@ -224,6 +233,8 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
 
         {raw && raw.dataSource !== 'chain' ? <div className="chain-warn">{d.dataSourceDemoWarn}</div> : null}
         {walletNetworkMismatch ? <div className="chain-warn">{d.walletNetMismatch}</div> : null}
+        <QueryNotice query={roundsQuery} lang={lang} label={lang === 'zh' ? '轮次' : 'Rounds'} />
+        <QueryNotice query={meQuery} lang={lang} label={lang === 'zh' ? '账户权益' : 'Account'} />
 
         {demoWallet ? (
           <div className="chain-warn chain-wallet-demo">
@@ -260,7 +271,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
           </div>
           <p className="runtime-note">{d.stakeDesc}</p>
 
-          {!openRound ? (
+          {!roundsQuery.data ? null : !openRound ? (
             <p className="chain-empty">{d.noOpenRound}</p>
           ) : (
             <>
@@ -386,13 +397,13 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
             <span className="lbl">{d.claimDesc}</span>
           </div>
           <div className="chain-actions">
-            <button className="btn ghost" type="button" disabled={!canClaim} onClick={() => handleClaim('claimAll')}>
+            <button className="btn ghost" type="button" disabled={!canClaim || claimable.length === 0} onClick={() => handleClaim('claimAll')}>
               {busy && state.kind === 'claimAll' ? d.stakeSigning : d.claimAll}
             </button>
           </div>
           <p className="runtime-note">{d.claimAllNote}</p>
 
-          {claimable.length === 0 ? (
+          {!meQuery.data ? null : claimable.length === 0 ? (
             <p className="chain-empty">
               {d.claimEmpty} — {d.claimEmptyDesc}
             </p>
@@ -438,7 +449,18 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
           )}
         </div>
 
-        <TxStatusView state={state} lang={lang} onRetry={handleRetry} onDismiss={reset} />
+        <TxStatusView state={state} lang={lang} onRetry={handleRetry} onRecheck={() => void recheck()} onDismiss={reset} />
+        {pendingClaim ? <ActionConfirm title={pendingClaim.kind === 'claimAll' ? d.claimAll : pendingClaim.kind === 'claimReward' ? d.claimReward : d.claimPrincipal} lang={lang} disabled={!canClaim} onCancel={() => setPendingClaim(null)} onConfirm={() => { if (!canClaim) return; const claim = pendingClaim; const latest = claimable.filter((item) => claim.roundId === undefined || item.roundId === claim.roundId); setPendingClaim(null); if (JSON.stringify(latest) !== JSON.stringify(claim.items)) return; void submitClaim({ kind: claim.kind, roundId: claim.roundId ?? null }); }}>
+          <p>{chain.network} · {pendingClaim.roundId === undefined ? (lang === 'zh' ? '全部已结算轮次' : 'All settled rounds') : `R#${pendingClaim.roundId}`}</p>
+          <dl className="chain-confirm-values">
+            <div><dt>{lang === 'zh' ? '本金领取' : 'Principal'}</dt><dd>{formatRawAmount(pendingClaim.principal, decimals, decimals)} A9</dd></div>
+            <div><dt>{lang === 'zh' ? '奖励立即到账（50%）' : 'Reward paid now (50%)'}</dt><dd>{formatRawAmount(pendingClaim.paid, decimals, decimals)} A9</dd></div>
+            <div><dt>{lang === 'zh' ? '奖励继续锁定' : 'Reward remains locked'}</dt><dd>{formatRawAmount(pendingClaim.reward - pendingClaim.paid, decimals, decimals)} A9</dd></div>
+          </dl>
+          {pendingClaim.kind === 'claimAll' ? <ul>{pendingClaim.items.map((item) => <li key={item.roundId}>R#{item.roundId} · {lang === 'zh' ? '本金' : 'Principal'} {formatRawAmount(item.principalRaw, decimals, decimals)} A9 · {lang === 'zh' ? '奖励总额' : 'Total reward'} {formatRawAmount(item.rewardRaw, decimals, decimals)} A9 · {lang === 'zh' ? '立即领取奖励' : 'Reward paid now'} {formatRawAmount(BigInt(item.rewardRaw) / 2n, decimals, decimals)} A9</li>)}</ul> : null}
+          <p>{lang === 'zh' ? '金额为接口估算，以合约结算为准；gas以钱包确认为准。' : 'Amounts are API estimates; contract settlement is authoritative. Your wallet shows gas.'}</p>
+          {pendingClaim.reward > 0n ? <p>{lang === 'zh' ? '涉及奖励即选择 EARLY：不可改为滚存；其余50%进入R10结束后的12期解锁池，每期30天。R10结束后请使用解锁池领取入口。' : 'Claiming rewards chooses EARLY irreversibly: the remainder enters 12 unlock periods of 30 days after R10. Use the unlock-pool action after R10.'}</p> : null}
+        </ActionConfirm> : null}
         <LastTxNote address={address} kind="stake" chain={chain} lang={lang} />
         <LastTxNote address={address} kind="claimAll" chain={chain} lang={lang} />
       </div>
