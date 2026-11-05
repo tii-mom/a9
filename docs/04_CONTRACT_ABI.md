@@ -4,7 +4,9 @@
 
 ## 1. 推荐架构
 
-建议采用模块化合约，避免单一合约承担全部逻辑。
+建议采用模块化设计，但**实现口径（V6.3）：只有 RoundController 一个协议合约**；它持有**一个** Jetton Wallet，同时托管本轮质押本金与每轮 7 亿奖励。下图中的 StakingVault / RewardVault 是**逻辑模块（合并进 RoundController）**，不是独立部署的合约。
+
+> **实现口径**：contracts/ 已通过 47 项测试；`StakingVault` / `RewardVault` 不作为独立合约部署，其职责由 RoundController + 单一 Jetton Wallet 承担（见 §19）。
 
 ``` text
                  +----------------------+
@@ -17,8 +19,8 @@
           +-----------------+------------------+
           |                                    |
 +---------v----------+              +----------v---------+
-|   StakingVault     |              |    RewardVault     |
-| round stake ledger |              | 10 x reward pools  |
+| StakingVault(逻辑) |              | RewardVault(逻辑)  |
+| stake ledger (RC)  |              | 10 pools (RC)      |
 +---------+----------+              +----------+---------+
           |                                    |
           +----------------+-------------------+
@@ -79,7 +81,7 @@ Master 的结算确认。 - **向 TeamVault 下发团队额度指令**：成功�
 事件供索引/前端。**95% 闸门、每 4h 检查、最长 7 天等待、超时提档全部取消**（V6）；
 触价提前关窗保留（报名期内 1h TWAP ≥ target 即关窗）。
 
-### 2.3 StakingVault
+### 2.3 StakingVault（**逻辑模块，合并进 RoundController**）
 
 职责： - 接收本项目 Jetton。 - 验证 Jetton Wallet 来源。 - 验证
 roundId、nonce 和风险确认 payload。 - 记录每轮每个用户的质押本金。 -
@@ -88,9 +90,9 @@ roundId、nonce 和风险确认 payload。 - 记录每轮每个用户的质押�
 **V5.3 已确认：不提供取消/提前退出通道**（无 `CancelStake` / `Withdraw` 消息）；
 只在 `TECHNICAL_ABORTED` 时按控制器指令退还全部本金。
 
-### 2.4 RewardVault
+### 2.4 RewardVault（**逻辑模块，合并进 RoundController**）
 
-职责： - 持有70亿社区奖励。 - 维护十轮独立的700,000,000（7亿）奖励账本。 -
+职责（逻辑账本，不是独立合约）： - 70 亿奖励由 RoundController 持有的 Jetton Wallet 托管。 - 维护十轮独立的 700,000,000（7 亿）奖励账本。 -
 成功时允许符合资格的用户一次性领取（无归属期）。 - 失败时销毁对应轮次的7亿奖励。 -
 不允许将失败轮次额度转移到其他轮次。
 
@@ -303,6 +305,8 @@ Get method 只读，不能被其他合约当作同步跨合约调用使用。
 
 ### 7.1 为什么需要两阶段
 
+> **V6.3 实现口径**：测试网阶段**由 jettonMaster 地址充当 BurnAck 权威**（contracts/README §4.4：BurnAck sender = jettonMaster）。主网前必须改为 **(a) Jetton Master burn ack 扩展**，或 **(b) 标准 burn + 链下对账 + owner 确认**；不得把普通 keeper 声明当链上销毁证明（见 docs/10 阻塞项）。
+
 TON 合约间通过异步消息交互。Controller
 发出消息不代表另一个合约已经完成状态变更。失败销毁必须等待**三个资金来源**（奖励池 /
 团队额度 / 质押本金）都完成实际 burn。
@@ -499,15 +503,28 @@ ClaimPayload {
 > 以上为 V6.2 前端与合约的临时约定；contract-dev 若在实现中调整，需同步更新本节与 contracts/README，前端以最终 ABI 为准。
 
 
-### 19.3 事件 opcode（V6.2 实现定稿）
+### 19.3 事件 opcode（以 contracts/README §4.5 与实现为准）
 
-| 事件 | opcode | 发出方 |
-| --- | --- | --- |
-| RoundOpened / StakingClosed / ObservationStarted | 0x52540101 ~ 0x52540103 | RoundController |
-| TargetPriceSet(roundId, tier, targetPriceUsdE8, twap24hUsdE8) | 0x52540104 | RoundController |
-| RoundSucceeded / RoundFailedPermanent | 0x52540105 / 0x52540106 | RoundController |
-| TeamReleased / TeamBurned | 0x52540107 / 0x52540108 | TeamVault |
-| TechnicalAborted | 0x52540109 | RoundController |
-| Claimed(owner, roundId, kind, amount) | 0x5254010A | RoundController |
+| 事件 | opcode | 发出方 | 字段 |
+| --- | --- | --- | --- |
+| TargetPriceSet | 0x52540101 | RoundController | roundId, tier, targetPriceUsdE8, twap24hUsdE8 |
+| RoundSettled | 0x52540102 | RoundController | roundId, status, qualifiedCandles, candlesSeen, totalAcceptedStakeRaw, tierAfter |
+| DepositAccepted | 0x52540103 | RoundController | roundId, owner, amountRaw, totalAcceptedStakeRaw |
+| TechnicalAborted | 0x52540104 | RoundController | roundId, reason, at |
+| TeamReleased | 0x52540201 | TeamVault | roundId, amountRaw, to |
+| TeamBurned | 0x52540202 | TeamVault | roundId, amountRaw, burnId |
 
-> opcode 以 contracts/README.md 与实现为准；前端常量见 web/src/features/chain/protocol.ts。
+> 事件以 contracts/README §4.5 与 contracts/constants.tolk 为准；前端常量见 web/src/features/chain/protocol.ts（EVENT_OPCODES）。
+
+## 19. 实现口径（V6.3，与 contracts/ 对齐）
+
+> 本节以 `contracts/README.md` 与 47 项测试为准；文档与实现冲突时以实现为准。
+
+1. **合约数量**：协议侧只有 **RoundController（自研）** + **TeamVault（自研）**；**没有独立的 StakingVault / RewardVault 合约**。RoundController 持有**一个** Jetton Wallet，同时托管本轮质押本金与每轮 7 亿奖励；StakingVault / RewardVault 仅为逻辑模块。
+2. **质押限额（固定硬顶）**：单笔 ≥ 10,000 A9；单地址 ≤ **20,000,000 A9**（= 本轮总上限 200,000,000 × 10%，固定硬顶，不是动态 10%）；本轮总质押 ≤ 200,000,000 A9。
+3. **判定**：18 根齐备后，**达标 ≥12 成功、≤11 失败，无中间态**。
+4. **R1 无 PREVIEW**：第 1 轮由管理员 **手动 OpenRound**（R1 无预告期）；**R2~R10** 才走「结算 → 24h PREVIEW → 自动开窗」。
+5. **SetJettonWallet（0x52540016）**：一次性调用，**必须早于 InitController**；部署顺序 65 SetJettonWallet → 70 InitController。
+6. **BurnAck 权威**：测试网由 **jettonMaster 地址**充当 ack 权威；主网前必须改为 Jetton Master burn ack 扩展或「标准 burn + 链下对账 + owner 确认」。
+7. **新增 opcode**：AbortTechnical(0x52540010)、StartObservation(0x52540011)、TeamReleasedAck(0x52540013)、TeamBurnedAck(0x52540014)、RetryPendingActions(0x52540015)、SetJettonWallet(0x52540016)；**事件 0x52540101 起**（TargetPriceSet/RoundSettled/DepositAccepted/TechnicalAborted 等）。完整 ABI 以 **contracts/README §4** 为准。
+8. **晚开窗 liveness 兜底**：若 keeper 错过整个 72h 报名窗口，`OpenRound` 会把 `stakeOpenAt` 重锚为 `now`（正常路径不触发）——见 docs/02 §4。

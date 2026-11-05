@@ -80,17 +80,28 @@ project/
 
 > **启动前置（V4/V5，用户明确）**：等所有文档与细节敲定、参数签字后再启动测试网，不要提前开始。测试网方案见 docs/11 §2.2（按最终架构，自研 **RoundController + TeamVault 共 2 个**；不再使用多签 MVP）。
 
-部署顺序建议（V5）： 1. Jetton Master/Wallet。 2.
-登记收款钱包（团队/营销/流动性，个人热钱包；地址**不对外披露**，仅填 config 并向审计/交易所披露）。 3.
-部署 **TeamVault** 并创建其 Jetton Wallet（owner = TeamVault）。 4.
-创建奖励金库、质押金库的 Jetton Wallet，owner = RoundController。 5. RoundController（单密钥 owner）。 6. OracleAdapter（可选，本期不部署）。 7.
-配置各地址、owner 与权限（权限最小化；TeamVault.rc = RoundController）。 8. 向 RewardVault 注入70亿奖励池。 9.
-向 TeamVault 注入12亿团队额度。 10.
-验证10个轮次各有7亿独立预算（合计70亿）。 11. 验证团队额度参数与托管（每轮1.2亿 × 10轮 = 12亿，owner = TeamVault）。 12. 验证初始分配总和为100亿（70 / 8 / 5 / 12 / 5，内盘8亿 + 流动性5亿）。 13.
-验证报名窗口参数（`stakeDuration = 259200`、`previewSeconds = 86400`、观察 `candleCount = 18 / minQualified = 12 / observationSeconds = 259200`）。 14.
-验证质押限额（单笔 10,000 A9 / 单地址 ≤10% / 本轮 ≤200,000,000 A9）与技术终止参数（暂停 14 天 / 观察超时 7 天）。 15.
-验证 P0 常量（116,000）、倍数（2）与 R1 目标（$0.00232）已正确写入；结算后 `TargetPriceSet` 事件与下一轮 target 一致（不预存 10 轮价格）。 15.
-执行完整模拟轮次。
+部署顺序（**V6.3：与 ops/ 脚本 00→10→11→20→30→40→65→70→55→50→60 对齐**）：
+
+1. **00 preflight**：参数/地址/密钥/工具链/钱包预检查（离线 dry-run 先跑）。
+2. **10 deploy Jetton Master**（TEP-74）。
+3. **11 mint & lock**：铸造 100 亿 + 关闭 mint。
+4. **20 deploy TeamVault**（controller=null 部署）。
+5. **30 deploy RoundController** + 初始化数据。
+6. **40 init params**：参数快照 + 链上 `get_protocol_config` 比对。
+7. **65 SetJettonWallet（0x52540016）**：一次性调用，RC/TV 绑定 canonical Jetton Wallet；**必须早于 70 InitController**。
+8. **70 InitController**：TeamVault 绑定 RC（**不可逆，双人核对**）。
+9. **55 fund TON**：RC ≥20 TON / TV ≥10 TON gas。
+10. **50 fund vaults**：注资 70 亿奖励 + 12 亿团队（`--all` 含 8/5/5 亿分配）。
+11. **60 verify & register**：登记表定稿 + 地址簿生成 + 链上核对。
+
+随后验证（V6.3）：
+
+- 验证参数：`stakeDuration=259200`、`previewSeconds=86400`、观察 `candleCount=18 / minQualified=12 / observationSeconds=259200`、P0=116,000、倍数=2。
+- 验证质押限额：单笔 10,000 A9 / 单地址 **20,000,000 A9（固定硬顶）** / 本轮 200,000,000 A9；技术终止（暂停 14 天 / 观察超时 7 天）。
+- **R1 由管理员手动 `OpenRound`（无 PREVIEW）**；R2~R10 走「结算 → 24h PREVIEW → 自动开窗」。
+- 验证目标价：开窗锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)` + `TargetPriceSet` 事件；不预存 10 轮价格。
+- **测试网 BurnAck 由 jettonMaster 地址充当权威**；主网前必须改为 Jetton Master burn ack 扩展或「标准 burn + 链下对账 + owner 确认」（见 docs/10 阻塞项）。
+- 执行完整模拟轮次。
 
 至少演练： - 一轮成功：12/18或以上（含 TeamVault 释放 1.2 亿到团队收款钱包）。 - 一轮失败：7/12或以下（**三笔** burn：奖励 7 亿 + TeamVault 团队额度 1.2 亿 + 全部本金，核对 supply 变化）。 -
 预言机故障暂停和恢复。 - 无人质押轮次：照常观察；通过时 7 亿奖励销毁，失败时奖励 + 团队额度销毁。 -

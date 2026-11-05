@@ -8,7 +8,7 @@ import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, useWallet } from '../wallet';
 import { ChainMePanel } from '../chain';
-import type { RoundSummary, StakePosition } from '@shared/types';
+import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
 import { apiErrorText, COMMON, durationText, formatPrice, pickCurrentRound, resultLabel, sharePct } from './common';
 import { Empty, ErrorState, Loading, PageHead, Stat, StatePill, ToastView, useToast } from './ui';
 import './pages.css';
@@ -27,6 +27,7 @@ interface MeDict extends Record<string, unknown> {
   readonlyNotice: string;
   chainNotice: string;
   chainClaimHint: string;
+  chainDesc: string;
   statMyStake: string;
   statClaimPrincipal: string;
   statClaimReward: string;
@@ -83,6 +84,7 @@ const ZH: MeDict = {
   readonlyNotice: '只读模式：不会发起任何交易；合约部署后开放真实质押与领取。',
   chainNotice: '链上模式：合约已配置。质押与领取请在下方「链上操作」面板中签名完成，本页仅做数据展示。',
   chainClaimHint: '链上领取请使用上方「链上操作」面板（链上交易需钱包签名）；本页不再提供演示领取。',
+  chainDesc: '当前轮质押、可领取本金与奖励、历史轮次与累计战绩；链上质押与领取请在「链上交易」面板签名完成。',
   statMyStake: '当前轮质押',
   statClaimPrincipal: '可领取本金',
   statClaimReward: '可领取奖励',
@@ -147,6 +149,7 @@ const EN: MeDict = {
   readonlyNotice: 'Read-only mode: no transactions are sent. Real staking and claiming open after contract deployment.',
   chainNotice: 'On-chain mode: contracts are configured. Stake and claim from the On-chain panel below (wallet signature required); this page only displays data.',
   chainClaimHint: 'Claim on-chain from the On-chain panel above (a wallet signature is required). Demo claiming is disabled on this page.',
+  chainDesc: 'Current-round stake, claimable principal and rewards, round history and cumulative record. On-chain stake and claim are signed from the On-chain panel.',
   statMyStake: 'Current stake',
   statClaimPrincipal: 'Claimable principal',
   statClaimReward: 'Claimable reward',
@@ -227,17 +230,24 @@ function rewardStatus(
 }
 
 /** 地址变化时整体重挂载（key=address），避免上一地址的数据短暂残留。 */
-function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
+function MeDashboard({
+  address,
+  demo,
+  config,
+  chainMode,
+}: {
+  address: string;
+  demo: boolean;
+  config: ProtocolConfig | null;
+  chainMode: boolean;
+}) {
   const { lang } = useLang();
   const d = useDict(ZH, EN);
   const c = COMMON[lang];
   const { toast, show } = useToast();
 
-  const configQuery = useQuery(() => api.config(), [], { intervalMs: 0 });
   const roundsQuery = useQuery(() => api.rounds(), [], { intervalMs: 5000 });
-  const decimals = configQuery.data?.token.decimals ?? 9;
-  // 链上模式：/api/config 下发了 roundController 合约地址（为空则保持演示模式）
-  const chainMode = Boolean(configQuery.data?.contracts?.roundController);
+  const decimals = config?.token.decimals ?? 9;
   const rounds = roundsQuery.data ?? [];
   const currentRound = useMemo(() => pickCurrentRound(rounds), [rounds]);
   const currentRoundId = currentRound?.roundId ?? null;
@@ -300,8 +310,8 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
   const roundProgress = roundDetailQuery.data;
   const candlesSeen = roundProgress?.candlesSeen ?? currentRound?.candlesSeen ?? 0;
   const qualified = roundProgress?.qualifiedCandles ?? currentRound?.qualifiedCandles ?? 0;
-  const candleCount = configQuery.data?.candleCount ?? 12;
-  const minQualified = configQuery.data?.minQualifiedCandles ?? 8;
+  const candleCount = config?.candleCount ?? 12;
+  const minQualified = config?.minQualifiedCandles ?? 8;
   const observedPct = Math.min(100, (candlesSeen / Math.max(1, candleCount)) * 100);
 
   return (
@@ -605,6 +615,9 @@ export default function MePage() {
   const wallet = useWallet();
   // 未连接钱包时也探测后端，保证「无后端」有明确错误态而不是空白引导
   const healthQuery = useQuery(() => api.health(), [], { enabled: !wallet.connected, intervalMs: 8000 });
+  // 链上模式：/api/config 下发了 roundController 合约地址（为空则保持演示模式）
+  const configQuery = useQuery(() => api.config(), [], { intervalMs: 0 });
+  const chainMode = Boolean(configQuery.data?.contracts?.roundController);
 
   return (
     <>
@@ -613,7 +626,7 @@ export default function MePage() {
         <PageHead
           lbl={d.lbl}
           title={d.title}
-          desc={d.desc}
+          desc={chainMode ? d.chainDesc : d.desc}
           right={
             <div className="ap-toolbar">
               {wallet.connected ? (
@@ -655,7 +668,13 @@ export default function MePage() {
             {healthQuery.error ? <ErrorState error={healthQuery.error} onRetry={healthQuery.refresh} /> : null}
           </div>
         ) : (
-          <MeDashboard key={wallet.address ?? 'none'} address={wallet.address ?? ''} demo={wallet.demo} />
+          <MeDashboard
+            key={wallet.address ?? 'none'}
+            address={wallet.address ?? ''}
+            demo={wallet.demo}
+            config={configQuery.data}
+            chainMode={chainMode}
+          />
         )}
       </main>
       <SiteFooter />
