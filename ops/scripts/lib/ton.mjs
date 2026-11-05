@@ -160,7 +160,7 @@ export async function runGetMethod(params, address, method, numericStack = []) {
   const parsed = parseAddress(address);
   if (!parsed.ok) throw new Error('非法地址：' + address);
   const url = params.network.toncenter.v2 + '/runGetMethod';
-  const stack = numericStack.map((value) => ({ type: 'num', value: '0x' + BigInt(String(value)).toString(16) }));
+  const stack = numericStack.map((value) => ['num', '0x' + BigInt(String(value)).toString(16)]);
   const json = await httpJson(url, {
     method: 'POST',
     body: { address: parsed.raw, method, stack },

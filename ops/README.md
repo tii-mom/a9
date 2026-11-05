@@ -29,10 +29,19 @@ OPS_EXECUTE=1 node ops/scripts/65_set_jetton_wallets.mjs --execute --query-only 
 node ops/scripts/70_bind_roles.mjs --mark-bound-only                              # 15 已 InitController，只记录
 # ... 然后 40 → 55 → 50 → 60 → verify_deployment → 80 open-round R1
 node ops/scripts/verify_deployment.mjs --online --save
+# ↑ 默认 STRICT：开轮前必检项必须全部 PASS；FAIL 时禁止开 R1。
+#   --lenient 仅排查用，输出不得作为开轮或上线依据。
 
 # 备选：Jetton 分步（位置参数；TV/RC 仍用 15 整体部署）
 # node ops/scripts/10_deploy_jetton.mjs --execute
 # node ops/scripts/11_mint_and_lock_jetton.mjs --execute
+
+# 4.1) 发布/开轮门禁（verify_deployment 默认 STRICT）
+#   - 开轮前必检项必须全部 PASS：协议配置 17 项、Jetton Wallet code hash、
+#     TeamVault pending 清零（get_round_state 1..10 枚举）、TeamVault.controller=RC、注资登记等。
+#   - getter 缺失 / 返回栈异常 / 必检分支未执行（gate.missing）一律 FAIL。
+#   - code hash 不一致 = 线上实例与 contracts/build 不一致（通常未重部署）→ 必须重部署后再开轮。
+#   - --lenient 只用于排查，输出不得作为开轮或上线依据；--offline 不覆盖链上状态。
 
 # 5) 运营期
 node ops/scripts/80_admin_ops.mjs --action submit-candle --round 1 --candle 0 --twap 232000 --digest <64hex> --observation-start <unix>  # K 线 dry-run
@@ -70,7 +79,7 @@ ops/
 │   ├── 70_bind_roles.mjs            TeamVault.InitController（不可逆，双人核对）
 │   ├── 80_admin_ops.mjs             最小权限操作（status/开轮/关窗/暂停恢复/结算/提交K线/技术终止）
 │   ├── deploy_all.mjs               按 deployPlan 串联（默认 dry-run）
-│   ├── verify_deployment.mjs        全量验收（--offline 跳过网络）
+│   ├── verify_deployment.mjs        全量验收（默认 STRICT；--offline 跳过网络；--lenient 仅排查）
 │   ├── reconcile.mjs                对账 CSV（支持 --snapshot 离线）
 │   ├── monitor_check.mjs            监控告警（支持 --snapshot/--json/--notify）
 │   ├── announcement.mjs             七类公告渲染（模板库 templates/announcements.json）
@@ -80,7 +89,8 @@ ops/
 │   ├── 02_round_operations.md       10 轮运营手册（8 阶段 SOP + 五条路径）
 │   ├── 03_monitoring_alerting.md    监控告警方案（指标/阈值/渠道/值班/事故分级）
 │   ├── 04_key_custody_admin.md      单密钥托管与权限操作（紧急暂停/技术终止演练）
-│   └── 05_announcements.md          公告与沟通手册（六类/七模板）
+│   ├── 05_announcements.md          公告与沟通手册（六类/七模板）
+│   └── 06_mainnet_admin.md          主网 admin 权限与多签方案（调研结论：推荐 Multisig v2 2-of-3）
 ├── templates/
 │   ├── announcements.json           七类公告模板（中英 + 强制风险提示）
 │   ├── reconciliation.csv           对账表模板（与 reconcile.mjs 字段一致）

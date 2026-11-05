@@ -1,0 +1,150 @@
+{
+  "network": "testnet",
+  "chainId": -3,
+  "status": "deployed_funded",
+  "configVersion": 1,
+  "paramsDigest": null,
+  "codeHashes": {},
+  "createdAt": "2026-11-05T14:13:41.427Z",
+  "updatedAt": "2026-11-05T16:38:03.843Z",
+  "contracts": {
+    "jettonMaster": {
+      "address": "kQCOYBSzkm5SEpv0g4Wg7NkCuiQGs47HlKPOzzXvff52kX65",
+      "raw": "0:8e6014b3926e52129bf48385a0ecd902ba2406b38ec794a3cecf35ef7dfe7691",
+      "deployTxHash": null,
+      "codeHash": "0x876F21A1A516FB0449A1D0AF5DBECEB8639373F947949C5AE8E1E9DBB769D64F",
+      "deployedAt": "2026-11-05T16:38:03.843Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "jettonMasterTreasuryWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVault": {
+      "address": "kQBFYc-AYafI9K7XTkN3bEKd1XGsg3h5zM6Kka75pILSbzL8",
+      "raw": "0:4561cf8061a7c8f4aed74e43776c429dd571ac837879ccce8a91aef9a482d26f",
+      "deployTxHash": null,
+      "codeHash": "0xCF3E6C7C9DC045F392F35E79E20AA6EDAAF9064D538CA4E78B6D1FE1443158B4",
+      "deployedAt": "2026-11-05T16:38:03.843Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "teamVaultJettonWallet": {
+      "address": "kQBFFdU4SZQjPabCwzIZvdsawG4a20nvuHKXveSAwVdEMEOx",
+      "raw": "0:4515d5384994233da6c2c33219bddb1ac06e1adb49efb87297bde480c1574430",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T16:38:03.843Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "roundController": {
+      "address": "kQBQf1af2vBgu9Uxw5dcDJ_7zFUIgQihsorPGgHEZlv-6Xot",
+      "raw": "0:507f569fdaf060bbd531c3975c0c9ffbcc55088108a1b28acf1a01c4665bfee9",
+      "deployTxHash": null,
+      "codeHash": "0xC5AD291469C3BEADBDC26A6F1733004D433F12B15B025D88B983DF098BA11500",
+      "deployedAt": "2026-11-05T16:38:03.843Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "roundControllerJettonWallet": {
+      "address": "kQBQ0fLed0EnRnupf_MyIdKFSBFp4U75h3-V0UCo8Mr4R6L7",
+      "raw": "0:50d1f2de774127467ba97ff33221d285481169e14ef9877f95d140a8f0caf847",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T16:38:03.843Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "teamWalletJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "oracleAdapter": {
+      "address": "kQDRAgy1aKip2gUPlBBz2tgfn3Si6cER1QqVeLrgrkXNRSnr",
+      "raw": "0:d1020cb568a8a9da050f941073dad81f9f74a2e9c111d50a9578bae0ae45cd45",
+      "deployTxHash": null,
+      "codeHash": "0x539F3597357943584A596DA2B40F901B4984D8C8307E63CE81A67F131EAB8CBA",
+      "deployedAt": "2026-11-05T16:38:03.843Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    }
+  },
+  "wallets": {
+    "adminOwner": {
+      "address": "kQDfQ68RY7pJ534OiwEt-dXRUmG1A7AajqJupq4hw35vWRuy",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.821Z"
+    },
+    "treasury": {
+      "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamWallet": {
+      "address": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "marketingWallet": {
+      "address": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "liquidityWallet": {
+      "address": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamInternalWallet": {
+      "address": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    }
+  },
+  "bindings": {
+    "teamVaultAcceptsOnly": "kQBQf1af2vBgu9Uxw5dcDJ_7zFUIgQihsorPGgHEZlv-6Xot"
+  },
+  "funding": [
+    {
+      "kind": "roundRewards",
+      "amountRaw": "7000000000000000000",
+      "recipient": "kQBQ0fLed0EnRnupf_MyIdKFSBFp4U75h3-V0UCo8Mr4R6L7",
+      "confirmed": true
+    },
+    {
+      "kind": "team",
+      "amountRaw": "1200000000000000000",
+      "recipient": "kQBFFdU4SZQjPabCwzIZvdsawG4a20nvuHKXveSAwVdEMEOx",
+      "confirmed": true
+    },
+    {
+      "kind": "internalSale",
+      "amountRaw": "800000000000000000",
+      "recipient": "kQDCoAFW7Offawe4y5JHUevHh5sv9CqnUVuiN82cuaOYJL6w",
+      "confirmed": true
+    },
+    {
+      "kind": "liquidity",
+      "amountRaw": "500000000000000000",
+      "recipient": "kQB459mu0OVlh7Ik06JIPgyFnMsrLOd-jLKH9gopkJvbKO6V",
+      "confirmed": true
+    },
+    {
+      "kind": "marketing",
+      "amountRaw": "500000000000000000",
+      "recipient": "kQABpbu1P2AdDyIGn--lVxMRtoZguZYmHP8QkhSUOuSzQOxX",
+      "confirmed": true
+    }
+  ],
+  "verification": {
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
+  },
+  "notes": "v8.6 authoritative instance; timing 10s; allocations + role wallets; RC/TV TON gas pending 20/10"
+}

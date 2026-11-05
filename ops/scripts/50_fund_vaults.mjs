@@ -7,7 +7,7 @@ import { flag, requireConfirm, str } from './lib/cli.mjs';
 import { bootstrap, finish, printNextSteps, resolveAddress, resolveWalletAddress, signerWallet } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { recordFunding, setContract, writeRegistry } from './lib/registry.mjs';
-import { findJettonWallet, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { findJettonWallet, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { verifyFundingPlan } from './lib/verify.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens, readJSON } from './lib/config.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
@@ -20,6 +20,7 @@ const { args, execute, params, registry } = bootstrap({
 
 const all = flag(args, 'all');
 const probe = flag(args, 'probe');
+const resume = flag(args, 'resume');
 const jettonMaster = resolveAddress(registry, params, 'jettonMaster', 'jetton-master.addr');
 const roundController = resolveAddress(registry, params, 'roundController', 'round-controller.addr');
 const teamVault = resolveAddress(registry, params, 'teamVault', 'team-vault.addr');
@@ -122,8 +123,11 @@ try {
   if (treasuryBalance === null) warn('无法读取 treasury 的 A9 余额（TON Center v3 不可用），继续执行但每笔转账前需人工核对');
   else kv('treasury A9 余额', formatTokens(treasuryBalance) + ' A9（raw ' + treasuryBalance + '）');
   if (treasuryBalance !== null && asBigInt(treasuryBalance) < totalRaw) {
-    fail('signer A9 余额不足本次注资：' + treasuryBalance + ' < ' + totalRaw);
-    process.exit(finish());
+    if (resume) warn('signer A9 余额 < 全额（resume 模式继续，逐笔仍由合约脚本校验余额）：' + treasuryBalance + ' < ' + totalRaw);
+    else {
+      fail('signer A9 余额不足本次注资：' + treasuryBalance + ' < ' + totalRaw);
+      process.exit(finish());
+    }
   }
 } catch (error) {
   warn('余额预检失败：' + String(error.message || error));
@@ -194,8 +198,22 @@ for (let index = 0; index < plan.length; index++) {
   kv(item.kind + ' → owner', mapping.owner);
   kv(item.kind + ' → jetton wallet', recipientWallet);
 
-  const preBalance = (await jettonBalance(recipientWallet)) ?? 0n;
+  const walletInfo = await getTonBalance(params, recipientWallet).catch(() => ({ state: 'unknown' }));
+  const isActive = walletInfo.state === 'active';
+  const currentBalance = isActive ? ((await jettonBalance(recipientWallet)) ?? 0n) : 0n;
   let txHashes = [];
+  if (resume && currentBalance >= amountRaw) {
+    info(item.kind + '：resume 检测到余额已达标（' + formatTokens(currentBalance.toString()) + ' A9），跳过转账');
+    if (!registry.funding.some((entry) => entry.kind === item.kind && entry.confirmed)) {
+      recordFunding(registry, { kind: item.kind, recipient: recipientWallet, recipientOwner: mapping.owner, amountRaw: item.amountRaw, confirmed: true, txHash: null, note: '50_fund_vaults resume 识别已到账' });
+      writeRegistry(registry);
+    }
+    if (mapping.walletKey) {
+      try { setContract(registry, mapping.walletKey, recipientWallet, { note: '由 50 resume 核对登记' }); } catch (error) { warn(String(error.message || error)); }
+    }
+    continue;
+  }
+  const preBalance = currentBalance;
   if (index === 0) {
     if (amountRaw <= PROBE_RAW) {
       fail('第一笔金额必须大于 1 A9 才能做小额试探');

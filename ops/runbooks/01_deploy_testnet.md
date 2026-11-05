@@ -29,6 +29,8 @@ OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
 OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
 node ops/scripts/60_verify_and_register.mjs --execute
 node ops/scripts/verify_deployment.mjs --online --save
+# ↑ 默认 STRICT：开轮前必检项必须全部 PASS；任一 FAIL 不得开 R1。
+#   --lenient 仅用于排查，输出不得作为开轮或上线依据。
 # 最后：开 R1（R1 无 PREVIEW，需 admin 手动 OpenRound）
 OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name> node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
 
@@ -111,8 +113,14 @@ node ops/scripts/70_bind_roles.mjs
 node ops/scripts/55_fund_ton.mjs
 node ops/scripts/50_fund_vaults.mjs --all
 node ops/scripts/60_verify_and_register.mjs
-node ops/scripts/verify_deployment.mjs --offline
+node ops/scripts/verify_deployment.mjs --offline   # 默认 STRICT；离线只覆盖不变量/登记表
 ~~~
+
+> **验收模式（STRICT / LENIENT）**：`verify_deployment.mjs` **默认 STRICT**，开轮前必检项（协议配置 17 项、
+> Jetton Wallet code hash、TeamVault pending 清零、TeamVault.controller 地址比对、注资登记等）必须全部 PASS；
+> getter 失败或返回栈异常一律 FAIL。`--lenient` 仅用于排查，**输出不得作为开轮或上线依据**。
+> `--offline` 不覆盖链上状态，**开轮前必须再跑 `--online` 且必检项全 PASS**。
+> STRICT 下 code hash 不一致 = 线上实例与 `contracts/build` 不一致（通常为未重部署），**必须重部署到当前构建后再开轮**。
 
 验收 dry-run 输出：
 
@@ -281,15 +289,40 @@ OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name> node ops/scri
 - 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
 - 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
 
-### Step 90 — 全量验收
+### Step 90 — 全量验收（STRICT 门禁）
 
 ~~~bash
-node ops/scripts/verify_deployment.mjs --online --save
+node ops/scripts/verify_deployment.mjs --online --save   # 默认 STRICT；开轮前必检项必须全部 PASS
 ~~~
 
-- 离线：参数、阶梯、分配、登记表结构、资金记录。
-- 在线：合约账户 active、RC/TV code hash 与 build 一致、Jetton supply/mintable/admin=null、RC jettonWalletCode hash 与 JettonWallet.json 一致、TV teamWalletJettonWallet = get_wallet_address(teamWallet)、pendingQueryId 全 0、RC 配置逐字段、R1 窗口与 target 锁定、TeamVault 参数。
+- 离线：参数、阶梯、分配、登记表结构、资金记录（**离线通过不构成开轮依据**）。
+- 在线：合约账户 active、RC/TV code hash 与 build 一致、Jetton supply/mintable/admin=null、RC jettonWalletCode hash 与 JettonWallet.json 一致、TV teamWalletJettonWallet = get_wallet_address(teamWallet)、**TeamVault pending 已清零（用 `get_round_state(1..10)` 枚举：queryId=0 或已 released/burned）**、TeamVault.controller 解析后与 RC 地址逐字节一致、RC 配置逐字段、R1 窗口与 target 锁定、TeamVault 参数。
+- 门禁语义：
+  - **默认 STRICT**：上述必检项必须全部 PASS；getter 缺失 / 返回栈异常 / 必检分支未执行 一律 FAIL。
+  - **`--lenient` 仅用于排查**：必检项降级为 WARN，**输出不得作为开轮或上线依据**。
+  - **code hash 不一致** = 线上实例与 `contracts/build` 不一致（通常为未重部署 v8.x），**必须重部署到当前构建后再开轮**，不要用 `--lenient` 掩盖。
+  - 脚本结尾对必检项做覆盖审计（`gate.missing.*`）：关键分支被跳过也会 FAIL，不会出现「没验证也算通过」。
 - 任一 FAIL → 不得开 R1；先按失败项回退（§9）。
+
+#### Step 90 必检项 checklist（STRICT 全 PASS 才允许开 R1）
+
+- [ ] `params.digest`：登记表参数哈希 = 当前 `ops/config`（漂移则重跑 40/60）
+- [ ] `registry.structure`：jettonMaster / teamVault / roundController 三个合约 + 六个钱包地址均登记、测试网地址、RC 不可升级
+- [ ] `funding.*`：roundRewards / team / marketing / liquidity / internalSale 五笔注资已确认登记
+- [ ] `account.*`：5 个合约账户（Jetton Master、RC、TV、RC/TV 的 Jetton Wallet）`state=active`
+- [ ] `jetton.total_supply`：新实例 = `1e19`；若为已发生销毁的旧实例，必须核对 `burn_ledger`/销毁记录后再放行
+- [ ] `jetton.mintable=false`、`jetton.admin_null=true`（mint 已永久关闭）
+- [ ] `roundController.code_hash` / `teamVault.code_hash`：与 `contracts/build/*.json` 完全一致（不一致 = 未重部署，必须重部署）
+- [ ] `rc.jetton_wallet_code_hash`：RC 存的 JettonWallet code hash = `contracts/build/JettonWallet.json`
+- [ ] `jetton.wallet.rc` / `jetton.wallet.tv` / `jetton.wallet.teamWallet`：canonical Jetton Wallet 与登记表一致
+- [ ] `rc.get_protocol_config.shape`（栈 ≥22）+ `rc.config.*` 17 项：P0、倍数、每轮奖励/团队额、限额、PREVIEW/报名/观察/K线/阈值、技术终止时长、风险版本、configVersion 全部与参数一致
+- [ ] `rc.round1.shape`（栈 ≥14）；R1 已开时校验 `target_lock` / `reward_budget` / `stake_window`
+- [ ] `teamVault.controller`：解析 slice 后与 RC 地址（wc+hash）逐字节一致
+- [ ] `teamVault.pending_query_ids`：`get_round_state(1..10)` 枚举，queryId=0 或已 released/burned（无卡住的 pending）
+- [ ] `teamVault.teamWalletJettonWallet` = `get_wallet_address(teamWallet)`；`teamVault.teamRoundRaw` 与参数一致
+- [ ] `gate.missing.*`：无「必检项未执行」记录（该条目出现即说明脚本分支被跳过，禁止开轮）
+
+> 报告落盘：`--save` 会在 `ops/records/verify-deployment-<date>.json` 记录 STRICT 模式、FAIL/WARN、必检项通过数，作为开轮审批附件。
 
 ---
 

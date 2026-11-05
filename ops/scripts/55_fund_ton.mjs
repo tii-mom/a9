@@ -91,8 +91,9 @@ for (const target of targets) {
   }
   ok(target.label + ' 充值 ' + amountTon + ' TON（含 1 TON 缓冲）');
 }
-registry.notes = registry.notes || [];
-registry.notes.push(new Date().toISOString() + ' TON gas top-up executed');
+const note = new Date().toISOString() + ' TON gas top-up executed';
+registry.notes = Array.isArray(registry.notes) ? registry.notes : (registry.notes ? [String(registry.notes)] : []);
+registry.notes.push(note);
 writeRegistry(registry);
 printNextSteps(['下一步：node scripts/50_fund_vaults.mjs --execute --all']);
 process.exit(finish({ 模式: 'EXECUTE' }));

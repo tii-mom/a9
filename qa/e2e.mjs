@@ -1,5 +1,16 @@
 // 端到端交互验收：落地页 / 我的战况 / 排行榜 / 运维后台
 // 用法: node e2e.mjs [baseUrl]
+//
+// 发布门禁（pre-release acceptance）最小集（全部必须 PASS 才允许部署）：
+//   1. 落地页核心内容 + 24 格 K 线 + 沙盘交互 + 阶梯 + 成交流 + 中英切换
+//   2. 我的战况：连接钱包后展示数据（不再是未连接引导）
+//   3. 排行榜：R1 至少 5 行；运维后台：未授权态 + token 登录总览
+//   4. 390px 移动端无横向溢出
+//   5. 链源不可用：/api/me、/api/rounds 持续 503 时页面给出明确错误态与重试，不白屏/不崩溃
+//   6. 重复提交防护：同一操作按钮在请求未完成前必须禁用（双击只发 1 次请求）
+//   7. 签名门禁：链上模式 + 演示钱包时必须提示「无法签名」并禁用签名动作（若目标环境为演示模式则显式 SKIP）
+// 真实签名拒绝 / 失败回执（aborted）/ nonce 防重等无法在无钱包浏览器里稳定复现，
+// 由 qa/chain-logic.mjs 用纯逻辑回归覆盖（CI 的 qa-logic job，同为 deploy 前置）。
 import { chromium } from 'playwright';
 
 const BASE = process.argv[2] || 'https://fuse-protocol.348421501.workers.dev';
@@ -7,6 +18,7 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 const results = [];
 const ok = (name, detail = '') => { results.push(['PASS', name, detail]); console.log('✅', name, detail); };
 const bad = (name, detail = '') => { results.push(['FAIL', name, detail]); console.log('❌', name, detail); };
+const skip = (name, detail = '') => { results.push(['SKIP', name, detail]); console.log('⏭️', name, detail); };
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });
@@ -153,6 +165,118 @@ if (ADMIN_TOKEN) {
   });
 }
 
+// ---------- 链源不可用（API 持续 503：必须给出错误态，不得白屏） ----------
+await step('链源不可用 → 明确错误态', async () => {
+  const downCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });
+  const downPage = await downCtx.newPage();
+  const downErrors = [];
+  downPage.on('pageerror', (e) => downErrors.push(String(e).slice(0, 200)));
+  await downCtx.route('**/api/**', async (route) => {
+    const url = route.request().url();
+    if (/\/api\/(me|rounds|stats|trades|book|config|health)/.test(url)) {
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: { code: 'INTERNAL', message: 'chain source unavailable (e2e)' } }),
+      });
+    }
+    return route.continue();
+  });
+  await downPage.addInitScript(() => {
+    localStorage.setItem('fuse.wallet.mode', 'demo');
+    localStorage.setItem('fuse.wallet.demoAddress', 'UQUTBw3GpXiC0WbJh0B-nYfHzbzDmp9T2mUTBw3GpXiC0WbJ');
+  });
+  await downPage.goto(BASE + '/me', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await downPage.waitForTimeout(3000);
+  const meBody = await downPage.locator('body').innerText();
+  if (!/接口不可用|重试|无法连接|API unavailable|Retry/.test(meBody)) throw new Error('/me 未展示错误态：' + meBody.replace(/\s+/g, ' ').slice(0, 120));
+  if (downErrors.length) throw new Error('链源不可用时出现未捕获异常：' + downErrors[0]);
+  await downPage.goto(BASE + '/leaderboard', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await downPage.waitForTimeout(2500);
+  const lbBody = await downPage.locator('body').innerText();
+  if (!/接口不可用|重试|无法连接|API unavailable|Retry/.test(lbBody)) throw new Error('/leaderboard 未展示错误态');
+  const h1 = await downPage.locator('h1').first().innerText();
+  if (!h1.trim()) throw new Error('错误态页面 h1 为空（白屏）');
+  await downCtx.close();
+  ok('链源不可用 → 明确错误态', '/me + /leaderboard 均显示错误与重试');
+});
+
+// ---------- 重复提交防护（单飞：请求未完成前动作按钮必须禁用，且只发 1 次） ----------
+if (ADMIN_TOKEN) {
+  await step('重复提交防护（单飞锁）', async () => {
+    const dupCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });
+    const dupPage = await dupCtx.newPage();
+    let tickRequests = 0;
+    await dupPage.route('**/api/admin/tick', async (route) => {
+      tickRequests += 1;
+      // 人为放慢，制造「请求未完成」窗口
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      await route.continue();
+    });
+    await dupPage.goto(BASE + '/admin', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await dupPage.waitForTimeout(1500);
+    const input = dupPage.locator('input[type=password], input[name=token], input[placeholder*="令牌"]').first();
+    await input.fill(ADMIN_TOKEN);
+    await dupPage.getByRole('button', { name: /^登录$/ }).click();
+    await dupPage.waitForFunction(() => /已登录/.test(document.body.innerText), { timeout: 25000 }).catch(() => {});
+    // 第一行动作（手动 Tick）的按钮：加载中会变成「…」且 disabled
+    const tickBtn = dupPage.locator('.ap-admin-actions .ap-action').first().locator('button').first();
+    if (!(await tickBtn.count())) throw new Error('未找到「手动 Tick」按钮（登录失败？）');
+    await tickBtn.click();
+    await dupPage.waitForTimeout(120);
+    const lockState = await dupPage.evaluate(() => {
+      const row = document.querySelector('.ap-admin-actions .ap-action');
+      const btn = row ? row.querySelector('button') : null;
+      return btn ? { disabled: btn.disabled, text: (btn.textContent || '').trim() } : null;
+    });
+    if (!lockState || !lockState.disabled) throw new Error('请求进行中动作按钮未禁用（单飞锁缺失）：' + JSON.stringify(lockState));
+    await dupPage.waitForTimeout(2400);
+    if (tickRequests !== 1) throw new Error('单次点击触发了 ' + tickRequests + ' 次请求（应为 1）');
+    await dupCtx.close();
+    ok('重复提交防护（单飞锁）', '请求期间按钮禁用（' + lockState.text + '），请求数 = 1');
+  });
+} else {
+  skip('重复提交防护（单飞锁）', '未提供 ADMIN_TOKEN，无法登录后台；显式跳过（非静默）');
+}
+
+// ---------- 签名门禁（链上模式 + 演示钱包：必须提示无法签名并禁止签名动作） ----------
+await step('签名门禁（链上模式 + 演示钱包）', async () => {
+  // 先看目标环境是否真的接了链：/api/config 下发 roundController 才算链上模式
+  let chainConfigured = false;
+  try {
+    const response = await fetch(BASE + '/api/config', { headers: { accept: 'application/json' } });
+    const json = await response.json();
+    chainConfigured = Boolean(json && json.ok && json.data && json.data.contracts && json.data.contracts.roundController);
+  } catch (error) {
+    throw new Error('无法读取 /api/config：' + String(error && error.message ? error.message : error));
+  }
+  if (!chainConfigured) {
+    skip('签名门禁（链上模式 + 演示钱包）', '目标环境为演示模式（/api/config 无 roundController）；真实签名拒绝/失败回执由 qa/chain-logic.mjs 覆盖');
+    return;
+  }
+  const chainPage = await ctx.newPage();
+  await chainPage.goto(BASE + '/me', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await chainPage.waitForTimeout(2800);
+  const body = await chainPage.locator('body').innerText();
+  if (!/演示钱包无法签名|Demo wallet cannot sign|无法签名/i.test(body)) {
+    throw new Error('链上模式 + 演示钱包未提示无法签名');
+  }
+  const switchBtn = chainPage.getByRole('button', { name: /连接真实钱包|Switch wallet|Switch to a real wallet/i }).first();
+  if (!(await switchBtn.count())) throw new Error('缺少「连接真实钱包」切换入口');
+  // 链上交易面板（排除奖励/邀请面板）里的签名动作在演示钱包下必须全部禁用
+  const onchainPanel = chainPage.locator('.chain-panel:not(.reward-panel):not(.referral-panel)');
+  const actionButtons = onchainPanel.locator('.chain-actions button');
+  const actionCount = await actionButtons.count();
+  let enabledActions = 0;
+  for (let i = 0; i < actionCount; i += 1) {
+    if (await actionButtons.nth(i).isEnabled()) enabledActions += 1;
+  }
+  if (actionCount === 0) throw new Error('链上模式下未找到链上交易面板动作按钮');
+  if (enabledActions > 0) throw new Error('演示钱包下仍有 ' + enabledActions + '/' + actionCount + ' 个签名按钮可点击');
+  await chainPage.close();
+  ok('签名门禁（链上模式 + 演示钱包）', '提示无法签名 + 切换入口 + ' + actionCount + ' 个签名按钮全禁用');
+});
+
 // ---------- 移动端 ----------
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto(BASE + '/', { waitUntil: 'networkidle' });
@@ -166,6 +290,8 @@ await step('移动端无横向溢出', async () => {
 await browser.close();
 console.log('\n=== e2e summary ===');
 const fails = results.filter((r) => r[0] === 'FAIL');
-console.log(`PASS ${results.length - fails.length} / FAIL ${fails.length}`);
+const skips = results.filter((r) => r[0] === 'SKIP');
+console.log(`PASS ${results.length - fails.length - skips.length} / FAIL ${fails.length} / SKIP ${skips.length}`);
+if (skips.length) skips.forEach((s) => console.log('  skip: ' + s[1] + ' — ' + s[2]));
 if (errors.length) { console.log('console errors:'); errors.slice(0, 8).forEach((e) => console.log(' - ' + e)); }
 process.exit(fails.length ? 1 : 0);

@@ -1,12 +1,12 @@
 {
   "network": "testnet",
   "chainId": -3,
-  "status": "deployed_unfunded",
+  "status": "funded",
   "configVersion": 1,
-  "paramsDigest": null,
+  "paramsDigest": "sha256:db6aafdbbd8aeb480176d06c035cde2a23365fd2d8981a6b88ea58944dc5f0af",
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-05T15:22:11.710Z",
+  "updatedAt": "2026-11-05T15:27:30.504Z",
   "contracts": {
     "jettonMaster": {
       "address": "kQDTfnjo8ESfl5SBvVeOZwil_CFDT8t3-zcUoyNHuzqIfCtq",
@@ -41,7 +41,7 @@
       "deployTxHash": null,
       "codeHash": null,
       "deployedAt": "2026-11-05T15:11:19.494Z",
-      "note": "query-only 登记",
+      "note": "由 50 resume 核对登记",
       "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "roundController": {
@@ -59,7 +59,7 @@
       "deployTxHash": null,
       "codeHash": null,
       "deployedAt": "2026-11-05T15:11:19.494Z",
-      "note": "query-only 登记",
+      "note": "由 50 resume 核对登记",
       "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "teamWalletJettonWallet": {
@@ -114,14 +114,125 @@
     }
   },
   "bindings": {
-    "teamVaultAcceptsOnly": "kQBXqfV0WY9h9n2qw0sb5ObfvEc04U5DBEKNiHpD2WdEFxiV"
+    "teamVaultAcceptsOnly": "kQBXqfV0WY9h9n2qw0sb5ObfvEc04U5DBEKNiHpD2WdEFxiV",
+    "roundControllerUpgradeable": false
   },
-  "funding": [],
+  "funding": [
+    {
+      "key": "roundRewards:kQBXvCptv3Ht9-oPUC4Ai0W6V-vxatE1wPa27KHem0XapLi6:7000000000000000000",
+      "at": "2026-11-05T15:25:39.594Z",
+      "confirmed": true,
+      "kind": "roundRewards",
+      "recipient": "kQBXvCptv3Ht9-oPUC4Ai0W6V-vxatE1wPa27KHem0XapLi6",
+      "recipientOwner": "kQBXqfV0WY9h9n2qw0sb5ObfvEc04U5DBEKNiHpD2WdEFxiV",
+      "amountRaw": "7000000000000000000",
+      "txHash": null,
+      "note": "50_fund_vaults resume 识别已到账"
+    },
+    {
+      "key": "team:kQBz6Xp9ffazwvkgHGBa36XEk6xaVjj0IIc6sfAE38FXrQYo:1200000000000000000",
+      "at": "2026-11-05T15:25:41.713Z",
+      "confirmed": true,
+      "kind": "team",
+      "recipient": "kQBz6Xp9ffazwvkgHGBa36XEk6xaVjj0IIc6sfAE38FXrQYo",
+      "recipientOwner": "kQBzEOUQNyZRvjJf_R9CIhZfcVmrK_YPOhi0_6_mBTTwGNmI",
+      "amountRaw": "1200000000000000000",
+      "txHash": null,
+      "note": "50_fund_vaults resume 识别已到账"
+    },
+    {
+      "key": "internalSale:kQDC91Gs0aNxV9G4mxX1adGil3XV2OwNtgDPCgZV45pTfevE:800000000000000000",
+      "at": "2026-11-05T15:25:54.690Z",
+      "confirmed": true,
+      "kind": "internalSale",
+      "recipient": "kQDC91Gs0aNxV9G4mxX1adGil3XV2OwNtgDPCgZV45pTfevE",
+      "recipientOwner": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "amountRaw": "800000000000000000",
+      "txHash": "tx[3] hash = 0x2c3c18df5246ce1f8a7ff97331976c849a51fe633dc8dd9eb5c9c99094033656",
+      "note": "50_fund_vaults --all"
+    },
+    {
+      "key": "liquidity:kQB40CX906CggfWPBp-h0UsUNuEHZhrKZtdXzgQRd6Y_dhE7:500000000000000000",
+      "at": "2026-11-05T15:26:07.552Z",
+      "confirmed": true,
+      "kind": "liquidity",
+      "recipient": "kQB40CX906CggfWPBp-h0UsUNuEHZhrKZtdXzgQRd6Y_dhE7",
+      "recipientOwner": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "amountRaw": "500000000000000000",
+      "txHash": "tx[3] hash = 0xfa4b38d028b4e7ec50855fe66c5729ac7078fe08586afe84242346b758ca5906",
+      "note": "50_fund_vaults --all"
+    },
+    {
+      "key": "marketing:kQABYLG91L_2xOmQ8J9c3H93q0l8YFGsL0QgrrR8qnUTHd-I:500000000000000000",
+      "at": "2026-11-05T15:26:20.066Z",
+      "confirmed": true,
+      "kind": "marketing",
+      "recipient": "kQABYLG91L_2xOmQ8J9c3H93q0l8YFGsL0QgrrR8qnUTHd-I",
+      "recipientOwner": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "amountRaw": "500000000000000000",
+      "txHash": "tx[3] hash = 0x9b469d4bf6b8648575d18b56e11f934388ba5065fa382ba5c1cb90f46541cf6d",
+      "note": "50_fund_vaults --all"
+    }
+  ],
   "verification": {
-    "lastRunAt": null,
-    "healthy": null,
-    "checks": [],
-    "digest": null
+    "lastRunAt": "2026-11-05T15:27:30.497Z",
+    "healthy": true,
+    "checks": [
+      {
+        "name": "contract.jettonMaster",
+        "status": "PASS",
+        "detail": "kQDTfnjo8ESfl5SBvVeOZwil_CFDT8t3-zcUoyNHuzqIfCtq"
+      },
+      {
+        "name": "contract.teamVault",
+        "status": "PASS",
+        "detail": "kQBzEOUQNyZRvjJf_R9CIhZfcVmrK_YPOhi0_6_mBTTwGNmI"
+      },
+      {
+        "name": "contract.roundController",
+        "status": "PASS",
+        "detail": "kQBXqfV0WY9h9n2qw0sb5ObfvEc04U5DBEKNiHpD2WdEFxiV"
+      },
+      {
+        "name": "wallet.adminOwner",
+        "status": "PASS",
+        "detail": "kQDfQ68RY7pJ534OiwEt-dXRUmG1A7AajqJupq4hw35vWRuy"
+      },
+      {
+        "name": "wallet.treasury",
+        "status": "PASS",
+        "detail": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5"
+      },
+      {
+        "name": "wallet.teamWallet",
+        "status": "PASS",
+        "detail": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr"
+      },
+      {
+        "name": "wallet.marketingWallet",
+        "status": "PASS",
+        "detail": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7"
+      },
+      {
+        "name": "wallet.liquidityWallet",
+        "status": "PASS",
+        "detail": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn"
+      },
+      {
+        "name": "wallet.teamInternalWallet",
+        "status": "PASS",
+        "detail": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd"
+      },
+      {
+        "name": "bindings.roundControllerUpgradeable",
+        "status": "PASS",
+        "detail": "不可升级（D-24）"
+      }
+    ],
+    "digest": "sha256:dbbe0de3bb6bf108d500fe289f3d3305ef76d548c669023e57f35ea3318c5241"
   },
-  "notes": "2026-11-05 第二次事故：仅 JettonMaster 部署成功；OracleAdapter/TeamVault/RoundController 未激活，已按真实状态回滚。见 ops/records/incident-2026-11-05-deploy-partial-fake-success.md"
+  "notes": [
+    "2026-11-05 第二次事故：仅 JettonMaster 部署成功；OracleAdapter/TeamVault/RoundController 未激活，已按真实状态回滚。见 ops/records/incident-2026-11-05-deploy-partial-fake-success.md",
+    "2026-11-05T15:23:01.507Z TON gas top-up executed"
+  ]
 }

@@ -1,0 +1,119 @@
+{
+  "network": "testnet",
+  "chainId": -3,
+  "status": "deployed_unfunded",
+  "configVersion": 1,
+  "paramsDigest": null,
+  "codeHashes": {},
+  "createdAt": "2026-11-05T14:13:41.427Z",
+  "updatedAt": "2026-11-05T15:48:50.045Z",
+  "contracts": {
+    "jettonMaster": {
+      "address": "kQDTfnjo8ESfl5SBvVeOZwil_CFDT8t3-zcUoyNHuzqIfCtq",
+      "raw": "0:d37e78e8f0449f979481bd578e6708a5fc21434fcb77fb3714a32347bb3a887c",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T15:48:50.044Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "jettonMasterTreasuryWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVault": {
+      "address": "kQBiGaPCZTtvUNVzsHZVaQyDXZpOm08YmyPtgcysa2dUxd_I",
+      "raw": "0:6219a3c2653b6f50d573b07655690c835d9a4e9b4f189b23ed81ccac6b6754c5",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T15:48:50.044Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "teamVaultJettonWallet": {
+      "address": "kQBi4O0eQ26RWdwg3U_DviIqLD4-0PQVb5eXwGI7YlglZz_P",
+      "raw": "0:62e0ed1e436e9159dc20dd4fc3be222a2c3e3ed0f4156f9797c0623b62582567",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T15:48:50.045Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "roundController": {
+      "address": "kQDMdpyDnBRsXRQZHX12HGbTn6Z35QIVfd-xQoR4w0Gp8T7w",
+      "raw": "0:cc769c839c146c5d14191d7d761c66d39fa677e502157ddfb1428478c341a9f1",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T15:48:50.045Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "roundControllerJettonWallet": {
+      "address": "kQDMJEuVEkgJyTWlkQvuHJWUzjYVujgVpKjZEjPeCGkLwhZ2",
+      "raw": "0:cc244b95124809c935a5910bee1c9594ce3615ba3815a4a8d91233de08690bc2",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T15:48:50.045Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "teamWalletJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "oracleAdapter": {
+      "address": "kQCw9mFwfUOM5PpzrhmOzx-sheloyz98VymSvLVcYK1dlz3J",
+      "raw": "0:b0f661707d438ce4fa73ae198ecf1fac85e968cb3f7c572992bcb55c60ad5d97",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-05T15:48:50.045Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    }
+  },
+  "wallets": {
+    "adminOwner": {
+      "address": "kQDfQ68RY7pJ534OiwEt-dXRUmG1A7AajqJupq4hw35vWRuy",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.821Z"
+    },
+    "treasury": {
+      "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamWallet": {
+      "address": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "marketingWallet": {
+      "address": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "liquidityWallet": {
+      "address": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamInternalWallet": {
+      "address": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    }
+  },
+  "bindings": {
+    "teamVaultAcceptsOnly": "kQDMdpyDnBRsXRQZHX12HGbTn6Z35QIVfd-xQoR4w0Gp8T7w"
+  },
+  "funding": [],
+  "verification": {
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
+  },
+  "notes": "fast-test v2: timing 10s, reward 1e15/round, team 1e14/round, dedicated admin a9-fast-admin2"
+}

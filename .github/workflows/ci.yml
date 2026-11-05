@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      allow_e2e_skip:
+        description: '显式允许跳过 E2E（仅用于 E2E_BASE_URL 不可用时的应急；会在 job summary 留痕，默认 false）'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -29,6 +34,20 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: Guard: migrations 目录只允许 NNNN_*.sql
+        # S-2 防呆：seed 放进 migrations/ 会被 wrangler d1 migrations apply 当迁移执行（生产灌假数据）
+        run: |
+          bad=0
+          for f in worker/migrations/*.sql; do
+            base=$(basename "$f")
+            case "$base" in
+              [0-9][0-9][0-9][0-9]_*.sql) ;;
+              *) echo "::error::非迁移文件出现在 worker/migrations: $base（seed 请放 worker/seed/，禁止再塞回迁移目录）"; bad=1 ;;
+            esac
+          done
+          if [ "$bad" != "0" ]; then exit 1; fi
+          echo "migrations OK:"
+          ls worker/migrations
       - name: Typecheck (web + worker)
         run: pnpm typecheck
       - name: Build web
@@ -90,9 +109,11 @@ jobs:
         working-directory: worker
         run: |
           echo "ADMIN_TOKEN=$CI_ADMIN_TOKEN" > .dev.vars
+          # seed 已移出 migrations，必须显式执行（migrations 只建表 / 不灌演示数据）
           DEMO_CANDLE_SECONDS=2 EPOCH=$(( $(date +%s) * 1000 + 20000 )) node scripts/generate-seed.mjs
           rm -rf .wrangler/state
           ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --local
+          ./node_modules/.bin/wrangler d1 execute fuse-protocol --local --file=./seed/seed.sql
       - name: Start wrangler dev
         working-directory: worker
         run: |
@@ -113,8 +134,8 @@ jobs:
         if: failure()
         run: tail -120 /tmp/wrangler.log || true
 
-  e2e:
-    name: e2e (optional: E2E_BASE_URL secret)
+  qa-logic:
+    name: qa chain logic (rejection / aborted receipt / nonce)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -127,22 +148,57 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: E2E against deployed URL (skips if secret missing)
+      - name: Chain negative cases (pure logic)
+        run: node qa/chain-logic.mjs
+
+  e2e:
+    name: e2e (required release gate)
+    # E2E 需要已部署的目标环境；PR（含 fork）不跑，主分支 push 与 workflow_dispatch 必跑。
+    # E2E_BASE_URL 必须指向「本次发布目标环境」（当前线上 / 预发），因此它是发布前门禁：
+    #   - secret 缺失 → 默认让 deploy 失败（不再静默跳过）；
+    #   - 应急放行 → workflow_dispatch 勾选 allow_e2e_skip=true，job summary 留痕。
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: E2E against target URL (required; missing secret fails unless explicitly allowed)
         working-directory: qa
         env:
           E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          ALLOW_E2E_SKIP: ${{ inputs.allow_e2e_skip }}
         run: |
           if [ -z "$E2E_BASE_URL" ]; then
-            echo "E2E_BASE_URL 未配置，跳过 e2e（生产部署后可在 workflow_dispatch 中手动跑）"
-            exit 0
+            if [ "$ALLOW_E2E_SKIP" = "true" ]; then
+              echo "::warning::E2E_BASE_URL 未配置，但 workflow_dispatch 显式 allow_e2e_skip=true —— 本次跳过 E2E（已留痕）"
+              {
+                echo "## ⚠️ E2E 被显式跳过"
+                echo ""
+                echo "- 原因：E2E_BASE_URL secret 未配置"
+                echo "- 授权：workflow_dispatch inputs.allow_e2e_skip=true"
+                echo "- 结论：本次部署**未经** E2E 验收，仅作应急放行；请尽快补齐 secret 并重跑。"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "::error::E2E_BASE_URL 未配置：e2e 已是 deploy 必需门禁。请配置 secret E2E_BASE_URL；如确需应急放行，请用 workflow_dispatch 勾选 allow_e2e_skip（会在 summary 留痕）。"
+            exit 1
           fi
           pnpm exec playwright install --with-deps chromium
           node e2e.mjs "$E2E_BASE_URL"
 
   deploy:
     name: deploy (production)
-    needs: [verify, contracts, ops-selftest, worker-smoke]
+    # E2E（含链上负向逻辑）是发布必需前置：缺 secret 会失败，除非 workflow_dispatch 显式 allow_e2e_skip。
+    needs: [verify, contracts, ops-selftest, worker-smoke, qa-logic, e2e]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
@@ -159,6 +215,20 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Guard: migrations 目录只允许 NNNN_*.sql
+        # S-2 防呆：任何非迁移 .sql 混入 migrations/ 都会让生产 apply 执行它（例如演示 seed）
+        run: |
+          bad=0
+          for f in worker/migrations/*.sql; do
+            base=$(basename "$f")
+            case "$base" in
+              [0-9][0-9][0-9][0-9]_*.sql) ;;
+              *) echo "::error::非迁移文件出现在 worker/migrations: $base（seed 请放 worker/seed/）"; bad=1 ;;
+            esac
+          done
+          if [ "$bad" != "0" ]; then exit 1; fi
+          echo "migrations OK:"
+          ls worker/migrations
       - name: Apply D1 migrations
         working-directory: worker
         env:
