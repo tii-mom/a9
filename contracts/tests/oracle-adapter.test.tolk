@@ -564,3 +564,25 @@ get fun `test C-3 rejected candle rolls back lastCandle and resubmits`() {
     expect(rcRound(rc, 1).candlesSeen).toEqual(1);
     expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
 }
+
+
+// C-2 defensive bound: index 255 would wrap index+1 back to 0.
+get fun `test C-2 candle index 255 is rejected before uint8 wrap`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val receiver = deployReceiver();
+    expect(setController(adapter, admin.address, receiver.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    val hash = signedHash(CHAIN_ID, receiver.address, SIGNED_ACTION_CANDLE, 1, 255, 0, 0, 300000 as uint128, 1 as uint256, T0 as uint64);
+    val body = SubmitSignedCandle {
+        roundId: 1, candleIndex: 255, periodStart: 0, periodEnd: 0,
+        twapPriceUsdE8: 300000, dataDigest: 1 as uint256, timestamp: T0 as uint64,
+        sigCount: 3, sigs: buildSigs(keys, eqArray3(), hash),
+    };
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
+        .toHaveFailedTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address, exitCode: Errors.CandleIndexOutOfRange });
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
+}
