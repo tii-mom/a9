@@ -316,12 +316,13 @@ fun onInternalMessage(in: InMessage) {
             if (verifySignatures(hash, msg.sigs, msg.sigCount, keys) < keys.threshold) {
                 throw Errors.NotEnoughSignatures;
             }
+            // C-2: store index+1 so "no record" (0) is distinct from accepted index 0.
             val lastRes = st.lastCandle.get(msg.roundId);
-            val last: uint8 = lastRes.isFound ? lastRes.loadValue() : 0;
-            if (msg.candleIndex <= last) {
+            val lastPlus: uint8 = lastRes.isFound ? lastRes.loadValue() : 0;
+            if ((msg.candleIndex as int) + 1 <= (lastPlus as int)) {
                 throw Errors.BadCandleOrder;
             }
-            st.lastCandle.set(msg.roundId, msg.candleIndex);
+            st.lastCandle.set(msg.roundId, (msg.candleIndex as uint8) + 1);
             val mask = st.usedMask.get(msg.roundId);
             val used: uint8 = mask.isFound ? mask.loadValue() : 0;
             st.usedMask.set(msg.roundId, used | SIGNED_ACTION_CANDLE);
@@ -382,6 +383,6 @@ get fun get_used_actions(roundId: uint8): OracleUsedActions {
     return {
         openUsed: (mask & SIGNED_ACTION_OPEN) != 0,
         closeUsed: (mask & SIGNED_ACTION_CLOSE) != 0,
-        lastCandleIndex: lastRes.isFound ? lastRes.loadValue() : 0,
+        lastCandleIndex: lastRes.isFound && lastRes.loadValue() > 0 ? lastRes.loadValue() - 1 : 0,
     };
 }

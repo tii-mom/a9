@@ -8,6 +8,7 @@ import "@acton/testing/expect"
 import "@contracts/constants"
 import "@contracts/types"
 import "@contracts/mocks/MockOracleReceiver"
+import "test-utils"
 
 const CHAIN_ID: uint32 = 1;
 const T0: uint32 = 1700000000;
@@ -428,4 +429,72 @@ get fun `test SetAdmin is admin-only and changes the admin`() {
     expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.2"), dest: adapter.address, body })))
         .toHaveSuccessfulTx<SetOracleAdmin>({ from: admin.address, to: adapter.address });
     expect(config(adapter).admin).toEqual(newAdmin.address);
+}
+
+
+// C-2: index 0 must be accepted (no record != index 0).
+get fun `test C-2 candle index 0 is accepted then monotonic`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val receiver = deployReceiver();
+    expect(setController(adapter, admin.address, receiver.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    val start: uint32 = 1700003600;
+    val end: uint32 = 1700007200;
+    val digest: uint256 = 0x55 as uint256;
+    val h0 = signedHash(CHAIN_ID, receiver.address, SIGNED_ACTION_CANDLE, 1, 0, start, end, 240000 as uint128, digest, T0 as uint64);
+    val body0 = SubmitSignedCandle {
+        roundId: 1, candleIndex: 0, periodStart: start, periodEnd: end,
+        twapPriceUsdE8: 240000, dataDigest: digest, timestamp: T0 as uint64,
+        sigCount: 3, sigs: buildSigs(keys, eqArray3(), h0),
+    };
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body: body0 })))
+        .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+    expect(state(receiver).candleCount).toEqual(1);
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
+    // duplicate index 0 rejected
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body: body0 })))
+        .toHaveFailedTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address, exitCode: Errors.BadCandleOrder });
+}
+
+// C-2 integration: signed candles forwarded to the REAL RoundController, starting at index 0.
+get fun `test C-2 real RC accepts adapter candle sequence from index 0`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val rc = deployRoundController(admin.address, adapter.address, admin.address, admin.address);
+    expect(setController(adapter, admin.address, rc.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    val openHash = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_OPEN, 1, 0, 0, 0, 300000 as uint128, 0 as uint256, T0 as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address,
+        body: signedOpenBody(openHash, keys, eqArray3(), 1, 300000, T0 as uint64) })))
+        .toHaveSuccessfulTx<SubmitSignedOpenRound>({ from: admin.address, to: adapter.address });
+    expect(rcStatus(rc, 1)).toEqual(STATUS_STAKING_OPEN);
+
+    advance(STAKE_DURATION_SECONDS as int);
+    expect(closeStaking(rc, admin.address, 0)).toHaveSuccessfulTx<CloseStaking>({ from: admin.address, to: rc.address });
+    expect(startObservation(rc, admin.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: admin.address, to: rc.address });
+    val start = rcRound(rc, 1).observationStart;
+    var i: uint8 = 0;
+    while (i < 3) {
+        val pStart: uint32 = (start + (i as uint64) * (CANDLE_SECONDS as uint64)) as uint32;
+        val pEnd: uint32 = (pStart as uint64 + (CANDLE_SECONDS as uint64)) as uint32;
+        testing.setNow(pEnd as int);
+        val ts: uint64 = pEnd as uint64;
+        val h = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_CANDLE, 1, i, pStart, pEnd, 300000 as uint128, (i as uint256) + 1, ts);
+        val body = SubmitSignedCandle {
+            roundId: 1, candleIndex: i, periodStart: pStart, periodEnd: pEnd,
+            twapPriceUsdE8: 300000, dataDigest: (i as uint256) + 1, timestamp: ts,
+            sigCount: 3, sigs: buildSigs(keys, eqArray3(), h),
+        };
+        expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
+            .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+        i += 1;
+    }
+    expect(rcRound(rc, 1).candlesSeen).toEqual(3);
 }
