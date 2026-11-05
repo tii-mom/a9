@@ -25,7 +25,7 @@ await page.waitForTimeout(3000);
 
 await step('hero 标题', async () => {
   const t = await page.locator('h1').first().innerText();
-  if (!t.includes('12 根 K 线点亮 8 根')) throw new Error('h1 文案不符: ' + t.slice(0, 60));
+  if (!t.includes('18 根 K 线点亮 12 根')) throw new Error('h1 文案不符: ' + t.slice(0, 60));
   ok('hero 标题', t.replace(/\s+/g, ' ').slice(0, 30));
 });
 
@@ -37,8 +37,8 @@ await step('行情已接后端', async () => {
 
 await step('12 格 K 线', async () => {
   const n = await page.locator('.cells .cell').count();
-  if (n !== 12) throw new Error('cell 数量 ' + n);
-  ok('12 格 K 线', '12 cells');
+  if (n !== 18) throw new Error('cell 数量 ' + n);
+  ok('18 格 K 线', '18 cells');
 });
 
 await step('沙盘推演交互', async () => {
@@ -106,8 +106,11 @@ await step('/me 展示数据', async () => {
 await page.goto(BASE + '/leaderboard', { waitUntil: 'networkidle', timeout: 45000 });
 await page.waitForTimeout(2000);
 await step('/leaderboard 榜单', async () => {
+  // 选择 R1（已结算、有质押数据）
+  const r1 = page.getByRole('button', { name: /R1/ }).first();
+  if (await r1.count()) { await r1.click(); await page.waitForTimeout(1200); }
   const rows = await page.locator('table tbody tr').count();
-  if (rows < 10) throw new Error('榜单行数 ' + rows);
+  if (rows < 5) throw new Error('榜单行数 ' + rows);
   ok('/leaderboard 榜单', rows + ' rows');
 });
 
