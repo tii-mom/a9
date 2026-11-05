@@ -9,10 +9,10 @@ import { sendTonConnectTransaction } from '../wallet';
 import { parseTonAddress, toRawAddress } from './address';
 import type { ChainConfig } from './config';
 import { explorerTxUrl } from './config';
-import { decodeClaimMessage, decodeJettonNotification, decodeUserAction } from './decode';
-import { ChainError, chainError, toChainError } from './errors';
+import { decodeJettonNotification } from './decode';
+import { ChainError, chainError, exitCodeError, toChainError } from './errors';
 import { RECEIPT_POLL_INTERVAL_MS, RECEIPT_TIMEOUT_MS } from './protocol';
-import { resolveJettonWalletAddress, waitForTransaction } from './rpc';
+import { matchesUserAction, resolveJettonWalletAddress, waitForTransaction } from './rpc';
 import { saveChainTx, type StoredChainTx } from './storage';
 import {
   prepareClaimTransaction,
@@ -102,6 +102,16 @@ interface RunContext {
   kind: ChainTxKind;
   prepared: PreparedTx;
   match: (tx: import('./rpc').OnchainTx) => boolean;
+}
+
+/** PreparedTx.meta.queryId（十进制字符串）→ bigint；'0'/空值表示该消息没有 queryId（如 SetReferrer）。 */
+function queryIdOf(prepared: PreparedTx): bigint | null {
+  try {
+    const text = String(prepared.meta.queryId ?? '').trim();
+    return text && text !== '0' ? BigInt(text) : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface SubmitRewardActionParams {
@@ -202,6 +212,14 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         persist(context, result);
         optionsRef.current.onSettled?.(context.kind);
         return result;
+      }
+      if (settle.stage === 'failed') {
+        // 身份命中但合约执行失败（aborted / bounced / 非 0 exit_code）：
+        // 绝不能置为 confirmed，也不能持久化为成功回执。
+        const error = exitCodeError(settle.tx?.exitCode ?? null);
+        patch({ phase: 'failed', error });
+        optionsRef.current.onSettled?.(context.kind);
+        return null;
       }
       if (settle.stage === 'wallet' && settle.tx) {
         // 已上链但尚未看到合约侧消息：保持「已发送」，可稍后刷新回执
@@ -319,12 +337,14 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         const expectedOp = prepared.meta.opcode;
         const expectedRound = prepared.meta.roundId ?? 0;
         const userRaw = toRawAddress(parseTonAddress(wallet.address));
-        const match = (tx: import('./rpc').OnchainTx): boolean => {
-          if (!tx.inSource || tx.inSource !== userRaw) return false;
-          const message = decodeClaimMessage(tx.inBody);
-          if (!message || message.op !== expectedOp) return false;
-          return expectedRound === 0 || message.roundId === expectedRound;
-        };
+        const match = (tx: import('./rpc').OnchainTx): boolean =>
+          matchesUserAction(tx, {
+            sourceRaw: userRaw,
+            op: expectedOp,
+            roundId: expectedRound,
+            // 快速重试时区分本次与上一笔：必须带本次 queryId
+            queryId: queryIdOf(prepared),
+          });
         return { kind: params.kind, prepared, match } satisfies RunContext;
       });
     },
@@ -345,11 +365,13 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         const expectedOp = prepared.meta.opcode;
         const expectedRound = params.roundId;
         const userRaw = toRawAddress(parseTonAddress(wallet.address));
-        const match = (tx: import('./rpc').OnchainTx): boolean => {
-          if (!tx.inSource || tx.inSource !== userRaw) return false;
-          const message = decodeUserAction(tx.inBody);
-          return !!message && message.op === expectedOp && message.roundId === expectedRound;
-        };
+        const match = (tx: import('./rpc').OnchainTx): boolean =>
+          matchesUserAction(tx, {
+            sourceRaw: userRaw,
+            op: expectedOp,
+            roundId: expectedRound,
+            queryId: queryIdOf(prepared),
+          });
         return { kind: params.kind, prepared, match } satisfies RunContext;
       });
     },
@@ -364,13 +386,13 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
         const prepared = prepareSetReferrerTransaction({ chain, wallet, referrer: params.referrer });
         const userRaw = toRawAddress(parseTonAddress(wallet.address));
         const referrerRaw = prepared.meta.referrer;
-        const match = (tx: import('./rpc').OnchainTx): boolean => {
-          if (!tx.inSource || tx.inSource !== userRaw) return false;
-          const message = decodeUserAction(tx.inBody);
-          if (!message || message.op !== prepared.meta.opcode) return false;
-          if (!referrerRaw) return true;
-          return !!message.referrer && toRawAddress(message.referrer) === referrerRaw;
-        };
+        const match = (tx: import('./rpc').OnchainTx): boolean =>
+          matchesUserAction(tx, {
+            sourceRaw: userRaw,
+            op: prepared.meta.opcode,
+            // SetReferrer payload 本身没有 queryId，用 referrer 地址区分身份
+            referrerRaw,
+          });
         return { kind: 'setReferrer', prepared, match } satisfies RunContext;
       });
     },
@@ -383,11 +405,12 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
       validateRewardAction({ chain, wallet });
       const prepared = prepareClaimUnlockedTransaction({ chain, wallet });
       const userRaw = toRawAddress(parseTonAddress(wallet.address));
-      const match = (tx: import('./rpc').OnchainTx): boolean => {
-        if (!tx.inSource || tx.inSource !== userRaw) return false;
-        const message = decodeUserAction(tx.inBody);
-        return !!message && message.op === prepared.meta.opcode;
-      };
+      const match = (tx: import('./rpc').OnchainTx): boolean =>
+        matchesUserAction(tx, {
+          sourceRaw: userRaw,
+          op: prepared.meta.opcode,
+          queryId: queryIdOf(prepared),
+        });
       return { kind: 'claimUnlocked', prepared, match } satisfies RunContext;
     });
   }, [begin]);

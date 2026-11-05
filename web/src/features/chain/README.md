@@ -76,13 +76,15 @@ ClaimPayload（104 bit）
 - **Jetton Wallet 解析**：本地缓存 → tonapi `/v2/accounts/{owner}/jettons` → toncenter `runGetMethod get_wallet_address`（raw / friendly / address-cell BOC 三种编码兜底）。
 - **发送**：复用 wallet 模块的单实例 TonConnectUI（`sendTonConnectTransaction`）；消息带 network（testnet=-3 / mainnet=-239）与 from（raw 地址）。
 - **BOC**：payload 为自包含 Cell/BOC 序列化（无 index/CRC），标准 base64 传给 TON Connect。
-- **回执轮询**：合约侧匹配（质押用 transfer_notification 的 depositNonce；领取/奖励/邀请/解锁用 in_msg.source + opcode + roundId/referrer），30s 仅见钱包外部交易时标记「已上链等待合约回执」，超时给可重试 TX_TIMEOUT。
+- **回执轮询**：合约侧匹配（质押用 transfer_notification 的 depositNonce；领取/奖励/邀请/解锁用 in_msg.source + opcode + roundId + **queryId** + referrer），30s 仅见钱包外部交易时标记「已上链等待合约回执」，超时给可重试 TX_TIMEOUT。
 
 ## 3. 状态机
 
 `idle → preparing → awaiting-signature → sent → confirming → confirmed`；异常分支 rejected / failed。
 
 支持交易种类：stake、claimPrincipal、claimReward、claimAll、claimRewardEarly、rollReward、setReferrer、claimUnlocked。
+
+**P0 FIX-5（回执误判成功）**：回执判定拆成两步——① `matchesUserAction` 只做身份匹配（inSource + op + roundId + **本次 queryId** + referrer）；② `isSuccessfulTx` 做执行成功判定（aborted=false、bounced=false、exitCode=0/null）。身份命中但执行失败（例如 ClaimPending=270）的 tx 返回 `stage='failed'`，由 `exitCodeError()` 映射为 `CONTRACT_REJECTED`（detail 形如 `exit_code=270 (ClaimPending)`），不再置 confirmed、不再持久化成功回执。质押沿用 depositNonce 身份匹配，但同样经过 `isSuccessfulTx` 成功门。早于本次 `sinceSec` 的旧失败 tx 不会上报（避免把上一笔失败当成本次失败）。
 
 ## 4. 配置来源（/api/config）
 

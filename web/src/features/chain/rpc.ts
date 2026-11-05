@@ -13,6 +13,7 @@ import {
 } from './address';
 import { beginCell, CellSlice, parseBocBase64, toBocBase64 } from './cell';
 import type { ChainConfig } from './config';
+import { decodeUserAction } from './decode';
 import { chainError, ChainError } from './errors';
 
 export interface ResolvedJettonWallet {
@@ -219,7 +220,15 @@ export interface OnchainTx {
   lt: string;
   /** 区块时间（unix 秒） */
   utime: number;
+  /**
+   * 交易 aborted：TON 上 compute phase 抛错/回滚时为 true。
+   * 注意 in_msg 的 op/roundId 仍然存在，所以匹配回执时必须显式排除，否则失败会被误判成功。
+   */
   aborted: boolean;
+  /** in_msg 是否被 bounce 回发送方（合约拒绝时常见） */
+  bounced: boolean;
+  /** compute phase exit_code（0 = 成功；null = 拿不到，例如 skipped） */
+  exitCode: number | null;
   /** 外部消息（用户钱包合约收到并处理） */
   external: boolean;
   inSource: string | null;
@@ -229,6 +238,52 @@ export interface OnchainTx {
   inBody: string | null;
 }
 
+/** 回执是否代表一次成功的合约执行（aborted / bounced / 非 0 exit_code 一律不算成功）。 */
+export function isSuccessfulTx(tx: OnchainTx): boolean {
+  if (tx.aborted || tx.bounced) return false;
+  if (tx.exitCode !== null && tx.exitCode !== 0) return false;
+  return true;
+}
+
+/** 用户操作回执的身份匹配条件（只做身份匹配，成功与否由 isSuccessfulTx 判定）。 */
+export interface UserActionMatch {
+  /** 发送者 raw 地址（"<wc>:<hex>"） */
+  sourceRaw: string;
+  op: number;
+  /** undefined/null = 不比较；ClaimAll 的 0 是有效值 */
+  roundId?: number | null;
+  /** undefined/null = 不比较（快速重试时必须传本次 queryId） */
+  queryId?: bigint | null;
+  /** 仅 SetReferrer：被邀请人 raw 地址 */
+  referrerRaw?: string | null;
+}
+
+/**
+ * 统一 matcher：inSource + op + roundId + queryId (+ referrer)。
+ * 不包含 aborted/exit_code 判断——waitForTransaction 会用 isSuccessfulTx 把「身份命中但执行失败」的 tx
+ * 判为 stage='failed' 并带回 exit_code，供 UI 展示失败原因。
+ */
+export function matchesUserAction(tx: OnchainTx, expected: UserActionMatch): boolean {
+  if (!tx.inSource || tx.inSource !== expected.sourceRaw) return false;
+  const message = decodeUserAction(tx.inBody);
+  if (!message || message.op !== expected.op) return false;
+  if (expected.roundId !== undefined && expected.roundId !== null && message.roundId !== expected.roundId) return false;
+  if (expected.queryId !== undefined && expected.queryId !== null) {
+    if (message.queryId === null || message.queryId !== expected.queryId) return false;
+  }
+  if (expected.referrerRaw !== undefined && expected.referrerRaw !== null) {
+    if (!message.referrer) return false;
+    let raw: string | null = null;
+    try {
+      raw = toRawAddress(message.referrer);
+    } catch {
+      raw = null;
+    }
+    if (raw !== expected.referrerRaw) return false;
+  }
+  return true;
+}
+
 interface ToncenterTxRaw {
   transaction_id?: { hash?: string; lt?: string };
   utime?: number;
@@ -236,9 +291,14 @@ interface ToncenterTxRaw {
     source?: string;
     destination?: string;
     value?: string;
+    bounced?: boolean;
     msg_data?: { body?: string };
   } | null;
-  description?: { aborted?: boolean };
+  description?: {
+    aborted?: boolean;
+    compute_ph?: { success?: boolean; exit_code?: number } | null;
+    action?: { result_code?: number; success?: boolean } | null;
+  };
 }
 
 interface ToncenterTxResponse {
@@ -267,11 +327,14 @@ function safeRawAddress(value: string | null): string | null {
 function mapToncenterTx(tx: ToncenterTxRaw): OnchainTx {
   const inSource = normalizeRaw(tx.in_msg?.source);
   const hash = tx.transaction_id?.hash ?? '';
+  const exitCodeRaw = tx.description?.compute_ph?.exit_code;
   return {
     hash,
     lt: tx.transaction_id?.lt ?? '0',
     utime: Number(tx.utime ?? 0),
     aborted: Boolean(tx.description?.aborted),
+    bounced: Boolean(tx.in_msg?.bounced),
+    exitCode: typeof exitCodeRaw === 'number' && Number.isFinite(exitCodeRaw) ? exitCodeRaw : null,
     external: !inSource,
     inSource: safeRawAddress(inSource),
     inDestination: tx.in_msg?.destination ? normalizeRaw(tx.in_msg.destination) : null,
@@ -332,13 +395,20 @@ export interface WaitForTxOptions {
 export interface WaitForTxResult {
   /** 命中的交易（合约侧优先，其次钱包侧） */
   tx: OnchainTx | null;
-  /** contract = 合约侧已确认；wallet = 仅确认外部消息上链；null = 超时未观察到 */
-  stage: 'contract' | 'wallet' | null;
+  /**
+   * contract = 合约侧执行成功；
+   * failed   = 身份匹配但合约 compute phase 失败（aborted / bounced / 非 0 exit_code，tx.exitCode 可读）；
+   * wallet   = 仅确认外部消息上链；
+   * null     = 超时未观察到。
+   */
+  stage: 'contract' | 'failed' | 'wallet' | null;
 }
 
 /**
  * 轮询回执：
- *   1) 合约地址出现 match(tx) → stage=contract
+ *   1) 合约地址出现 match(tx)：
+ *      - isSuccessfulTx → stage=contract
+ *      - 否则（aborted / bounced / 非 0 exit_code）→ stage=failed（带回 tx.exitCode）
  *   2) 超过 30s 只有钱包外部交易 → stage=wallet（已签名发出）
  *   3) 超时 → stage=null
  */
@@ -354,13 +424,18 @@ export async function waitForTransaction(options: WaitForTxOptions): Promise<Wai
     try {
       const targetTxs = await fetchRecentTransactions(options.chain, options.targetAddress, 20, options.signal);
       const matched = targetTxs.find((tx) => tx.utime >= options.sinceSec - 30 && options.match(tx));
-      if (matched) return { tx: matched, stage: 'contract' };
+      if (matched) {
+        if (isSuccessfulTx(matched)) return { tx: matched, stage: 'contract' };
+        // 身份匹配但执行失败：只上报「本次窗口内新鲜」的失败tx，避免把上一笔旧失败当成本次失败
+        if (matched.utime >= options.sinceSec) return { tx: matched, stage: 'failed' };
+      }
     } catch {
       /* 单次查询失败不终止轮询 */
     }
     try {
       const walletTxs = await fetchRecentTransactions(options.chain, options.walletAddress, 10, options.signal);
-      const external = walletTxs.find((tx) => tx.external && tx.utime >= options.sinceSec - 30);
+      // 外部消息也可能 aborted（如 seqno 冲突）：只有成功执行的外部 tx 才算「已发送」
+      const external = walletTxs.find((tx) => tx.external && tx.utime >= options.sinceSec - 30 && isSuccessfulTx(tx));
       if (external && !walletTx) {
         walletTx = external;
         options.onWalletTx?.(external);
