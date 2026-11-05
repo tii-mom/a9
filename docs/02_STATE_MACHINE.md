@@ -1,5 +1,7 @@
 # 02 --- 轮次状态机与结算流程
 
+> **口径声明（V3）**：报名窗口 48h、上一轮结算后 48h 开启下一轮、观察窗口 48h、每轮奖励 7 亿、无人质押照常启动观察。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+
 ## 1. 状态定义
 
 每轮独立状态：
@@ -80,35 +82,52 @@ OBSERVING -> ORACLE_PAUSED -> OBSERVING
 
 轮次编号从1开始。
 
-## 4. 质押窗口
+## 4. 质押窗口（V3：48 小时）
 
-建议默认质押期为7天，但该值尚未获用户确认，必须作为部署配置。
+V3 已确认报名窗口为 **48 小时（172,800 秒）**，在**上一轮结算完成后 48 小时**开启。
 
-参数： - `stakeOpenAt` - `stakeCloseAt` - `stakeDuration` - `roundId`
+参数： - `stakeOpenAt` - `stakeCloseAt` - `stakeDuration` - `stakeGap` - `roundId` - `prevSettledAt`
+
+时间定义：
+
+``` text
+stakeOpenAt  = prevSettledAt + STAKE_GAP_SECONDS      // 上一轮结算后 48h；R1 由项目方指定
+stakeCloseAt = stakeOpenAt + STAKE_DURATION_SECONDS   // 报名窗口 48h
+stakeDuration = stakeCloseAt - stakeOpenAt = 172,800  // 秒
+```
 
 规则： 1. 只有 `STAKING_OPEN` 状态接受新质押。 2. 当前链上时间必须满足
 `stakeOpenAt <= now < stakeCloseAt`。 3.
 质押窗口结束后，所有新质押都必须拒绝并退款。 4.
 同一地址可多次质押，但每笔必须使用不同
 nonce；合约将其聚合到该地址的总质押。 5.
-若没有任何有效质押，不启动价格观察，不视为价格失败，不销毁奖励额度；应按预先配置的无参与者处理流程重新开放或等待项目方确认。此行为属于上线阻断参数。
+若没有任何有效质押，**本轮照常启动并进入观察**（V3 已裁决，见 §4.1）；不跳过轮次、不延长窗口、不视为价格失败。
+6. 第 1 轮的 `stakeOpenAt` 由项目方在 P0 冻结、配置校验通过后指定；之后各轮全部由上一轮结算时间推导，不人工指定。
+
+### 4.1 无人质押分支
+
+1.  报名窗口关闭时 `totalAcceptedStake == 0`，仍进入 `STAKING_CLOSED` → `OBSERVING`。
+2.  观察与判定与正常轮次一致（12 根 4 小时 K 线，≥8 根达标即通过）。
+3.  **失败**：照常销毁本轮 7 亿奖励（无本金可销毁），进入 `FAILED_PERMANENT`。
+4.  **通过**：奖励按质押比例分配；1 名质押人获得全部奖励；0 名质押人时奖励无接收人，**建议销毁**（D-18b 待确认）。
 
 ## 5. 48小时观察窗口的精确边界
 
-为避免部分K线和时区歧义，建议以 UTC 4小时边界对齐。
+V3 已确认：**报名窗口关闭即进入观察**，不额外等待、不做 4 小时边界取整。
 
 定义： - `CANDLE_SECONDS = 14,400` - `CANDLE_COUNT = 12` -
 `OBSERVATION_SECONDS = 172,800`
 
-质押关闭后，观察开始时间取不早于 `stakeCloseAt` 的下一个UTC 4小时边界：
-
-`observationStart = ceil(stakeCloseAt / 14400) × 14400`
+`observationStart = stakeCloseAt`
 
 第 i 根K线（i从0开始）： -
 `periodStart = observationStart + i × 14400` -
 `periodEnd = periodStart + 14400`
 
 第12根结束时间： `observationEnd = observationStart + 172800`
+
+若主网要求 K 线对齐 UTC 4 小时边界，应在**开轮时**把 `stakeOpenAt` 对齐到 UTC 4h 整点（这样
+`stakeCloseAt` 自然落在 4h 边界），禁止在报名结束后对 `observationStart` 做 `ceil` 平移（会产生无观察数据的空窗）。
 
 观察窗口必须使用12个连续完整区间。不得由前端或管理员任意指定起止时间。
 
@@ -150,7 +169,7 @@ nonce；合约将其聚合到该地址的总质押。 5.
 
 进入 `SETTLING_SUCCESS` 后： 1. 禁止继续质押。 2. 固化
 `totalStake`、用户 stake 账本及奖励权重快照。 3. 本金变为可领取状态。 4.
-奖励池变为可领取状态。 5. 用户主动调用 `claimPrincipal` 和
+奖励池变为可领取状态（本轮 7 亿；**一次性发放、无归属期**，V3 已确认）。 5. 用户主动调用 `claimPrincipal` 和
 `claimReward`。 6. 每个用户、每轮、每种领取类型均有独立幂等标记。 7.
 全部操作完成后可标记 `SUCCEEDED`；如果采用 pull claim，状态可先进入
 `SUCCEEDED`，未领取余额继续留在金库。
@@ -159,7 +178,7 @@ nonce；合约将其聚合到该地址的总质押。 5.
 
 进入 `SETTLING_FAILURE` 后： 1. 立即冻结该轮所有质押和奖励领取。 2.
 冻结本轮用户 stake ledger。 3. 计算
-`expectedStakeBurn = totalAcceptedStake`。 4. 请求销毁本轮 `750,000,000`
+`expectedStakeBurn = totalAcceptedStake`。 4. 请求销毁本轮 `700,000,000`
 奖励。 5. 请求销毁本轮全部已接受质押本金。 6. 每个 burn 请求必须有唯一
 `burnId`。 7. Jetton Master 确认供应量已减少后，向协议发送 burn
 acknowledgement。 8. 协议核对两类销毁金额和 burnId。 9.
@@ -182,7 +201,7 @@ TON 合约之间异步交互，不得假设多个合约可以在同一原子事�
 
 ## 11. 后续轮次
 
-上一轮进入 `SUCCEEDED` 或 `FAILED_PERMANENT` 后，才允许开启下一轮。
+上一轮进入 `SUCCEEDED` 或 `FAILED_PERMANENT` 后，再等待 **48 小时**（`prevSettledAt + 48h`）才允许开启下一轮报名。
 
 失败轮次不会导致价格阶梯重置： - Round 1 失败，Round 2 目标仍为 4×P0。 -
 Round 2 失败，Round 3 目标仍为 8×P0。 - 依此类推。

@@ -5,8 +5,8 @@
  * 设计目标：
  *  - 可复现：所有地址/数量/成交由固定种子推导，时间以 EPOCH（默认 now）为锚点。
  *  - 幂等：先 DELETE 再 INSERT OR REPLACE，可反复执行（本地/远端都安全）。
- *  - 与 worker/src/sources/demo.ts 的判定规则一致：R1 10/12 成功、R2 6/12 失败（销毁 991.5M）、
- *    R3 观察中（已收盘 5 根，按 DEMO_CANDLE_SECONDS 继续推进）、R4..R10 UNOPENED。
+ *  - 与 worker/src/sources/demo.ts 的判定规则一致：R1 10/12 成功、R2 6/12 失败（销毁 941.5M）、
+ *    R3 观察中（已收盘 6 根，按 DEMO_CANDLE_SECONDS 继续推进）、R4..R10 UNOPENED。
  *  - K 线不写进 seed：由 Worker 的 reconcile 依据 observation_start 确定性回填（单一事实来源）。
  *
  * 用法：
@@ -25,19 +25,20 @@ const OUT_FILE = join(WORKER_ROOT, 'migrations', 'seed.sql');
 
 const TOKEN_SCALE = 1_000_000_000n;
 const TOKEN_DECIMALS = 9;
-const P0_USD_E8 = 400_000n;
+const P0_USD_E8 = 100_000n; // $0.001（V3）
 const USD_SCALE = 100_000_000n;
 const ROUND_COUNT = 10;
 const CANDLE_COUNT = 12;
 const MIN_QUALIFIED_CANDLES = 8;
 const CANDLE_SECONDS = 14_400;
 const OBSERVATION_SECONDS = CANDLE_SECONDS * CANDLE_COUNT;
-const ROUND_REWARD_TOKENS = 750_000_000n;
+const ROUND_REWARD_TOKENS = 700_000_000n; // 70% / 10 轮
 const TOTAL_SUPPLY_TOKENS = 10_000_000_000n;
 const ROUND_REWARD_RAW = ROUND_REWARD_TOKENS * TOKEN_SCALE;
 const TOTAL_SUPPLY_RAW = TOTAL_SUPPLY_TOKENS * TOKEN_SCALE;
 const RISK_DISCLOSURE_VERSION = 1;
-const STAKE_DURATION_SECONDS = 7 * 24 * 3600;
+const STAKE_DURATION_SECONDS = 48 * 3600; // V3：报名窗口 48h
+const STAKE_GAP_SECONDS = 48 * 3600; // 上一轮结算后 48h 开启下一轮
 
 const EPOCH = Number(process.env.EPOCH || Date.now());
 const DEMO_CANDLE_SECONDS = Math.max(1, Number(process.env.DEMO_CANDLE_SECONDS || 90));
@@ -110,8 +111,8 @@ const ROUND_STAKES_TOKENS = {
 // R3：已收盘 6 根（4 达标 / 2 未达标），第 7 根为 live；之后按 C 继续推进
 const R3_SEEDED_CANDLES = 6;
 const R3_OBSERVATION_START = EPOCH - R3_SEEDED_CANDLES * C;
-const R3_STAKE_CLOSE = R3_OBSERVATION_START - 30 * 60 * 1000;
-const R3_STAKE_OPEN = R3_STAKE_CLOSE - 3 * DAY;
+const R3_STAKE_CLOSE = R3_OBSERVATION_START;
+const R3_STAKE_OPEN = R3_STAKE_CLOSE - 2 * DAY;
 
 const R1_STAKE_CLOSE = EPOCH - 21 * DAY;
 const R2_STAKE_CLOSE = EPOCH - 14 * DAY;
@@ -134,7 +135,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
 
   if (roundId === 1) {
     state = 'SUCCEEDED';
-    stakeOpen = n(R1_STAKE_CLOSE - 7 * DAY);
+    stakeOpen = n(R1_STAKE_CLOSE - 2 * DAY);
     stakeClose = n(R1_STAKE_CLOSE);
     observationStart = n(R1_STAKE_CLOSE);
     observationEnd = n(R1_STAKE_CLOSE + CANDLE_COUNT * C);
@@ -146,7 +147,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     updatedAt = R1_STAKE_CLOSE + CANDLE_COUNT * C;
   } else if (roundId === 2) {
     state = 'FAILED_PERMANENT';
-    stakeOpen = n(R2_STAKE_CLOSE - 7 * DAY);
+    stakeOpen = n(R2_STAKE_CLOSE - 2 * DAY);
     stakeClose = n(R2_STAKE_CLOSE);
     observationStart = n(R2_STAKE_CLOSE);
     observationEnd = n(R2_STAKE_CLOSE + CANDLE_COUNT * C);
@@ -369,7 +370,7 @@ for (let i = 0; i < 10; i++) {
 const eventRows = [
   [n(R1_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R1 质押窗口开启（演示种子）')],
   [n(R1_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R1 质押窗口关闭：12 个地址，214,800,000 A9')],
-  [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：10/12 根达标，本金不销毁，7.5 亿奖励开放领取')],
+  [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：10/12 根达标，本金不销毁，7 亿奖励开放领取')],
   [n(R2_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R2 质押窗口开启（演示种子）')],
   [n(R2_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R2 质押窗口关闭：12 个地址，241,500,000 A9')],
   [
@@ -377,7 +378,7 @@ const eventRows = [
     q('warn'),
     q('system'),
     q('ROUND_FAILED_PERMANENT'),
-    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 750,000,000 + 质押本金 241,500,000 = 991,500,000 A9'),
+    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 700,000,000 + 质押本金 241,500,000 = 991,500,000 A9'),
   ],
   [
     n(R2_STAKE_CLOSE + CANDLE_COUNT * C + 60_000),
@@ -388,7 +389,7 @@ const eventRows = [
   ],
   [n(R3_STAKE_OPEN), q('info'), q('system'), q('ROUND_OPENED'), q('R3 质押窗口开启（演示种子）')],
   [n(R3_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R3 质押窗口关闭：12 个地址，386,200,000 A9')],
-  [n(R3_OBSERVATION_START), q('info'), q('oracle'), q('OBSERVATION_STARTED'), q('R3 观察窗口开始：12 根，已收盘 5 根')],
+  [n(R3_OBSERVATION_START), q('info'), q('oracle'), q('OBSERVATION_STARTED'), q('R3 观察窗口开始：12 根，已收盘 6 根')],
   [n(EPOCH), q('info'), q('admin'), q('SEED_APPLIED'), q('演示种子数据写入完成（含 10 轮 / 36 笔质押 / 2 笔销毁）')],
 ];
 
@@ -409,6 +410,7 @@ const configRows = [
   ['min_qualified_candles', String(MIN_QUALIFIED_CANDLES)],
   ['risk_disclosure_version', String(RISK_DISCLOSURE_VERSION)],
   ['stake_duration_seconds', String(STAKE_DURATION_SECONDS)],
+  ['stake_gap_seconds', String(STAKE_GAP_SECONDS)],
   ['observation_seconds', String(OBSERVATION_SECONDS)],
   ['network', 'demo'],
   ['data_source', 'demo'],
@@ -455,7 +457,7 @@ const statementChunks = [];
 statementChunks.push(
   '-- A9 引信协议 — 演示种子数据（由 worker/scripts/generate-seed.mjs 生成，请勿手改）\n' +
     '-- EPOCH=' + EPOCH + ' (' + new Date(EPOCH).toISOString() + '), DEMO_CANDLE_SECONDS=' + DEMO_CANDLE_SECONDS + '\n' +
-    '-- 状态：R1 SUCCEEDED(10/12)、R2 FAILED_PERMANENT(6/12, 销毁 991.5M)、R3 OBSERVING(5/12 已收盘)、R4..R10 UNOPENED\n' +
+    '-- 状态：R1 SUCCEEDED(10/12)、R2 FAILED_PERMANENT(6/12, 销毁 941.5M)、R3 OBSERVING(5/12 已收盘)、R4..R10 UNOPENED\n' +
     '-- 幂等：先清空业务表再 INSERT OR REPLACE，可安全重复执行。\n',
 );
 statementChunks.push('DELETE FROM claims;');
@@ -574,10 +576,10 @@ writeFileSync(OUT_FILE, statementChunks.join('\n'), 'utf8');
 
 const burnedInvariant = ROUND_REWARD_RAW + ROUND_STAKES_TOKENS[2] * TOKEN_SCALE;
 const ok =
-  burnedInvariant === 750_000_000n * TOKEN_SCALE + 241_500_000n * TOKEN_SCALE &&
+  burnedInvariant === 700_000_000n * TOKEN_SCALE + 241_500_000n * TOKEN_SCALE &&
   ADDRESSES.length === 12 &&
   new Set(ADDRESSES).size === 12 &&
-  ROUND_REWARD_RAW * BigInt(ROUND_COUNT) === 7_500_000_000n * TOKEN_SCALE &&
+  ROUND_REWARD_RAW * BigInt(ROUND_COUNT) === 7_000_000_000n * TOKEN_SCALE &&
   TOTAL_SUPPLY_RAW === 10_000_000_000n * TOKEN_SCALE;
 
 console.log('seed.sql 已生成 →', OUT_FILE);
@@ -586,7 +588,7 @@ console.log('  DEMO_CANDLE_SECONDS  :', DEMO_CANDLE_SECONDS);
 console.log('  rounds               :', roundRows.length, '(R1 SUCCEEDED / R2 FAILED_PERMANENT / R3 OBSERVING / R4-R10 UNOPENED)');
 console.log('  stakes               :', stakeRows.length, '（12 地址 × R1/R2/R3）');
 console.log('  claims               :', claimRows.length);
-console.log('  burn_ledger          :', burnRows.length, '(R2 reward 750,000,000 + principal 241,500,000 = 991,500,000 A9)');
+console.log('  burn_ledger          :', burnRows.length, '(R2 reward 700,000,000 + principal 241,500,000 = 991,500,000 A9)');
 console.log('  candles              :', candleSeedRows.length, '(R1 12 / R2 12 / R3 6)');
 console.log('  trades               :', tradeRows.length, '/ book_levels:', bookRows.length, '/ admin_events:', eventRows.length);
 console.log('  R3 已收盘 K 线       :', R3_SEEDED_CANDLES, '（4 达标 / 2 未达标，第 7 根为 live）');

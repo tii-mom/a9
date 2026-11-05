@@ -8,7 +8,7 @@
  * 与 worker/scripts/generate-seed.mjs 保持同一份「演示数据集定义」：
  *   - 12 个确定性 UQ 地址（SHA-256("fuse-protocol-demo-wallet-{i}") → base64url）
  *   - 每轮总质押：R1 214.8M / R2 241.5M / R3 386.2M，按固定 bps 权重拆分
- *   - R2 两笔销毁：750,000,000 奖励 + 241,500,000 本金
+ *   - R2 两笔销毁：700,000,000 奖励 + 241,500,000 本金
  * 差异仅在于时间锚点（重置时刻 vs seed 执行时刻）与成交/盘口由 demo source 现场生成。
  */
 import type { Env } from './env';
@@ -234,5 +234,4 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
     now,
   );
 }
-
 

@@ -1,5 +1,7 @@
 # 04 --- 智能合约架构、存储与消息接口
 
+> **口径声明（V3）**：RewardVault 70 亿 / 每轮 7 亿；报名窗口 48h（上一轮结算后 48h 开启）；无人质押启动观察；奖励一次性发放。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+
 ## 1. 推荐架构
 
 建议采用模块化合约，避免单一合约承担全部逻辑。
@@ -67,8 +69,8 @@ roundId、nonce 和风险确认 payload。 - 记录每轮每个用户的质押�
 
 ### 2.4 RewardVault
 
-职责： - 持有75亿社区奖励。 - 维护十轮独立的750,000,000奖励账本。 -
-成功时允许符合资格的用户领取。 - 失败时销毁对应轮次的7.5亿奖励。 -
+职责： - 持有70亿社区奖励。 - 维护十轮独立的700,000,000（7亿）奖励账本。 -
+成功时允许符合资格的用户一次性领取（无归属期）。 - 失败时销毁对应轮次的7亿奖励。 -
 不允许将失败轮次额度转移到其他轮次。
 
 ### 2.5 OracleAdapter
@@ -96,7 +98,9 @@ ProtocolConfig {
     oracleAdapter: address
     p0UsdE8: uint128
     tokenDecimals: uint8
-    roundRewardRaw: uint128
+    roundRewardRaw: uint128     // 700,000,000 × 10^decimals
+    stakeDurationSeconds: uint32 // 172800：报名窗口 48h
+    stakeGapSeconds: uint32      // 172800：上一轮结算后 48h 开启下一轮
     candleSeconds: uint32       // 14400
     candleCount: uint8          // 12
     minQualifiedCandles: uint8  // 8
@@ -228,7 +232,7 @@ burn。
 
 1.  Controller 将轮次设为 `SETTLING_FAILURE`，冻结所有 claim。
 2.  Controller 创建唯一 `burnId = hash(roundId, failure, configHash)`。
-3.  RewardVault 对本轮7.5亿发送 burn 请求。
+3.  RewardVault 对本轮7亿发送 burn 请求。
 4.  StakingVault 对本轮 `totalAcceptedStakeRaw` 发送 burn 请求。
 5.  Jetton Wallet 执行标准 burn 操作。
 6.  Jetton Master 接收 `burn_notification` 并减少 total_supply。
@@ -245,7 +249,7 @@ Master，必须另行设计可信的销毁确认方案；不能把普通 keeper
 
 为避免链上无界循环，采用 pull claim。
 
-暂定的 MVP 权重公式（需项目方确认）：
+V3 已确认的纯质押比例公式（D-14，不再叠加任何贡献积分）：
 
 `weight[user] = acceptedStake[user]`
 
@@ -271,10 +275,21 @@ Master，必须另行设计可信的销毁确认方案；不能把普通 keeper
 
 ---
 
-## 9. V2 变更注记（2026-11-05）
+## 10. V2 变更注记（2026-11-05）
 
 - **ContributionRegistry（§2.6）已移除**：奖励算法确定为纯质押比例，不再引入 AI 对战/贡献积分。若未来重启该方向，须重新走 D-15 决策与反作弊设计。
 - **OracleAdapter（§2.5）本期不接入第三方预言机**：K 线由任意用户手动触发提交（测试网模式），适配器保留接口与配置版本字段，主网前必须恢复签名验证（见 docs/00 §3 第 3 条）。
 - **burn acknowledgement 扩展（§2.1、§7）**：优先采用「标准 TEP-74 burn + 链下对账 + 多签确认」替代自研 ack 回调；如确需扩展，控制在最小回调面并单独审计（见 docs/00 §5）。
 - 其余消息接口（opcode 表）与存储结构不变。
+
+---
+
+## 11. V3 变更注记（2026-11-05）
+
+- **奖励金库总量**：RewardVault 持有 **70 亿**（原 75 亿），十轮独立账本每轮 **700,000,000**（7 亿），合计 10 × 7 亿 = 70 亿。
+- **报名窗口参数**：新增 `stakeDurationSeconds = 172,800`（48h）与 `stakeGapSeconds = 172,800`（上一轮结算后 48h 开启）；`stakeOpenAt = prevSettledAt + stakeGap`，`stakeCloseAt = stakeOpenAt + stakeDuration`，报名关闭即进入观察（`observationStart = stakeCloseAt`）。
+- **无人质押分支**：报名关闭时 `totalAcceptedStake == 0` 仍启动观察（不跳过、不延期、不判负）；失败照常销毁本轮 7 亿奖励，通过则按质押比例分配（0 人质押且通过时奖励建议销毁，D-18b 待确认）。
+- **奖励领取**：成功后**一次性发放、无归属期**（D-16/D-17 已定）；`ClaimReward` 仍是 pull claim，需幂等。
+- **价格参数**：`p0UsdE8 = 100,000`（P0 = $0.001），`target(roundId) = P0 × 2^roundId`，R10 = $1.024；`roundRewardRaw = 700,000,000 × 10^decimals`。
+- **销毁口径**：失败轮销毁 `ROUND_REWARD + totalAcceptedStake`；无人质押时本金部分为 0。
 

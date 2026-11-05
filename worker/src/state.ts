@@ -16,6 +16,7 @@ import {
   P0_USD_E8,
   ROUND_REWARD_RAW,
   STAKE_DURATION_SECONDS,
+  STAKE_GAP_SECONDS,
   TOTAL_SUPPLY_RAW,
   RISK_DISCLOSURE_VERSION,
   CANDLE_SECONDS,
@@ -102,6 +103,7 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
     minQualifiedCandles: numberFrom(kv, 'min_qualified_candles', MIN_QUALIFIED_CANDLES),
     riskDisclosureVersion: numberFrom(kv, 'risk_disclosure_version', RISK_DISCLOSURE_VERSION),
     stakeDurationSeconds: numberFrom(kv, 'stake_duration_seconds', STAKE_DURATION_SECONDS),
+    stakeGapSeconds: numberFrom(kv, 'stake_gap_seconds', STAKE_GAP_SECONDS),
     observationSeconds: numberFrom(kv, 'observation_seconds', candleSeconds * CANDLE_COUNT),
     dataSource,
     network: networkValue === 'mainnet' ? 'mainnet' : networkValue === 'demo' ? 'demo' : 'testnet',
@@ -401,8 +403,9 @@ export async function advanceRound(env: Env, actor: string, now = Date.now()): P
 
 /** 开启指定轮次（admin advance 与 demo autoplay 共用；CAS 保证并发幂等）。 */
 async function openRoundAt(env: Env, params: Params, roundId: number, now: number, actor: string): Promise<number> {
-  const stakeOpenAt = now;
-  const stakeCloseAt = now + stakeWindowMs(params);
+  // V3：真实模式下一轮报名在「上一轮结算后 48h」开启；演示模式立即开启便于循环展示。
+  const stakeOpenAt = params.dataSource === 'demo' ? now : now + params.stakeGapSeconds * 1000;
+  const stakeCloseAt = stakeOpenAt + stakeWindowMs(params);
   const observationStart = ceilTo(stakeCloseAt, params.candleMs);
   const observationEnd = observationStart + params.candleCount * params.candleMs;
   const target = targetPriceFor(roundId, params.p0UsdE8);

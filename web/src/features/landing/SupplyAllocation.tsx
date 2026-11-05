@@ -25,16 +25,16 @@ export function SupplyAllocation({ cfg, rounds, copy }: Props) {
         </div>
         <div className="alloc" role="img" aria-label={copy.supply.aria}>
           {letters.map((letter, index) => (
-            <div className={'r ' + letter} style={{ flex: '7.5 1 0' }} key={index}>
+            <div className={'r ' + letter} style={{ flex: '7 1 0' }} key={index}>
               <b>{'R' + (index + 1)}</b>
-              <span>7.5%</span>
+              <span>7%</span>
             </div>
           ))}
-          <div className="liq" style={{ flex: '10 1 0' }}>
+          <div className="liq" style={{ flex: '13 1 0' }}>
             <b>{copy.supply.liq}</b>
             <span>10%</span>
           </div>
-          <div className="team" style={{ flex: '10 1 0' }}>
+          <div className="team" style={{ flex: '12 1 0' }}>
             <b>{copy.supply.team}</b>
             <span>10%</span>
           </div>

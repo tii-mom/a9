@@ -29,7 +29,7 @@ function DataSourceChip({ value }: { value: string | null | undefined }) {
 /** 已知冻结项的英文标签/取值（后端 label/value 为中文数据，EN 界面用本地映射兜底）。 */
 const FROZEN_EN: Record<string, { label: string; value?: string }> = {
   P0_USD_E8: { label: 'P0 initial reference price' },
-  ROUND_REWARD_RAW: { label: 'Reward budget per round', value: '750,000,000 A9 × 10 rounds = 7,500,000,000' },
+  ROUND_REWARD_RAW: { label: 'Reward budget per round', value: '700,000,000 A9 × 10 rounds = 7,000,000,000' },
   PRICE_LADDER: { label: 'Price ladder P0×2ⁿ', value: '10 rounds / up to 1024×P0' },
   MIN_QUALIFIED_CANDLES: { label: 'Qualified candle threshold', value: '8 / 12 (otherwise permanently closed and principal burned)' },
   BURN_SEMANTICS: { label: 'Failure burn semantics', value: 'Reward budget + all accepted principal of this round' },

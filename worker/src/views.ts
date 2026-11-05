@@ -132,7 +132,7 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
     tonUsdE8: params.tonUsdE8,
     frozenParams: [
       { key: 'P0_USD_E8', label: 'P0 初始参考价', status: 'frozen', value: '$' + (Number(params.p0UsdE8) / params.usdPriceScale).toFixed(5) },
-      { key: 'ROUND_REWARD_RAW', label: '每轮奖励预算', status: 'frozen', value: '750,000,000 A9 × 10 轮 = 7,500,000,000' },
+      { key: 'ROUND_REWARD_RAW', label: '每轮奖励预算', status: 'frozen', value: '700,000,000 A9 × 10 轮 = 7,000,000,000' },
       { key: 'PRICE_LADDER', label: '价格阶梯 P0×2ⁿ', status: 'frozen', value: '10 轮 / 最高 1024×P0' },
       { key: 'MIN_QUALIFIED_CANDLES', label: '达标 K 线阈值', status: 'frozen', value: params.minQualifiedCandles + ' / ' + params.candleCount + '（不足即永久关闭并销毁本金）' },
       { key: 'BURN_SEMANTICS', label: '失败销毁语义', status: 'frozen', value: '奖励额度 + 本轮全部已接受质押本金' },

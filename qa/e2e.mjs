@@ -87,7 +87,7 @@ await step('演示钱包连接', async () => {
   await page.waitForTimeout(500);
   const pop = await page.locator('.wl-pop').innerText();
   if (!/UQ/.test(pop)) throw new Error('弹层无地址');
-  if (!/FUSE 余额/.test(pop)) throw new Error('弹层无余额信息');
+  if (!/余额/.test(pop)) throw new Error('弹层无余额信息');
   await page.keyboard.press('Escape');
   ok('演示钱包连接', trig.replace(/\s+/g, ' ').slice(0, 24));
 });

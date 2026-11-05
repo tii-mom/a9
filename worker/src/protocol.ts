@@ -8,13 +8,13 @@ export const TOKEN_DECIMALS = 9;
 export const TOKEN_SCALE = 1_000_000_000n;
 export const USD_SCALE = 100_000_000n;
 
-/** P0 = $0.004 → USD_E8 */
-export const P0_USD_E8 = 400_000n;
+/** P0 = $0.001 → USD_E8（V3：第 10 轮目标 = 1024 × P0 = $1.024） */
+export const P0_USD_E8 = 100_000n;
 export const PRICE_MULTIPLIER = 2;
 export const ROUND_COUNT = 10;
 
-/** 每轮奖励预算 750,000,000 A9（raw） */
-export const ROUND_REWARD_RAW = 750_000_000n * TOKEN_SCALE;
+/** 每轮奖励预算 700,000,000 A9（raw）：70% 奖励池 ÷ 10 轮 */
+export const ROUND_REWARD_RAW = 700_000_000n * TOKEN_SCALE;
 /** 初始总供应 10,000,000,000 A9（raw） */
 export const TOTAL_SUPPLY_RAW = 10_000_000_000n * TOKEN_SCALE;
 
@@ -23,8 +23,10 @@ export const CANDLE_SECONDS = 14_400;
 export const CANDLE_COUNT = 12;
 export const MIN_QUALIFIED_CANDLES = 8;
 export const OBSERVATION_SECONDS = CANDLE_SECONDS * CANDLE_COUNT;
-/** 真实规格：质押窗口建议 7 天（D-10，待项目方确认） */
-export const STAKE_DURATION_SECONDS = 7 * 24 * 3600;
+/** 真实规格：报名窗口 48 小时（V3 决策：上一轮结算后 48h 开启，窗口 48h） */
+export const STAKE_DURATION_SECONDS = 48 * 3600;
+/** 轮次间隔：上一轮结算完成后 48 小时开启下一轮报名 */
+export const STAKE_GAP_SECONDS = 48 * 3600;
 export const RISK_DISCLOSURE_VERSION = 1;
 
 /** 演示加速：默认 90s / 根（wrangler.toml 可覆盖） */
@@ -76,8 +78,10 @@ export interface Params {
   candleCount: number;
   minQualifiedCandles: number;
   riskDisclosureVersion: number;
-  /** 真实规格质押期（秒） */
+  /** 真实规格报名窗口（秒）：48h */
   stakeDurationSeconds: number;
+  /** 轮次间隔（秒）：上一轮结算后 48h 开启下一轮 */
+  stakeGapSeconds: number;
   observationSeconds: number;
   dataSource: DataSource;
   network: 'mainnet' | 'testnet' | 'demo';

@@ -1,5 +1,7 @@
 # 09 — 前端与 Cloudflare 后端实施基线（V1.0）
 
+> **口径声明（V3）**：P0 = $0.001（USD_E8 = "100000"）、每轮奖励 7 亿（700M）、报名 48h、失败 100% 罚没。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+>
 > 本文件是本次开发任务的**唯一协作契约**。所有参与者（Lead / frontend-dev / app-dev / backend-dev）以本文件为准。
 > 原型：根目录 `FUSE 引信协议.html`（1060 行单文件，含全部视觉与交互）。业务规则：`README.md`、`docs/01~08`。
 
@@ -55,8 +57,8 @@ BAM/
 
 ## 4. 数据与单位约定（必须遵守）
 
-- 所有代币金额：`raw units` **字符串**，精度 `TOKEN_DECIMALS = 9`（`1 FUSE = 1e9`）。
-- 所有 USD 价格：`USD_E8` 字符串（`1e8 = $1.00`），例如 `0.004` → `"400000"`。
+- 所有代币金额：`raw units` **字符串**，精度 `TOKEN_DECIMALS = 9`（`1 A9 = 1e9`）。
+- 所有 USD 价格：`USD_E8` 字符串（`1e8 = $1.00`），例如 `0.001` → `"100000"`。
 - 时间：Unix **毫秒**（`number`）。
 - 前端展示一律走 `web/src/lib/format.ts`（`formatToken` / `formatUsdE8` / `formatDuration`）。
 - 接口统一返回 `ApiResponse<T>`：`{ ok: true, data, ts }` 或 `{ ok: false, error: { code, message } }`。
@@ -89,12 +91,13 @@ BAM/
 
 启动状态（与原型一致，用户验收时看到的就是这个样子）：
 
-- `p0UsdE8 = "400000"`（P0 = $0.004），目标价 `P0 × 2^roundId`。
-- `roundRewardRaw = 750000000e9`，`totalSupplyRaw = 1e10 * 1e9`。
-- Round 1：`SUCCEEDED`（10/12 达标，7.5 亿已解锁）；Round 2：`FAILED_PERMANENT`（6/12，已销毁 7.5 亿 + 质押本金）。
+- `p0UsdE8 = "100000"`（P0 = $0.001），目标价 `P0 × 2^roundId`（R10 = $1.024）。
+- `roundRewardRaw = 700000000e9`，`totalSupplyRaw = 1e10 * 1e9`。
+- Round 1：`SUCCEEDED`（10/12 达标，7 亿已解锁）；Round 2：`FAILED_PERMANENT`（6/12，已销毁 7 亿 + 质押本金）。
 - Round 3：`OBSERVING`，观察中，K 线随时间推进（演示加速 `DEMO_CANDLE_SECONDS`，默认 90s/根），达标判定用 `twap >= target`。
 - Round 4：`UNOPENED`（上一轮结算后可开启）。
-- 演示加速只影响 K 线进度条，**判定规则、8/12 阈值、销毁语义必须与规格一致**。
+- 演示加速只影响 K 线进度条与报名窗口（`DEMO_STAKE_SECONDS`，默认 900s/轮），**判定规则、8/12 阈值、销毁语义必须与规格一致**；真实参数为报名 48h（`STAKE_DURATION_SECONDS = 172800`）、轮次间隔 48h（`STAKE_GAP_SECONDS = 172800`）。
+- 分配口径：十轮奖励 70%（每轮 7 亿）、内盘及流动性 13%（内盘 3% + 流动性 10%）、团队 12%、营销 5%。
 - 演示地址：8~12 个 `UQ...` 假地址 + 随机质押，聚合出排行榜；`/api/me` 对未质押地址返回空对象。
 - 销毁账本：`burn_ledger` 记录每次销毁（轮次、类型 reward/principal、数量、确认状态），供应量 = 初始 - 已确认销毁。
 
@@ -132,6 +135,7 @@ cd .. && npm run build && cd worker && npx wrangler deploy
 ```
 
 临时域名：`https://fuse-protocol.348421501.workers.dev`（account subdomain：348421501）。
+> 注：仓库内资源名（D1 `fuse-protocol`、`fuse.css`、原型文件名、函数 `fuseBalance`）沿用历史命名，**对外品牌与代币统一为 A9**，不改资源名（避免破坏已绑定部署）。
 生效后必须验证：首页 200、`/api/health` ok、`/api/rounds` 返回 10 轮、`/me`、`/leaderboard`、`/admin` 可打开、移动端布局正常。
 
 ## 10. 完成标准（Definition of Done）
@@ -156,7 +160,7 @@ export interface WalletState {
   connecting: boolean;
   demo: boolean;               // true = 降级演示钱包（非真实 TON Connect）
   tonBalance: string | null;   // TON 余额，人类可读字符串（"1250.42"）
-  fuseBalance: string | null;  // FUSE 余额，raw units 字符串（9 位精度）
+  fuseBalance: string | null;  // A9 余额，raw units 字符串（9 位精度）；字段名沿用历史命名
   error: string | null;
   connect: () => void;
   disconnect: () => void;
@@ -177,6 +181,6 @@ export function WalletButton(): JSX.Element;
 
 `/api/*` **没有 swap/buy 端点**（避免伪造真实成交）。CommandPanel 的买入：
 - 报价按 `config.tonUsdE8`（演示 $3.00）+ 0.3% 手续费 + 加深池价格影响实时计算；
-- 点击买入：演示钱包内本地扣减 TON、增加 FUSE，并明确 toast「演示环境不产生真实交易」；
+- 点击买入：演示钱包内本地扣减 TON、增加 A9，并明确 toast「演示环境不产生真实交易」；
 - 真实钱包（demon:false）点击买入 → 提示「合约部署后开放」，不做任何状态变更。
 

@@ -185,11 +185,11 @@ async function baseline() {
 
   await test('GET /api/config', async () => {
     const data = await apiOk('/api/config');
-    eq(data.p0UsdE8, '400000', 'p0UsdE8');
+    eq(data.p0UsdE8, '100000', 'p0UsdE8');
     eq(data.usdPriceScale, 100000000, 'usdPriceScale');
     eq(data.priceMultiplier, 2, 'priceMultiplier');
     eq(data.roundCount, 10, 'roundCount');
-    eq(data.roundRewardRaw, '750000000000000000', 'roundRewardRaw');
+    eq(data.roundRewardRaw, '700000000000000000', 'roundRewardRaw');
     eq(data.totalSupplyRaw, '10000000000000000000', 'totalSupplyRaw');
     eq(data.candleCount, 12, 'candleCount');
     eq(data.minQualifiedCandles, 8, 'minQualifiedCandles');
@@ -202,7 +202,7 @@ async function baseline() {
     assert(data.contracts && 'jettonMaster' in data.contracts, 'contracts 缺失');
     ctx.demoCandleSeconds = data.demo.candleSeconds;
     ctx.fast = data.demo.candleSeconds <= 5;
-    return 'P0=$0.004 demoCandle=' + data.demo.candleSeconds + 's 冻结项=' + data.frozenParams.length;
+    return 'P0=$0.001 demoCandle=' + data.demo.candleSeconds + 's 冻结项=' + data.frozenParams.length;
   });
 
   await test('GET /api/rounds（10 轮演示状态机）', async () => {
@@ -490,12 +490,12 @@ async function settlementTests() {
       r4 = res.body.data.rounds.find((row) => row.roundId === 4);
     }
     eq(r4.state, 'STAKING_OPEN', 'R4 state（DEMO_AUTOPLAY 未生效）');
-    eq(r4.targetPriceUsdE8, '6400000', 'R4 target = 16×P0');
+    eq(r4.targetPriceUsdE8, '1600000', 'R4 target = 16×P0');
     assert(r4.stakeCloseAt > Date.now(), 'R4 质押窗口未开启');
     const overview = await api('/api/admin/overview', {}, ADMIN_TOKEN);
     assert(overview.body.data.events.some((event) => event.action === 'ROUND_OPENED' && event.detail.includes('R4')), '缺少 R4 审计事件');
     ctx.r4Open = true;
-    return 'admin tick 触发自动开轮：R4 STAKING_OPEN target=6400000';
+    return 'admin tick 触发自动开轮：R4 STAKING_OPEN target=1600000';
   });
 
   await test('POST /api/admin/rounds/advance（存在活动轮次 → 409）', async () => {

@@ -115,7 +115,7 @@ const ZH: MeDict = {
   risk: [
     '本轮目标价为 P0 × 2^轮次；第 10 轮目标为初始参考价的 1024 倍。',
     '观察期 48 小时 = 12 根 4 小时 K 线，至少 8 根 TWAP ≥ 目标价才算通过。',
-    '本轮价格考核失败时，本轮 7.5 亿枚奖励额度全部销毁。',
+    '本轮价格考核失败时，本轮 7 亿枚奖励额度全部销毁。',
     '本轮价格考核失败时，本轮全部已接受质押本金 100% 销毁。',
     '预言机技术故障不按市场失败处理，不销毁质押本金。',
     '失败轮次永久关闭：不重开、不补发、不回滚。',
@@ -177,7 +177,7 @@ const EN: MeDict = {
   risk: [
     'Target price is P0 × 2^round; round 10 targets 1024× the initial reference price.',
     'The observation window is 48 hours = twelve 4-hour candles; at least 8 must have TWAP ≥ target.',
-    'If this round fails the price test, its 750M reward budget is fully burned.',
+    'If this round fails the price test, its 700M reward budget is fully burned.',
     'If this round fails the price test, 100% of the principal accepted for this round is burned.',
     'Oracle technical failures are not treated as a market failure and never burn principal.',
     'A failed round is permanently closed: no reopen, no reissue, no rollback.',
