@@ -131,6 +131,9 @@ struct RoundData {
     teamBurnConfirmed: bool
     rewardBurnConfirmed: bool
     principalBurnConfirmed: bool
+    // F-03: burn already sent but not yet confirmed (prevents double retry)
+    rewardBurnDispatched: bool
+    principalBurnDispatched: bool
     // ref: candle hash + total weight + bonus/referred maps
     extra: Cell<RoundExtra>
 }
@@ -170,6 +173,8 @@ struct StreakInfo {
 struct LockedState {
     lockedRaw: uint128
     claimedRaw: uint128
+    // F-01: non-zero while this owner has an unconfirmed claim in flight
+    pendingQueryId: uint64
 }
 
 // P0-3: every outbound claim transfer is recorded here by queryId and removed
@@ -258,6 +263,8 @@ fun emptyRound(): RoundData {
         teamBurnConfirmed: false,
         rewardBurnConfirmed: false,
         principalBurnConfirmed: false,
+        rewardBurnDispatched: false,
+        principalBurnDispatched: false,
         extra: emptyRoundExtra().toCell(),
     };
 }

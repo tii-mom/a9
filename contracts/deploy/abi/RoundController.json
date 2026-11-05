@@ -363,6 +363,10 @@
     },
     {
       "kind": "StructRef",
+      "struct_name": "RewardEarly"
+    },
+    {
+      "kind": "StructRef",
       "struct_name": "TechnicalAborted"
     },
     {
@@ -380,10 +384,6 @@
     {
       "kind": "StructRef",
       "struct_name": "UnlockClaimed"
-    },
-    {
-      "kind": "StructRef",
-      "struct_name": "RewardEarly"
     }
   ],
   "struct_instantiations": [],
@@ -759,6 +759,14 @@
           "ty_idx": 5
         },
         {
+          "name": "rewardBurnDispatched",
+          "ty_idx": 5
+        },
+        {
+          "name": "principalBurnDispatched",
+          "ty_idx": 5
+        },
+        {
           "name": "extra",
           "ty_idx": 68
         }
@@ -886,6 +894,10 @@
         {
           "name": "claimedRaw",
           "ty_idx": 13
+        },
+        {
+          "name": "pendingQueryId",
+          "ty_idx": 11
         }
       ]
     },
@@ -1701,7 +1713,7 @@
     {
       "kind": "struct",
       "name": "DepositAccepted",
-      "ty_idx": 86,
+      "ty_idx": 87,
       "prefix": {
         "prefix_num": 1381236995,
         "prefix_len": 32
@@ -1728,7 +1740,7 @@
     {
       "kind": "struct",
       "name": "TechnicalAborted",
-      "ty_idx": 85,
+      "ty_idx": 86,
       "prefix": {
         "prefix_num": 1381236996,
         "prefix_len": 32
@@ -1751,7 +1763,7 @@
     {
       "kind": "struct",
       "name": "RewardRolled",
-      "ty_idx": 87,
+      "ty_idx": 88,
       "prefix": {
         "prefix_num": 1381236997,
         "prefix_len": 32
@@ -1778,7 +1790,7 @@
     {
       "kind": "struct",
       "name": "RewardEarly",
-      "ty_idx": 90,
+      "ty_idx": 85,
       "prefix": {
         "prefix_num": 1381236998,
         "prefix_len": 32
@@ -1805,7 +1817,7 @@
     {
       "kind": "struct",
       "name": "ReferrerSet",
-      "ty_idx": 88,
+      "ty_idx": 89,
       "prefix": {
         "prefix_num": 1381236999,
         "prefix_len": 32
@@ -1824,7 +1836,7 @@
     {
       "kind": "struct",
       "name": "UnlockClaimed",
-      "ty_idx": 89,
+      "ty_idx": 90,
       "prefix": {
         "prefix_num": 1381237000,
         "prefix_len": 32
@@ -2340,6 +2352,11 @@
       "kind": "enum_member",
       "name": "Errors.RollNotAvailable",
       "err_code": 266
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.ClaimPending",
+      "err_code": 270
     },
     {
       "kind": "enum_member",

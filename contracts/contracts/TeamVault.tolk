@@ -37,6 +37,7 @@ fun onInternalMessage(in: InMessage) {
         SetJettonWallet => {
             var st = lazy TeamVaultStorage.load();
             assert (in.senderAddress == st.config.admin) throw Errors.NotAdmin;
+            assert (msg.wallet != createAddressNone()) throw Errors.BadConfig;
             // one-time: only before the controller is wired up
             assert (st.config.controller == null) throw Errors.AlreadyInitialized;
             var params = st.params.load();

@@ -49,6 +49,7 @@ fun deployMockWallet(owner: address, balance: coins): MockWalletHandle {
         lastTransferAmount: 0,
         burnCount: 0,
         lastBurnAmount: 0,
+        autoAck: true,
     };
     val init = ContractState { code: build("MockJettonWallet"), data: storage.toCell() };
     val addr = AutoDeployAddress { stateInit: init }.calculateAddress();
@@ -733,4 +734,14 @@ fun confirmTeamBurn(f: ProtocolFixture, roundId: uint8) {
         dest: f.tv.address,
         body: ReturnExcessesBack { queryId: q },
     }))).toHaveSuccessfulTx<ReturnExcessesBack>({ from: f.jettonMaster, to: f.tv.address });
+}
+
+
+fun setMockAutoAck(wallet: MockWalletHandle, enabled: bool) {
+    expect(net.send(wallet.address, createMessage({
+        bounce: false,
+        value: ton("0.02"),
+        dest: wallet.address,
+        body: SetMockAutoAck { autoAck: enabled },
+    }))).toHaveSuccessfulTx<SetMockAutoAck>({ from: wallet.address, to: wallet.address });
 }

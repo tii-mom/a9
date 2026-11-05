@@ -231,12 +231,12 @@ get fun `test RetryPendingActions resends missing failure burns`() {
         to: f.rc.address,
         exitCode: Errors.NotAdmin,
     });
-    // resends reward + principal burns (team already confirmed)
+    // F-03: burns are already in flight -> retry must NOT resend them
     expect(retryPendingActions(f.rc, f.admin, 1)).toHaveSuccessfulTx<RetryPendingActions>({
         from: f.admin,
         to: f.rc.address,
     });
-    expect(mockState(f.rcWallet).burnCount).toEqual(4);
+    expect(mockState(f.rcWallet).burnCount).toEqual(2);
 }
 
 // ===========================================================================

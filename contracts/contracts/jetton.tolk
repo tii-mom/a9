@@ -92,9 +92,9 @@ fun sendTrackedJettonTransfer(
 fun sendJettonBurn(jettonWallet: address, queryId: uint64, amount: coins, responseDestination: address): void {
     val body = buildJettonBurnBody(queryId, amount, responseDestination);
     val out = createMessage({
-        // P0-2: bounceable; success is observed via ReturnExcessesBack in the RC.
+        // F-04: 0.1 TON so the ReturnExcessesBack hop is always funded; excess is refunded.
         bounce: BounceMode.Only256BitsOfBody,
-        value: ton("0.05"),
+        value: ton("0.1"),
         dest: jettonWallet,
         body,
     });

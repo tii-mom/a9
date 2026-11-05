@@ -316,13 +316,15 @@ get fun `test roll is truncated when the address already staked the 20M cap`() {
 
     openNext(f); // R2 STAKING_OPEN
     stakeAccount(f, 2, alice.address, MAX_PER_ADDR as coins, 1);
-    expect(rollReward(f.rc, alice.address, 1)).toHaveSuccessfulTx<RollReward>({
+    // F-05: no room -> reject, keep PENDING (no ROLLED state, no lost early-claim right)
+    expect(rollReward(f.rc, alice.address, 1)).toHaveFailedTx<RollReward>({
         from: alice.address,
         to: f.rc.address,
+        exitCode: Errors.RollNotAvailable,
     });
-    // no room left for alice -> full reward locked, nothing added to R2 principal
     expect(rcUserStake(f.rc, 2, alice.address).amountRaw).toEqual(MAX_PER_ADDR);
-    expect(rcUnlockInfo(f.rc, alice.address).totalLockedRaw).toEqual(REWARD_RAW);
+    expect(rcRewardState(f.rc, alice.address, 1).state).toEqual(REWARD_STATE_PENDING);
+    expect(rcUserStake(f.rc, 1, alice.address).rewardClaimed).toBeFalse();
 }
 
 get fun `test roll is truncated when the round total already hit 200M`() {
@@ -353,13 +355,14 @@ get fun `test roll is truncated when the round total already hit 200M`() {
     }
     expect(rcRound(f.rc, 2).totalAcceptedStakeRaw).toEqual(MAX_TOTAL);
 
-    expect(rollReward(f.rc, alice.address, 1)).toHaveSuccessfulTx<RollReward>({
+    expect(rollReward(f.rc, alice.address, 1)).toHaveFailedTx<RollReward>({
         from: alice.address,
         to: f.rc.address,
+        exitCode: Errors.RollNotAvailable,
     });
     expect(rcRound(f.rc, 2).totalAcceptedStakeRaw).toEqual(MAX_TOTAL);
     expect(rcUserStake(f.rc, 2, alice.address).amountRaw).toEqual(0 as uint128);
-    expect(rcUnlockInfo(f.rc, alice.address).totalLockedRaw).toEqual(REWARD_RAW);
+    expect(rcRewardState(f.rc, alice.address, 1).state).toEqual(REWARD_STATE_PENDING);
 }
 
 // ===========================================================================

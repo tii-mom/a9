@@ -95,6 +95,25 @@ fun onBouncedMessage(in: InMessageBounced) {
         return;
     }
     val op = in.bouncedBody.loadUint(32);
+    if (op == OP_JETTON_BURN) {
+        // F-03: burn bounced -> allow RetryPendingActions to resend it.
+        val burnQ: uint64 = in.bouncedBody.loadUint(64) as uint64;
+        val roundId: uint8 = ((burnQ >> 16) & 0xff) as uint8;
+        val kind: uint8 = ((burnQ >> 8) & 0xff) as uint8;
+        var s = lazy Storage.load();
+        val rr = s.rounds.get(roundId);
+        if (rr.isFound) {
+            var rd = rr.loadValue();
+            if (kind == BURN_QUERY_REWARD) {
+                rd.rewardBurnDispatched = false;
+            } else if (kind == BURN_QUERY_PRINCIPAL) {
+                rd.principalBurnDispatched = false;
+            }
+            s.rounds.set(roundId, rd);
+            s.save();
+        }
+        return;
+    }
     if (op != OP_JETTON_TRANSFER) {
         return;
     }
@@ -154,6 +173,11 @@ fun roundExtra(rd: RoundData): RoundExtra {
     return rd.extra.load();
 }
 
+// F-07: single referral formula used by both deposit and roll paths.
+fun referralRawAdd(amountRaw: uint128): uint128 {
+    return amountRaw * (REFERRAL_BPS as uint128) / 10000;
+}
+
 fun bonusOf(ex: RoundExtra, owner: address): uint128 {
     val found = ex.bonus.get(owner);
     return found.isFound ? found.loadValue() : 0;
@@ -171,7 +195,11 @@ fun streakOf(ex: StorageExtras, owner: address): StreakInfo {
 
 fun lockedStateOf(ex: StorageExtras, owner: address): LockedState {
     val found = ex.locked.get(owner);
-    return found.isFound ? found.loadValue() : (LockedState { lockedRaw: 0, claimedRaw: 0 });
+    return found.isFound ? found.loadValue() : (LockedState { lockedRaw: 0, claimedRaw: 0, pendingQueryId: 0 });
+}
+
+fun requireNoPendingClaim(ex: StorageExtras, owner: address) {
+    assert (lockedStateOf(ex, owner).pendingQueryId == 0) throw Errors.ClaimPending;
 }
 
 fun lockedOf(ex: StorageExtras, owner: address): uint128 {
@@ -283,12 +311,19 @@ fun rollbackPendingClaim(queryId: uint64) {
             }
             i += 1;
         }
+        // F-01: relative decrement (never an absolute snapshot), so overlapping
+        // rollbacks cannot inflate lockedRaw.
         var lk = lockedStateOf(ex, owner);
-        lk.lockedRaw = p.lockedBeforeRaw;
+        lk.lockedRaw = lk.lockedRaw > p.lockedDeltaRaw ? lk.lockedRaw - p.lockedDeltaRaw : 0;
         lk.claimedRaw = lk.claimedRaw > p.amountRaw ? lk.claimedRaw - p.amountRaw : 0;
         ex.locked.set(owner, lk);
     }
 
+    var lk2 = lockedStateOf(ex, owner);
+    if (lk2.pendingQueryId == queryId) {
+        lk2.pendingQueryId = 0;
+        ex.locked.set(owner, lk2);
+    }
     ex.pending.delete(queryId);
     s.extras = ex.toCell();
     s.save();
@@ -298,10 +333,19 @@ fun rollbackPendingClaim(queryId: uint64) {
 fun settlePendingClaim(queryId: uint64) {
     var s = lazy Storage.load();
     var ex = s.extras.load();
-    if (ex.pending.delete(queryId)) {
-        s.extras = ex.toCell();
-        s.save();
+    val found = ex.pending.get(queryId);
+    if (!found.isFound) {
+        return;
     }
+    val p = found.loadValue();
+    var lk = lockedStateOf(ex, p.owner);
+    if (lk.pendingQueryId == queryId) {
+        lk.pendingQueryId = 0;
+        ex.locked.set(p.owner, lk);
+    }
+    ex.pending.delete(queryId);
+    s.extras = ex.toCell();
+    s.save();
 }
 
 // streak rule: same round keeps the count; previous round +1; otherwise reset to 1.
@@ -527,6 +571,7 @@ fun settleRound(s: Storage, rd: RoundData, success: bool, _now: uint64) {
             rdExtra.failureBurnId = burnId;
             updated.extra = rdExtra.toCell();
             sendJettonBurn(v.stakingJettonWallet, burnQueryId(roundId, BURN_QUERY_REWARD), updated.rewardBudgetRaw as coins, contract.getAddress());
+            updated.rewardBurnDispatched = true;
         }
         // team 1.2e8 release instruction (idempotent in TeamVault)
         sendTeamRelease(v.teamVault, roundId, 0);
@@ -539,9 +584,11 @@ fun settleRound(s: Storage, rd: RoundData, success: bool, _now: uint64) {
 
         // burn 1/3: round reward 7e8
         sendJettonBurn(v.stakingJettonWallet, burnQueryId(roundId, BURN_QUERY_REWARD), updated.rewardBudgetRaw as coins, contract.getAddress());
+        updated.rewardBurnDispatched = true;
         // burn 2/3: principal (0-stake rounds have nothing to burn -> auto-confirmed)
         if (updated.totalAcceptedStakeRaw > 0) {
             sendJettonBurn(v.stakingJettonWallet, burnQueryId(roundId, BURN_QUERY_PRINCIPAL), updated.totalAcceptedStakeRaw as coins, contract.getAddress());
+            updated.principalBurnDispatched = true;
         } else {
             updated.principalBurnConfirmed = true;
         }
@@ -789,13 +836,26 @@ fun handleTransferNotification(sender: address, msg: TransferNotification) {
         val refStake: uint128 = refPosRes.isFound ? refPosRes.loadValue().amountRaw : 0;
         val bonusSoFar = bonusOf(rdExtra, referrer);
         val room: uint128 = refStake > bonusSoFar ? refStake - bonusSoFar : 0;
-        val rawAdd: uint128 = (amount as uint128) * (REFERRAL_BPS as uint128) / 10000;
+        val rawAdd: uint128 = referralRawAdd(amount as uint128);
         val add: uint128 = rawAdd < room ? rawAdd : room;
         if (add > 0) {
             rdExtra.bonus.set(referrer, bonusSoFar + add);
             rdExtra.totalWeight = rdExtra.totalWeight + add;
         }
         rdExtra.referred.set(referrer, referredOf(rdExtra, referrer) + (amount as uint128));
+    }
+
+    // F-06: if the depositor itself is a referrer, top up its own bonus to
+    // min(20% * referredStake, ownStake) (O(1), no loops).
+    val myReferred = referredOf(rdExtra, owner);
+    if (myReferred > 0) {
+        val twenty = myReferred / 5; // 20% = REFERRAL_BPS / 10000
+        val target: uint128 = twenty < pos.amountRaw ? twenty : pos.amountRaw;
+        val current = bonusOf(rdExtra, owner);
+        if (target > current) {
+            rdExtra.bonus.set(owner, target);
+            rdExtra.totalWeight = rdExtra.totalWeight + (target - current);
+        }
     }
 
     var updated = rd;
@@ -854,12 +914,16 @@ fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal) {
     }
 
     var ex = s.extras.load();
+    requireNoPendingClaim(ex, sender);
     val q = claimQueryId(msg.roundId, CLAIM_KIND_PRINCIPAL, ex.claimCounter);
     ex.claimCounter = ex.claimCounter + 1;
     ex.pending.set(q, PendingClaim { owner: sender, kind: CLAIM_KIND_PRINCIPAL, roundId: msg.roundId, principalMask: 0, rewardMask: 0, amountRaw: pos.amountRaw, lockedDeltaRaw: 0, lockedBeforeRaw: 0 });
     pos.principalClaimed = true;
     inner.set(sender, pos);
     s.stakes.set(msg.roundId, inner);
+    var lk = lockedStateOf(ex, sender);
+    lk.pendingQueryId = q;
+    ex.locked.set(sender, lk);
     s.extras = ex.toCell();
     s.save();
 
@@ -876,6 +940,7 @@ fun handleClaimAll(sender: address, msg: ClaimAll) {
     var s = lazy Storage.load();
     val v = vaults(s);
     var ex = s.extras.load();
+    requireNoPendingClaim(ex, sender);
 
     var principalTotal: uint128 = 0;
     var rewardTotal: uint128 = 0;
@@ -922,6 +987,13 @@ fun handleClaimAll(sender: address, msg: ClaimAll) {
                                 lockedTotal += applied.lockedRaw;
                                 rewardMask = rewardMask | ((1 as uint16) << ((roundId - 1) as uint16));
                                 changed = true;
+                                // F-08: indexers must see the same event as ClaimRewardEarly.
+                                emitExternalEvent(RewardEarly {
+                                    roundId,
+                                    owner: sender,
+                                    paidRaw: applied.paidRaw,
+                                    lockedRaw: applied.lockedRaw,
+                                });
                             }
                         }
                         if (changed) {
@@ -951,6 +1023,9 @@ fun handleClaimAll(sender: address, msg: ClaimAll) {
     val q = claimQueryId(s.currentRoundId, CLAIM_KIND_CLAIM_ALL, ex.claimCounter);
     ex.claimCounter = ex.claimCounter + 1;
     ex.pending.set(q, PendingClaim { owner: sender, kind: CLAIM_KIND_CLAIM_ALL, roundId: s.currentRoundId, principalMask, rewardMask, amountRaw: total, lockedDeltaRaw: lockedTotal, lockedBeforeRaw: before });
+    var lk = lockedStateOf(ex, sender);
+    lk.pendingQueryId = q;
+    ex.locked.set(sender, lk);
     s.extras = ex.toCell();
     s.save();
 
@@ -1048,26 +1123,32 @@ fun handleTeamBurnedAck(sender: address, msg: TeamBurnedAck) {
 // ===========================================================================
 
 fun handleRetryPendingActions(sender: address, msg: RetryPendingActions) {
-    val s = lazy Storage.load();
+    var s = lazy Storage.load();
     requireAdmin(s, sender);
     assert (msg.roundId == s.currentRoundId) throw Errors.BadRoundId;
-    val rd = ensureRoundExists(s, msg.roundId);
-    val _e = econ(s);
+    var rd = ensureRoundExists(s, msg.roundId);
     val v = vaults(s);
+    var changed = false;
 
     if (rd.status == STATUS_SETTLING_SUCCESS) {
         if (!rd.teamReleaseConfirmed) {
             sendTeamRelease(v.teamVault, msg.roundId, msg.queryId);
         }
-        if (rd.totalAcceptedStakeRaw == 0 && !rd.rewardBurnConfirmed) {
+        if (rd.totalAcceptedStakeRaw == 0 && !rd.rewardBurnConfirmed && !rd.rewardBurnDispatched) {
             sendJettonBurn(v.stakingJettonWallet, burnQueryId(msg.roundId, BURN_QUERY_REWARD), rd.rewardBudgetRaw as coins, contract.getAddress());
+            rd.rewardBurnDispatched = true;
+            changed = true;
         }
     } else if (rd.status == STATUS_SETTLING_FAILURE) {
-        if (!rd.rewardBurnConfirmed) {
-            sendJettonBurn(v.stakingJettonWallet, msg.queryId, rd.rewardBudgetRaw as coins, addresses(s).admin);
+        if (!rd.rewardBurnConfirmed && !rd.rewardBurnDispatched) {
+            sendJettonBurn(v.stakingJettonWallet, burnQueryId(msg.roundId, BURN_QUERY_REWARD), rd.rewardBudgetRaw as coins, contract.getAddress());
+            rd.rewardBurnDispatched = true;
+            changed = true;
         }
-        if (!rd.principalBurnConfirmed && rd.totalAcceptedStakeRaw > 0) {
+        if (!rd.principalBurnConfirmed && !rd.principalBurnDispatched && rd.totalAcceptedStakeRaw > 0) {
             sendJettonBurn(v.stakingJettonWallet, burnQueryId(msg.roundId, BURN_QUERY_PRINCIPAL), rd.totalAcceptedStakeRaw as coins, contract.getAddress());
+            rd.principalBurnDispatched = true;
+            changed = true;
         }
         if (!rd.teamBurnConfirmed) {
             sendTeamBurn(v.teamVault, msg.roundId, roundExtra(rd).failureBurnId, msg.queryId);
@@ -1075,11 +1156,15 @@ fun handleRetryPendingActions(sender: address, msg: RetryPendingActions) {
     } else {
         throw Errors.BadRoundStatus;
     }
+    if (changed) {
+        s.rounds.set(msg.roundId, rd);
+        s.save();
+    }
 }
-
 fun handleSetJettonWallet(sender: address, msg: SetJettonWallet) {
     var s = lazy Storage.load();
     requireAdmin(s, sender);
+    assert (msg.wallet != createAddressNone()) throw Errors.BadConfig;
     assert (s.currentRoundId == 0) throw Errors.BadRoundStatus;
     var cfg = s.config.load();
     var v = cfg.vaults.load();
@@ -1096,6 +1181,7 @@ fun handleSetJettonWallet(sender: address, msg: SetJettonWallet) {
 fun handleSetReferrer(sender: address, msg: SetReferrer) {
     var s = lazy Storage.load();
     var ex = s.extras.load();
+    assert (msg.referrer != createAddressNone()) throw Errors.BadConfig;
     assert (msg.referrer != sender) throw Errors.SelfReferral;
     assert (!ex.referrer.exists(sender)) throw Errors.AlreadyReferred;
     // one-level binding, no mutual A<->B pair
@@ -1131,6 +1217,7 @@ fun payEarlyReward(sender: address, roundId: uint8): uint128 {
     assert (rd.status == STATUS_SUCCEEDED) throw Errors.NotClaimable;
     var ex = s.extras.load();
     assert (ex.unlockStart == 0) throw Errors.RewardStateLocked;
+    requireNoPendingClaim(ex, sender);
 
     val innerRes = s.stakes.get(roundId);
     if (!innerRes.isFound) {
@@ -1159,6 +1246,7 @@ fun payEarlyReward(sender: address, roundId: uint8): uint128 {
     s.stakes.set(roundId, inner);
     var lk = lockedStateOf(ex, sender);
     lk.lockedRaw = before + applied.lockedRaw;
+    lk.pendingQueryId = q;
     ex.locked.set(sender, lk);
     ex.pending.set(q, PendingClaim { owner: sender, kind: CLAIM_KIND_REWARD, roundId, principalMask: 0, rewardMask: 0, amountRaw: applied.paidRaw, lockedDeltaRaw: applied.lockedRaw, lockedBeforeRaw: before });
     s.extras = ex.toCell();
@@ -1201,6 +1289,7 @@ fun handleRollReward(sender: address, msg: RollReward) {
 
     var ex = s.extras.load();
     assert (ex.unlockStart == 0) throw Errors.RewardStateLocked;
+    requireNoPendingClaim(ex, sender);
 
     val innerRes = s.stakes.get(msg.roundId);
     if (!innerRes.isFound) {
@@ -1253,6 +1342,8 @@ fun handleRollReward(sender: address, msg: RollReward) {
         rollAmount = roomTotal;
     }
     val excess: uint128 = reward - rollAmount;
+    // F-05: no room means no roll; keep PENDING (early claim / unlock rights intact).
+    assert (rollAmount > 0) throw Errors.RollNotAvailable;
 
     pos.rewardState = REWARD_STATE_ROLLED;
     pos.rewardClaimed = true;
@@ -1277,7 +1368,7 @@ fun handleRollReward(sender: address, msg: RollReward) {
             val refStake: uint128 = refPosRes.isFound ? refPosRes.loadValue().amountRaw : 0;
             val bonusSoFar = bonusOf(nextExtra, referrer);
             val room: uint128 = refStake > bonusSoFar ? refStake - bonusSoFar : 0;
-            val rawAdd: uint128 = rollAmount / (10000 / REFERRAL_BPS); // 20% of rolled stake
+            val rawAdd: uint128 = referralRawAdd(rollAmount);
             val add: uint128 = rawAdd < room ? rawAdd : room;
             if (add > 0) {
                 nextExtra.bonus.set(referrer, bonusSoFar + add);
@@ -1286,6 +1377,17 @@ fun handleRollReward(sender: address, msg: RollReward) {
             nextExtra.referred.set(referrer, referredOf(nextExtra, referrer) + rollAmount);
         }
 
+        // F-06: the roller may itself be a referrer -> top up its next-round bonus.
+        val myReferred = referredOf(nextExtra, sender);
+        if (myReferred > 0) {
+            val twenty = myReferred / 5; // 20% = REFERRAL_BPS / 10000
+            val target: uint128 = twenty < nextPos.amountRaw ? twenty : nextPos.amountRaw;
+            val current = bonusOf(nextExtra, sender);
+            if (target > current) {
+                nextExtra.bonus.set(sender, target);
+                nextExtra.totalWeight = nextExtra.totalWeight + (target - current);
+            }
+        }
         ex.streaks.set(sender, StreakInfo { lastRound: nextRoundId, count: newStreak });
     }
 
@@ -1316,6 +1418,7 @@ fun handleClaimUnlocked(sender: address, _msg: ClaimUnlocked) {
     var ex = s.extras.load();
     assert (ex.unlockStart > 0) throw Errors.UnlockNotStarted;
     assert (now >= ex.unlockStart) throw Errors.UnlockNotStarted;
+    requireNoPendingClaim(ex, sender);
 
     val lockedBefore = lockedOf(ex, sender);
     var folded: uint128 = 0;
@@ -1366,6 +1469,7 @@ fun handleClaimUnlocked(sender: address, _msg: ClaimUnlocked) {
     var lk = lockedStateOf(ex, sender);
     lk.lockedRaw = totalLocked;
     lk.claimedRaw = claimed + claimable;
+    lk.pendingQueryId = q;
     ex.locked.set(sender, lk);
     ex.pending.set(q, PendingClaim { owner: sender, kind: CLAIM_KIND_UNLOCK, roundId: s.currentRoundId, principalMask: 0, rewardMask: foldMask, amountRaw: claimable, lockedDeltaRaw: folded, lockedBeforeRaw: lockedBefore });
     s.extras = ex.toCell();
@@ -1621,13 +1725,18 @@ get fun get_reward_state(owner: address, roundId: uint8): RewardStateInfo {
         if (posRes.isFound) {
             val pos = posRes.loadValue();
             state = pos.rewardState;
-            if (rd.status == STATUS_SUCCEEDED && !pos.rewardClaimed) {
+            // F-07: full win amount is always reported after the round succeeded,
+            // even after Roll / early claim (rollable/early are derived below).
+            if (rd.status == STATUS_SUCCEEDED) {
                 amount = rewardForRound(rd, ex, pos, owner);
             }
         }
     }
     var rollable: uint128 = 0;
-    if (state == REWARD_STATE_PENDING && roundId < MAX_ROUNDS) {
+    val rewardClaimedNow = innerRes.isFound
+        && innerRes.loadValue().get(owner).isFound
+        && innerRes.loadValue().get(owner).loadValue().rewardClaimed;
+    if (state == REWARD_STATE_PENDING && !rewardClaimedNow && roundId < MAX_ROUNDS) {
         val nextFound = s.rounds.get(roundId + 1);
         if (nextFound.isFound) {
             val nextRd = nextFound.loadValue();

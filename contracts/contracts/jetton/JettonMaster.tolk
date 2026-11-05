@@ -212,7 +212,8 @@ fun handleBurnNotification(
         value: 0,
         body: ReturnExcessesBack { queryId },
     });
-    excessesMsg.send(SEND_MODE_IGNORE_ERRORS | SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
+    // F-04: never silently drop the burn confirmation; let action failure bounce.
+    excessesMsg.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
 }
 
 get fun get_jetton_data(): JettonDataReply {

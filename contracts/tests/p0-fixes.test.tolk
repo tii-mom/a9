@@ -230,6 +230,7 @@ get fun `test P0-3 bounced ClaimPrincipal rolls back and can be retried`() {
     stakeAccount(f, 1, alice.address, 1);
     finishSuccess(f, 1);
 
+    setMockAutoAck(f.rcWallet, false);
     val q = claimQ(1, CLAIM_KIND_PRINCIPAL, claimCounter(f));
     expect(claimPrincipal(f.rc, alice.address, 1)).toHaveSuccessfulTx<ClaimPrincipal>({
         from: alice.address,
@@ -256,6 +257,7 @@ get fun `test P0-3 bounced ClaimReward rolls back state and locked amount`() {
     stakeAccount(f, 1, alice.address, 1);
     finishSuccess(f, 1);
 
+    setMockAutoAck(f.rcWallet, false);
     val q = claimQ(1, CLAIM_KIND_REWARD, claimCounter(f));
     expect(claimReward(f.rc, alice.address, 1)).toHaveSuccessfulTx<ClaimReward>({
         from: alice.address,
@@ -279,6 +281,7 @@ get fun `test P0-3 bounced ClaimAll rolls back principal and reward`() {
     stakeAccount(f, 1, alice.address, 1);
     finishSuccess(f, 1);
 
+    setMockAutoAck(f.rcWallet, false);
     val q = claimQ(1, CLAIM_KIND_CLAIM_ALL, claimCounter(f));
     expect(claimAll(f.rc, alice.address, 0)).toHaveSuccessfulTx<ClaimAll>({
         from: alice.address,
@@ -302,6 +305,7 @@ get fun `test P0-3 wallet ReturnExcessesBack clears the pending claim (success p
     stakeAccount(f, 1, alice.address, 1);
     finishSuccess(f, 1);
 
+    setMockAutoAck(f.rcWallet, false);
     val q = claimQ(1, CLAIM_KIND_PRINCIPAL, claimCounter(f));
     expect(claimPrincipal(f.rc, alice.address, 1)).toHaveSuccessfulTx<ClaimPrincipal>({
         from: alice.address,
@@ -334,6 +338,7 @@ get fun `test P0-3 bounced ClaimUnlocked rolls back claimed amount and folded re
 
     topUpForTimeJump(f, ton("500"));
     advance(2592000); // one month -> 1/12 vested
+    setMockAutoAck(f.rcWallet, false);
     val q = claimQ(10, CLAIM_KIND_UNLOCK, claimCounter(f));
     expect(claimUnlocked(f.rc, alice.address)).toHaveSuccessfulTx<ClaimUnlocked>({
         from: alice.address,

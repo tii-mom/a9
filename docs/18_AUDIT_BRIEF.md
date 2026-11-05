@@ -40,7 +40,7 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 | `contracts/README.md` | ABI 表、storage 布局、错误码、gas 实测、**§9 已知问题与修复记录** |
 | `contracts/deploy/abi/*.json` | 机器可读 ABI |
 | `contracts/deploy/params.testnet.json` | 部署参数（P0、2×、24/16、12h+36h+24h、限额、技术终止） |
-| `contracts/tests/*.test.tolk` | 97 个测试（7 个文件） |
+| `contracts/tests/*.test.tolk` | 114 个测试（9 个文件） |
 
 ---
 
@@ -109,7 +109,7 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 cd contracts
 acton build --clear-cache    # 期望 0 error
 acton check                  # 期望 0 warning
-acton test                   # 期望 97 passed
+acton test                   # 期望 114 passed
 acton script scripts/deploy-emulation.tolk   # 期望 OK
 ```
 
@@ -145,12 +145,12 @@ acton script scripts/deploy-emulation.tolk   # 期望 OK
 
 | 合约 | 行数 | Code hash |
 | --- | --- | --- |
-| RoundController | 1,744 | 0xCD8F2C2B653CE4F0C1813E864A224E34764DB93F8D9304074DBB420A3A288A51 |
-| TeamVault | 270 | 0x25D7B03C09BCCCEA9487DEE79AA0728E9808850F8FC7E2EAAD25ECF4B52A6B30 |
-| JettonMaster | 245 | 0xAA7BC0B3429880FCE965C6FF5FC8E7A0A4F63445F1BA2602EBF37A079DBE740C |
-| JettonWallet | 179 | 0x068E64CF94ABC5B514A65CC32A6B8415E8E963FAD9C016E0BC815AB68C447D53 |
+| RoundController | 1,853 | 0x38DFE37D3F2A33D74141FA1D5267274BEDB402209D7A79B41EA76A8AF44CD127 |
+| TeamVault | 271 | 0x41AD560CF1B6F61935B492727B6354CE409291340CB7E7962D09BAA519E90212 |
+| JettonMaster | 245 | 0x657C029A1BAB71815BC0AB3CF0E1958BFEFCFFAF644B307394E7A696550886E2 |
+| JettonWallet | 179 | 0x3E3D595A8BB95AB108340B7CB50E99135D5FBA9E1118F7B0F1B4CF0EB5066A96 |
 
-验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **97 passed** / `acton script scripts/deploy-emulation.tolk` OK。
+验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **114 passed** / `acton script scripts/deploy-emulation.tolk` OK。
 
 若审计方的 hash 与上表不一致，说明代码已被改动，请先与项目方确认版本。
 
@@ -180,3 +180,23 @@ JettonMaster / JettonWallet **不是从零自研**，而是 **Acton 官方 jetto
 **如果某一处与官方参考实现存在非预期差异，请明确指出差异点与风险**；如果只是命名/格式化差异，请说明「语义等价」。
 
 TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理）**不需要逐行重审**，只需确认「与官方实现一致」。
+
+---
+
+## 10. 审计修复记录（v8.2，首轮审计后）
+
+首轮外部审计（v8.1）共 9 条发现：1×P0 + 5×P1 + 3×P2，**已全部修复**，修复后 114 个测试全绿。
+
+| 编号 | 严重度 | 问题 | 修复 |
+| --- | --- | --- | --- |
+| F-01 | P0 | ClaimUnlocked 回滚用绝对快照 → 解锁池可翻倍双花 | 改相对扣减 + per-owner pending 互斥（ClaimPending） |
+| F-02 | P1 | RetryPendingActions 的 reward burn 用 msg.queryId + admin | 改 burnQueryId(roundId, REWARD) + RC 自身 |
+| F-03 | P1 | RC burn 无 dispatched 标记 → retry 双倍销毁 | 加 rewardBurnDispatched/principalBurnDispatched + onBouncedMessage 处理 OP_JETTON_BURN |
+| F-04 | P1 | sendJettonBurn 0.05 TON + IGNORE_ERRORS → 确认被静默丢弃 | value 0.1 TON；excesses 改 BOUNCE_ON_ACTION_FAIL；calcMinimalBurnAmount 计入回传费 |
+| F-05 | P1 | RollReward 在 rollAmount==0 时仍置 ROLLED | assert rollAmount > 0 throw RollNotAvailable |
+| F-06 | P1 | 邀请人后加仓/滚存不补 bonus | deposit/roll 两条路径 O(1) 差额补齐 |
+| F-07 | P2 | get_reward_state 领取后返回 0；除法写法不一致 | SUCCEEDED 即返回全额；统一为 amount × BPS / 10000 |
+| F-08 | P2 | ClaimAll 早领不发 RewardEarly 事件 | 补发事件 |
+| F-09 | P2 | SetReferrer / SetJettonWallet 未校验空地址 | 三处加 createAddressNone() 校验 |
+
+新增测试文件 `contracts/tests/audit-fixes.test.tolk`（17 条），覆盖上述全部修复点与复现路径。

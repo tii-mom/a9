@@ -10,10 +10,10 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **97 passed / 7 files**（原有 65 + V8 22 + P0 安全修复 9 + TeamVault burn 闭环 1 个用例）。
+- **测试**：acton test → **114 passed / 9 files**（65 + V8 22 + P0 9 + TeamVault 1 + 审计 F-01~F-06 10 + 审计 F-07~F-09 7 个用例）。
 - **合约代码哈希**（clean rebuild，Tolk code cell）：
-    - RoundController：0xCD8F2C2B653CE4F0C1813E864A224E34764DB93F8D9304074DBB420A3A288A51（1,744 行，瘦身 -229）
-    - TeamVault：0x25D7B03C09BCCCEA9487DEE79AA0728E9808850F8FC7E2EAAD25ECF4B52A6B30
+    - RoundController：0x38DFE37D3F2A33D74141FA1D5267274BEDB402209D7A79B41EA76A8AF44CD127（1,853 行，审计批次 3 后）
+    - TeamVault：0x41AD560CF1B6F61935B492727B6354CE409291340CB7E7962D09BAA519E90212
     - TeamVault：0xDDFEE8CA14B5104B7C73FBBC075953FDD729286E5CB67F90DB08DB5E502B09DD
     - JettonMaster：0xAA7BC0B3429880FCE965C6FF5FC8E7A0A4F63445F1BA2602EBF37A079DBE740C
     - JettonWallet：0x068E64CF94ABC5B514A65CC32A6B8415E8E963FAD9C016E0BC815AB68C447D53
@@ -52,7 +52,7 @@
     cd contracts
     acton build              # 产出 build/*.json 与 build/abi/*.json
     acton check              # 0 warning
-    acton test               # 97 passed
+    acton test               # 114 passed
     acton build --info       # 打印 code hash
 
 ### 1.3 官方安装方式（新机器）
@@ -645,13 +645,13 @@ dry-run（fund_ton <to> 20）：
 ## 8. 测试
 
     cd contracts
-    acton test                    # 97 passed in 7 files
+    acton test                    # 114 passed in 9 files
     acton test tests/jetton.test.tolk
     acton test tests/settlement.test.tolk
     acton test -f 'technical abort'   # 按名字过滤
     acton check                   # lint：0 warning
 
-### 8.1 覆盖矩阵（97 个用例）
+### 8.1 覆盖矩阵（114 个用例）
 
 | 需求 | 用例（文件） |
 | --- | --- |
@@ -680,6 +680,8 @@ dry-run（fund_ton <to> 20）：
 | P0-2 销毁确认 | 失败轮通过 Jetton Master 的 ReturnExcessesBack（编码 round/kind）完成 reward+principal 确认并 finalize；错误发送者/错误 round 不确认 |
 | P0-3 领取回滚 | principal / reward(50%) / claimAll / unlock 的 bounce 均完整回滚（标记、locked、folded rewards），可重试；ReturnExcesses 清除 pending |
 | TeamVault burn 闭环 | TV burn 先 pending、不发 ack；jettonMaster 的 ReturnExcessesBack 到达后才 ack/累计；bounce 清 pending 不 ack、可重试 |
+| 审计 F-01~F-06 | unlock 双 bounce 不膨胀 locked（相对扣减 + per-owner pending 互斥）；retry 用规范 burn queryId 且不重发在途 burn；bounce 清 dispatched；0.1 TON burn 回传；零额度 roll 保持 PENDING；邀请人后加仓/后滚存 O(1) 补 bonus |
+| 审计 F-07~F-09 | Roll/早领后 get_reward_state 仍返回全额 amountRaw 且 rollable 仅 PENDING；ClaimAll 早领补 RewardEarly 事件；空地址 SetReferrer/SetJettonWallet（RC/TV）被拒且不写状态 |
 
 ### 8.3 V8 gas 实测（Acton emulation，gas units；按主网 gas price 400 nanotons/unit 估算）
 
@@ -733,7 +735,24 @@ P0 安全修复（task-22，外部审查）——修复前后行为差异：
 
 22. **已知异常路径（残留 #2，本次不改）**：非法质押的退款转账失败若 bounce，没有 pending 记录可回滚；资金仍留在 RC Jetton Wallet（未记账），需 admin/ops 手工重发退款。
 
-23. **瘦身（task-23）**：删除废弃 get_round_candle（ABI 经 lead 明确允许）、未引用常量、CandleRecord 类型；合并 ClaimReward/ClaimRewardEarly 为 payEarlyReward（ClaimAll 复用 applyEarlyReward）、BurnAck/ReturnExcesses 为 confirmBurn；格式化压缩。RoundController 1973 → 1,744 行；opcode/body/get 签名未变（仅删除 get_round_candle）。
+23. **瘦身（task-23）**：删除废弃 get_round_candle（ABI 经 lead 明确允许）、未引用常量、CandleRecord 类型；合并 ClaimReward/ClaimRewardEarly 为 payEarlyReward（ClaimAll 复用 applyEarlyReward）、BurnAck/ReturnExcesses 为 confirmBurn；格式化压缩。RoundController 1973 → 1,744 行；opcode/body/get 签名未变（仅删除 get_round_candle）。审计修复后为 1,834 行。
+
+外部审计批次 1+2（task-24）——六条已修复，逐条记录修复前后行为：
+
+24. **F-01（P0）ClaimUnlocked 回滚绝对快照导致 locked 双花**：修复前 UNLOCK 回滚把 lockedRaw 直接置为 lockedBefore，q1/q2 双 bounce 可把 locked 从 0 置回 F，配合仍为 PENDING 的 stakes 再折叠出 2F，循环抽干共享钱包。修复后：① UNLOCK 回滚改为相对扣减 lockedRaw -= lockedDeltaRaw；② LockedState 增加 pendingQueryId，同一 owner 有未确认 claim 时新的 Claim/ClaimUnlocked/RollReward 一律抛 ClaimPending（settle/bounce 清零）。测试：F-01 unlock double-bounce cannot inflate locked pool、F-01 pending claim blocks a second claim and roll。
+25. **F-02（P1）RetryPendingActions reward burn 残留旧代码**：修复前 reward burn 用 msg.queryId + admin 作为 response destination，RC 永远收不到 ReturnExcessesBack。修复后统一为 burnQueryId(round, BURN_QUERY_REWARD) + contract.getAddress()。测试：F-02 retried reward burn uses canonical queryId and confirms、F-02 retried principal burn uses canonical queryId and confirms。
+26. **F-03（P1）burn 无 dispatched 标记导致 retry 双倍销毁**：修复前 settle 后确认前 retry 会再发一次 burn，旧测试甚至断言 burnCount==4。修复后 RoundData 增加 rewardBurnDispatched/principalBurnDispatched，settle 发送时置 true，retry 仅在 !confirmed && !dispatched 时重发；onBouncedMessage 处理 OP_JETTON_BURN，按 queryId 清对应 dispatched。测试：F-03 retry does not resend in-flight burns、F-03 burn bounce clears dispatched and allows exactly one resend；原 invariants 用例的 burnCount 从 4 改回 2。
+27. **F-04（P1）burn 确认可能被静默丢弃**：修复前 sendJettonBurn 仅 0.05 TON，JettonMaster 用 SEND_MODE_IGNORE_ERRORS 发 ReturnExcessesBack，余额不足时静默丢消息 → 永久死锁。修复后 burn value 提到 0.1 TON、excesses 改为 CARRY_ALL_REMAINING_MESSAGE_VALUE | BOUNCE_ON_ACTION_FAIL、calcMinimalBurnAmount 计入回传那一跳的转发费。测试：F-04 burn carries 0.1 TON for the confirmation hop。
+28. **F-05（P1）零额度 RollReward 仍置 ROLLED**：修复前 rollAmount==0 时仍把奖励标 ROLLED、断 streak、锁死奖励并丧失早领权。修复后计算完 rollAmount 即 assert rollAmount > 0 throw RollNotAvailable，状态保持 PENDING。测试：F-05 zero-room roll keeps PENDING and early-claim right；原有两条 20M/200M 截断用例改为断言失败且 PENDING。
+29. **F-06（P1）邀请人后加仓/后滚存不补 bonus**：修复前 bonus 只在被邀请人入账时按当时 ownStake 计算。修复后在 deposit 与 roll 两条路径对「本人作为邀请人」做 O(1) 差额补齐：target = min(20% * referred, ownStakeAfter)，target > current 时补差额并同步 totalWeight。测试：F-06 referrer later stake tops up own bonus、F-06 referrer roll tops up next-round bonus。
+
+外部审计批次 3（task-25）——最后三条已修复：
+
+30. **F-07 get_reward_state 语义 + 除法写法**：修复前用户 Roll/早领后 rewardClaimed=true，get_reward_state 的 amountRaw/earlyAmountRaw 全变 0，前端/索引器无法展示已赢金额。修复后只要 round SUCCEEDED 就返回全额 amountRaw；rollableRaw 仍仅在 state==PENDING 且未领取时非零；earlyAmountRaw = amount/2。另将 roll 路径的 rawAdd 从 rollAmount / (10000/REFERRAL_BPS) 统一为 referralRawAdd(amount) = amount * REFERRAL_BPS / 10000，与 deposit 路径一致（bps 非 2000 时不再有整数截断偏差）。测试：F-07 reward state keeps full amount after roll / after early claim、F-07 roll referral uses unified multiplication formula。
+31. **F-08 ClaimAll 早领不发 RewardEarly**：修复前 ClaimAll 走 applyEarlyReward 但不发事件，索引器漏记 50% 进解锁池。修复后每个发生早领的轮次补 emit RewardEarly{roundId, owner, paidRaw, lockedRaw}，与 ClaimRewardEarly 完全一致。测试：F-08 ClaimAll emits RewardEarly for the early-claimed round。
+32. **F-09 空地址校验缺失**：修复前 SetReferrer 未校验 referrer 为空、SetJettonWallet（RC/TV）未校验 wallet 为空。修复后三处均 assert(addr != createAddressNone()) throw BadConfig，避免一次性邀请关系/钱包地址被写成空值。说明：消息结构字段为内部 address，空地址在解码阶段就会被拒绝（测试用原始 addr_none body 验证 exit 9 且状态不变）；新增 assert 是对未来/非标准编码的纵深防御。测试：F-09 empty SetReferrer is rejected and leaves no binding、F-09 empty RC SetJettonWallet is rejected、F-09 empty TeamVault SetJettonWallet is rejected。
+
+> ABI 三批次均未变（opcode/body/get 签名不变；F-07 仅返回值语义修正，F-08 复用既有事件，F-09 仅内部校验）。合约自此冻结，交 delta 复审。
 21. **P0-3 领取无回滚**：修复前先置 claimed+save 再 NoBounce 转账，失败即永久丢失；修复后领取转账 bounceable、send_excesses 回 RC，pending claim 以全局唯一 queryId 记录；bounce 时回滚 principal/reward/claimAll/unlock 的标记与 locked 金额，成功时由 ReturnExcessesBack 清除 pending。**影响：领取失败可安全重试；每条领取多一次 pending map 读写（gas 见 §8.3）。refund 转账仍为非托管路径（失败时金额仍在 RC 钱包，不涉及已置位领取标记），本轮未改。**
 
 ---
@@ -755,7 +774,7 @@ P0 安全修复（task-22，外部审查）——修复前后行为差异：
     acton --version                  # 1.1.0
     acton build                      # 0 error
     acton check                      # 0 warning
-    acton test                       # 97 passed in 7 files
+    acton test                       # 114 passed in 9 files
     acton build --info               # 对照 §0 的 code hash
     acton script scripts/deploy-emulation.tolk   # 打印部署顺序与地址
     cat deploy/params.testnet.json   # V6.1 参数模板

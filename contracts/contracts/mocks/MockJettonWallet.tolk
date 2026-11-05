@@ -22,6 +22,7 @@ struct MockWalletStorage {
     lastTransferAmount: coins
     burnCount: uint32
     lastBurnAmount: coins
+    autoAck: bool
 }
 
 fun MockWalletStorage.load(): MockWalletStorage {
@@ -40,9 +41,14 @@ struct MockWalletState {
     lastTransferAmount: coins
     burnCount: uint32
     lastBurnAmount: coins
+    autoAck: bool
 }
 
-type MockAllowedMessage = AskToTransfer | AskToBurn | TopUpTons
+struct (0x7e57a0c1) SetMockAutoAck {
+    autoAck: bool
+}
+
+type MockAllowedMessage = AskToTransfer | AskToBurn | SetMockAutoAck | TopUpTons
 
 fun onInternalMessage(in: InMessage) {
     val msg = lazy MockAllowedMessage.fromSlice(in.body);
@@ -56,7 +62,21 @@ fun onInternalMessage(in: InMessage) {
             st.lastTransferDest = msg.transferRecipient;
             st.lastTransferAmount = msg.jettonAmount;
             st.save();
-
+            // Real-wallet behaviour used by tracked claims: confirm via excess return.
+            if (st.autoAck && msg.sendExcessesTo != null && msg.sendExcessesTo! == st.owner) {
+                val ack = createMessage({
+                    bounce: BounceMode.NoBounce,
+                    value: ton("0.01"),
+                    dest: st.owner,
+                    body: ReturnExcessesBack { queryId: msg.queryId },
+                });
+                ack.send(SEND_MODE_PAY_FEES_SEPARATELY);
+            }
+        }
+        SetMockAutoAck => {
+            var st = lazy MockWalletStorage.load();
+            st.autoAck = msg.autoAck;
+            st.save();
         }
         AskToBurn => {
             var st = lazy MockWalletStorage.load();
@@ -84,5 +104,6 @@ get fun get_mock_state(): MockWalletState {
         lastTransferAmount: st.lastTransferAmount,
         burnCount: st.burnCount,
         lastBurnAmount: st.lastBurnAmount,
+        autoAck: st.autoAck,
     };
 }
