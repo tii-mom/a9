@@ -46,7 +46,10 @@ export interface ProtocolConfig {
     oracleAdapter: string | null;
     codeHash: string | null;
     oracleConfigHash: string | null;
-    multisig: string | null;
+    /** 管理员 owner（单密钥，项目不设多签） */
+    adminOwner: string | null;
+    /** 团队额度钱包（owner = RoundController） */
+    teamWallet: string | null;
     auditReportUrl: string | null;
   };
   tonConnectManifestUrl: string | null;

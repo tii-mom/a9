@@ -1,6 +1,6 @@
 # 05 --- 安全要求、威胁模型与测试清单
 
-> **口径声明（V3）**：奖励池 70 亿、每轮 7 亿；报名 48h；无人质押启动观察；奖励一次性发放。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V4）**：奖励池 70 亿、每轮 7 亿；团队每轮 1.2 亿随轮次释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；报名 48h；无人质押启动观察（0 人通过 → 奖励销毁）；不设多签（单密钥 owner）。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 威胁模型
 
@@ -28,7 +28,9 @@
 
   重复领取                用户多次调用 claim           claimed/pending 状态与唯一 claimId
 
-  管理员滥权              修改价格目标或恢复失败轮次   不可变配置、受限多签、终态不可逆
+  管理员滥权              修改价格目标或恢复失败轮次   不可变配置、单密钥 owner 权限最小化、终态不可逆
+
+  单密钥泄露/丢失          owner 私钥或托管钱包失窃      硬件钱包、冷热分离、地址公开、密钥备份与轮换演练、控制器不可升级
 
   资金卡死                预言机长期不可用             ORACLE_PAUSED 与技术性退款路径
 
@@ -59,6 +61,10 @@
 17. 实际 burn 必须使 Jetton Master total_supply 减少。
 18. 管理员不得更改已开始轮次的目标价、K线阈值或 oracle config hash。
 19. 无人质押的轮次也必须完成完整观察窗口（12 根 K 线），不得跳过、延期或直接判负。
+20. 团队额度每轮上限为 `1.2亿 × TOKEN_SCALE`，十轮释放 + 销毁合计等于 `12亿 × TOKEN_SCALE`。
+21. 同一轮的团队额度不得同时释放和销毁；每轮最多发生一次。
+22. 成功轮团队释放量精确等于 1.2 亿；失败轮团队 burn 量精确等于 1.2 亿。
+23. 0 人质押且轮次通过时，本轮 7 亿奖励必须销毁（不得留存、回流或转移）。
 
 ## 3. 单元测试
 
@@ -105,24 +111,28 @@
 -   奖励总分配不超过7亿。
 -   舍入余数留在奖励金库。
 -   失败轮次不能领取奖励。
+-   成功轮团队额度精确释放 1.2 亿，且只释放一次。
+-   团队释放失败（bounce）时可重试且不重复释放。
+-   0 人质押且通过：7 亿奖励全部销毁，无任何领取记录。
 
 ### 3.5 失败结算
 
--   失败时奖励 burn 金额精确等于7亿。
--   失败时质押 burn 金额精确等于 roundTotalStake。
--   两笔 burn ack 缺一不可。
+-   失败时奖励 burn 金额精确等于7亿（kind = reward）。
+-   失败时团队 burn 金额精确等于1.2亿（kind = team）。
+-   失败时质押 burn 金额精确等于 roundTotalStake（kind = principal）。
+-   **三笔** burn ack 缺一不可。
 -   重复 BurnAck 不会重复计账。
 -   burn 消息 bounce 时可安全重试。
 -   burn 未确认时轮次不得标记为最终失败。
 -   失败终态不能重新打开。
 -   下一轮价格目标保持原公式。
 
-### 3.6 无人质押（V3）
+### 3.6 无人质押（V3，V4 补充）
 
 -   报名关闭时 `totalAcceptedStake == 0`：仍进入 `OBSERVING`，不跳过、不延期。
 -   `stakeOpenAt = prevSettledAt + 48h`、`stakeCloseAt = stakeOpenAt + 48h`、`observationStart = stakeCloseAt` 三个时间点必须精确。
--   无人质押 + 失败：奖励 burn 金额精确等于 7 亿，本金 burn 金额为 0。
--   无人质押 + 通过：奖励按质押比例分配；单一质押人获得全部 7 亿；0 名质押人时奖励无接收人（按配置销毁或留存，D-18b 待定），不得死锁轮次。
+-   无人质押 + 失败：奖励 burn 金额精确等于 7 亿、团队 burn 1.2 亿，本金 burn 金额为 0。
+-   无人质押 + 通过：奖励按质押比例分配；单一质押人获得全部 7 亿；**0 名质押人时本轮 7 亿奖励销毁**（D-18b 已定，不得留存或转移），且不得死锁轮次。
 -   无人质押不得导致轮次卡在 `STAKING_CLOSED` 或重复开轮。
 
 ## 4. 集成测试
@@ -131,9 +141,10 @@
 StakingVault Jetton Wallet -\> StakingVault notification。 2.
 StakingVault -\> RoundController stake ledger 更新。 3. Keeper -\>
 OracleAdapter -\> RoundController candle 记录。 4. RoundController -\>
-RewardVault/StakingVault burn request。 5. Vault owner -\> Jetton Wallet
+RewardVault/团队钱包/StakingVault 的 burn 或 release request。 5. Vault owner -\> Jetton Wallet
 burn。 6. Jetton Wallet -\> Jetton Master burn_notification。 7. Jetton
-Master -\> RoundController BurnAck。 8. 用户 claim -\> Vault -\> Jetton
+Master -\> RoundController BurnAck（三笔）。 8. 成功轮：RoundController -\>
+团队钱包（1.2 亿释放）。 9. 用户 claim -\> Vault -\> Jetton
 transfer -\> 用户 Jetton Wallet。
 
 每个环节都要测试成功、bounce、重复消息、超时和重试。
@@ -149,8 +160,9 @@ payload； - 任意 bounce 状态。
 
 ## 6. 主网前安全要求
 
--   第三方智能合约安全审计。
+-   第三方智能合约安全审计（自研面仅 RoundController，含团队释放/销毁、0 人质押分支、领取逻辑）。
 -   Jetton Master/Wallet 及自定义 burn ack 扩展专项审计。
+-   密钥托管专项检查：单密钥 owner 与个人钱包的权限最小化、硬件钱包与备份流程。
 -   OracleAdapter 签名验证专项审计。
 -   经济攻击模拟（低流动性拉盘、价格回落、预言机延迟）。
 -   大额质押与失败销毁压力测试。

@@ -33,6 +33,7 @@ const MIN_QUALIFIED_CANDLES = 8;
 const CANDLE_SECONDS = 14_400;
 const OBSERVATION_SECONDS = CANDLE_SECONDS * CANDLE_COUNT;
 const ROUND_REWARD_TOKENS = 700_000_000n; // 70% / 10 轮
+const TEAM_ROUND_TOKENS = 120_000_000n; // 团队 12% / 10 轮（达标释放、失败销毁）
 const TOTAL_SUPPLY_TOKENS = 10_000_000_000n;
 const ROUND_REWARD_RAW = ROUND_REWARD_TOKENS * TOKEN_SCALE;
 const TOTAL_SUPPLY_RAW = TOTAL_SUPPLY_TOKENS * TOKEN_SCALE;
@@ -156,7 +157,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     totalStake = ROUND_STAKES_TOKENS[2] * TOKEN_SCALE;
     stakers = ADDRESSES.length;
     result = "'FAILURE'";
-    burned = (ROUND_REWARD_RAW + ROUND_STAKES_TOKENS[2] * TOKEN_SCALE).toString();
+    burned = (ROUND_REWARD_RAW + TEAM_ROUND_TOKENS * TOKEN_SCALE + ROUND_STAKES_TOKENS[2] * TOKEN_SCALE).toString();
     updatedAt = R2_STAKE_CLOSE + CANDLE_COUNT * C;
   } else if (roundId === 3) {
     state = 'OBSERVING';
@@ -314,6 +315,7 @@ const candleSeedRows = [
 
 const burnRows = [
   [2, q('reward'), q(ROUND_REWARD_RAW.toString()), q('R2:reward'), 1, n(R2_STAKE_CLOSE + CANDLE_COUNT * C), n(R2_STAKE_CLOSE + CANDLE_COUNT * C + 60_000)],
+  [2, q('team'), q((TEAM_ROUND_TOKENS * TOKEN_SCALE).toString()), q('R2:team'), 1, n(R2_STAKE_CLOSE + CANDLE_COUNT * C), n(R2_STAKE_CLOSE + CANDLE_COUNT * C + 60_000)],
   [
     2,
     q('principal'),
@@ -370,7 +372,7 @@ for (let i = 0; i < 10; i++) {
 const eventRows = [
   [n(R1_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R1 质押窗口开启（演示种子）')],
   [n(R1_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R1 质押窗口关闭：12 个地址，214,800,000 A9')],
-  [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：10/12 根达标，本金不销毁，7 亿奖励开放领取')],
+  [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：10/12 根达标，本金不销毁，7 亿奖励开放领取，团队 1.2 亿额度已释放')],
   [n(R2_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R2 质押窗口开启（演示种子）')],
   [n(R2_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R2 质押窗口关闭：12 个地址，241,500,000 A9')],
   [
@@ -378,7 +380,7 @@ const eventRows = [
     q('warn'),
     q('system'),
     q('ROUND_FAILED_PERMANENT'),
-    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 700,000,000 + 质押本金 241,500,000 = 991,500,000 A9'),
+    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 700,000,000 + 团队 120,000,000 + 质押本金 241,500,000 = 991,500,000 A9'),
   ],
   [
     n(R2_STAKE_CLOSE + CANDLE_COUNT * C + 60_000),
@@ -404,6 +406,7 @@ const configRows = [
   ['price_multiplier', '2'],
   ['round_count', String(ROUND_COUNT)],
   ['round_reward_raw', ROUND_REWARD_RAW.toString()],
+  ['team_round_raw', (TEAM_ROUND_TOKENS * TOKEN_SCALE).toString()],
   ['total_supply_raw', TOTAL_SUPPLY_RAW.toString()],
   ['candle_seconds', String(CANDLE_SECONDS)],
   ['candle_count', String(CANDLE_COUNT)],
@@ -434,7 +437,8 @@ const configRows = [
   ['contract_oracle_adapter', ''],
   ['contract_code_hash', ''],
   ['contract_oracle_config_hash', ''],
-  ['contract_multisig', ''],
+  ['contract_admin_owner', ''],
+  ['contract_team_wallet', ''],
   ['contract_audit_report_url', ''],
 ];
 
@@ -574,9 +578,9 @@ writeFileSync(OUT_FILE, statementChunks.join('\n'), 'utf8');
 
 /* ------------------------------- 自检 ------------------------------- */
 
-const burnedInvariant = ROUND_REWARD_RAW + ROUND_STAKES_TOKENS[2] * TOKEN_SCALE;
+const burnedInvariant = ROUND_REWARD_RAW + TEAM_ROUND_TOKENS * TOKEN_SCALE + ROUND_STAKES_TOKENS[2] * TOKEN_SCALE;
 const ok =
-  burnedInvariant === 700_000_000n * TOKEN_SCALE + 241_500_000n * TOKEN_SCALE &&
+  burnedInvariant === 700_000_000n * TOKEN_SCALE + 120_000_000n * TOKEN_SCALE + 241_500_000n * TOKEN_SCALE &&
   ADDRESSES.length === 12 &&
   new Set(ADDRESSES).size === 12 &&
   ROUND_REWARD_RAW * BigInt(ROUND_COUNT) === 7_000_000_000n * TOKEN_SCALE &&
@@ -588,7 +592,7 @@ console.log('  DEMO_CANDLE_SECONDS  :', DEMO_CANDLE_SECONDS);
 console.log('  rounds               :', roundRows.length, '(R1 SUCCEEDED / R2 FAILED_PERMANENT / R3 OBSERVING / R4-R10 UNOPENED)');
 console.log('  stakes               :', stakeRows.length, '（12 地址 × R1/R2/R3）');
 console.log('  claims               :', claimRows.length);
-console.log('  burn_ledger          :', burnRows.length, '(R2 reward 700,000,000 + principal 241,500,000 = 991,500,000 A9)');
+console.log('  burn_ledger          :', burnRows.length, '(R2 reward 700,000,000 + team 120,000,000 + principal 241,500,000 = 1,061,500,000 A9)');
 console.log('  candles              :', candleSeedRows.length, '(R1 12 / R2 12 / R3 6)');
 console.log('  trades               :', tradeRows.length, '/ book_levels:', bookRows.length, '/ admin_events:', eventRows.length);
 console.log('  R3 已收盘 K 线       :', R3_SEEDED_CANDLES, '（4 达标 / 2 未达标，第 7 根为 live）');

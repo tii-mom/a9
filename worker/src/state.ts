@@ -17,6 +17,7 @@ import {
   ROUND_REWARD_RAW,
   STAKE_DURATION_SECONDS,
   STAKE_GAP_SECONDS,
+  TEAM_ROUND_RAW,
   TOTAL_SUPPLY_RAW,
   RISK_DISCLOSURE_VERSION,
   CANDLE_SECONDS,
@@ -104,6 +105,7 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
     riskDisclosureVersion: numberFrom(kv, 'risk_disclosure_version', RISK_DISCLOSURE_VERSION),
     stakeDurationSeconds: numberFrom(kv, 'stake_duration_seconds', STAKE_DURATION_SECONDS),
     stakeGapSeconds: numberFrom(kv, 'stake_gap_seconds', STAKE_GAP_SECONDS),
+    teamRoundRaw: bigintFrom(kv, 'team_round_raw', TEAM_ROUND_RAW),
     observationSeconds: numberFrom(kv, 'observation_seconds', candleSeconds * CANDLE_COUNT),
     dataSource,
     network: networkValue === 'mainnet' ? 'mainnet' : networkValue === 'demo' ? 'demo' : 'testnet',
@@ -218,12 +220,25 @@ async function settleSuccess(env: Env, params: Params, round: RoundRow, now: num
       'info',
       'system',
       'ROUND_SUCCEEDED',
-      `R${round.round_id} SUCCEEDED：本金不销毁，${params.roundRewardRaw.toString()} raw 奖励开放领取`,
+      `R${round.round_id} SUCCEEDED：本金不销毁，${params.roundRewardRaw.toString()} raw 奖励开放领取；团队轮次额度 ${params.teamRoundRaw.toString()} raw 已释放`,
     );
     round.state = 'SUCCEEDED';
     round.result = 'SUCCESS';
     round.burned_raw = null;
     round.updated_at = now;
+    // D-18b：0 人质押且本轮通过 → 本轮奖励无接收人，直接销毁（不回流、不留存）
+    const staked = toBigInt(round.total_accepted_stake_raw);
+    if (staked === 0n) {
+      await store.recordNoStakerRewardBurn(env, round.round_id, params.roundRewardRaw.toString(), now);
+      round.burned_raw = params.roundRewardRaw.toString();
+      await store.logEvent(
+        env,
+        'warn',
+        'system',
+        'REWARD_BURNED_NO_STAKER',
+        `R${round.round_id} 0 人质押且本轮达标：本轮奖励 ${params.roundRewardRaw.toString()} raw 无接收人，已销毁（D-18b）`,
+      );
+    }
   }
   return done;
 }
@@ -234,7 +249,8 @@ async function settleFailure(env: Env, params: Params, round: RoundRow, now: num
   if (!moved) return false;
   const principal = toBigInt(round.total_accepted_stake_raw);
   const reward = params.roundRewardRaw;
-  const burned = reward + principal;
+  const team = params.teamRoundRaw;
+  const burned = reward + team + principal;
   await store.logEvent(
     env,
     'warn',
@@ -248,6 +264,7 @@ async function settleFailure(env: Env, params: Params, round: RoundRow, now: num
     candlesSeen: round.candles_seen,
     qualifiedCandles: round.qualified_candles,
     rewardBurnRaw: reward.toString(),
+    teamBurnRaw: team.toString(),
     principalBurnRaw: principal.toString(),
     burnedRaw: burned.toString(),
   });
@@ -257,14 +274,14 @@ async function settleFailure(env: Env, params: Params, round: RoundRow, now: num
       'error',
       'system',
       'ROUND_FAILED_PERMANENT',
-      `R${round.round_id} FAILED_PERMANENT：销毁奖励 ${reward.toString()} + 质押本金 ${principal.toString()} = ${burned.toString()} raw，永久关闭`,
+      `R${round.round_id} FAILED_PERMANENT：销毁奖励 ${reward.toString()} + 团队轮次额度 ${team.toString()} + 质押本金 ${principal.toString()} = ${burned.toString()} raw，永久关闭`,
     );
     await store.logEvent(
       env,
       'warn',
       'system',
       'BURN_CONFIRMED',
-      `R${round.round_id} burnId R${round.round_id}:reward / R${round.round_id}:principal 已确认（demo 模拟 JetMaster burn ack）`,
+      `R${round.round_id} burnId R${round.round_id}:reward / :team / :principal 已确认（demo 模拟 JetMaster burn ack）`,
     );
     round.state = 'FAILED_PERMANENT';
     round.result = 'FAILURE';

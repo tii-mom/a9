@@ -15,6 +15,8 @@ export const ROUND_COUNT = 10;
 
 /** 每轮奖励预算 700,000,000 A9（raw）：70% 奖励池 ÷ 10 轮 */
 export const ROUND_REWARD_RAW = 700_000_000n * TOKEN_SCALE;
+/** 团队额度每轮释放/销毁量 = 12% ÷ 10 轮 = 120,000,000 A9（raw） */
+export const TEAM_ROUND_RAW = 120_000_000n * TOKEN_SCALE;
 /** 初始总供应 10,000,000,000 A9（raw） */
 export const TOTAL_SUPPLY_RAW = 10_000_000_000n * TOKEN_SCALE;
 
@@ -82,6 +84,8 @@ export interface Params {
   stakeDurationSeconds: number;
   /** 轮次间隔（秒）：上一轮结算后 48h 开启下一轮 */
   stakeGapSeconds: number;
+  /** 团队每轮额度（raw）：达标释放、失败销毁 */
+  teamRoundRaw: bigint;
   observationSeconds: number;
   dataSource: DataSource;
   network: 'mainnet' | 'testnet' | 'demo';

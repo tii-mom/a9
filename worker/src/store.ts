@@ -245,19 +245,25 @@ export interface FinalizeFailureInput {
   candlesSeen: number;
   qualifiedCandles: number;
   rewardBurnRaw: string;
+  teamBurnRaw: string;
   principalBurnRaw: string;
   burnedRaw: string;
 }
 
 /** 失败终态：写入两笔销毁账本 + 轮次 FAILED_PERMANENT，单事务批量执行（幂等）。 */
 export async function finalizeFailure(env: Env, input: FinalizeFailureInput): Promise<boolean> {
-  const { roundId, now, candlesSeen, qualifiedCandles, rewardBurnRaw, principalBurnRaw, burnedRaw } = input;
+  const { roundId, now, candlesSeen, qualifiedCandles, rewardBurnRaw, teamBurnRaw, principalBurnRaw, burnedRaw } = input;
   const results = await env.DB.batch([
     env.DB.prepare(
       `INSERT OR IGNORE INTO burn_ledger
          (round_id, kind, amount_raw, burn_ref, confirmed, created_at, confirmed_at)
        VALUES (?, 'reward', ?, ?, 1, ?, ?)`,
     ).bind(roundId, rewardBurnRaw, `R${roundId}:reward`, now, now),
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO burn_ledger
+         (round_id, kind, amount_raw, burn_ref, confirmed, created_at, confirmed_at)
+       VALUES (?, 'team', ?, ?, 1, ?, ?)`,
+    ).bind(roundId, teamBurnRaw, `R${roundId}:team`, now, now),
     env.DB.prepare(
       `INSERT OR IGNORE INTO burn_ledger
          (round_id, kind, amount_raw, burn_ref, confirmed, created_at, confirmed_at)
@@ -408,7 +414,7 @@ export async function insertClaimsBulk(
 
 export async function insertBurnsBulk(
   env: Env,
-  rows: { round_id: number; kind: 'reward' | 'principal'; amount_raw: string; burn_ref: string; confirmed: number; created_at: number; confirmed_at: number }[],
+  rows: { round_id: number; kind: 'reward' | 'principal' | 'team'; amount_raw: string; burn_ref: string; confirmed: number; created_at: number; confirmed_at: number }[],
 ): Promise<void> {
   if (!rows.length) return;
   const statements = rows.map((row) =>
@@ -418,6 +424,18 @@ export async function insertBurnsBulk(
     ).bind(row.round_id, row.kind, row.amount_raw, row.burn_ref, row.confirmed, row.created_at, row.confirmed_at),
   );
   await runBatches(env, statements);
+}
+
+/** D-18b：0 人质押且本轮通过 → 本轮奖励销毁；记录销毁并回写轮次 burned_raw。 */
+export async function recordNoStakerRewardBurn(env: Env, roundId: number, amountRaw: string, now: number): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT OR IGNORE INTO burn_ledger
+         (round_id, kind, amount_raw, burn_ref, confirmed, created_at, confirmed_at)
+       VALUES (?, 'reward', ?, ?, 1, ?, ?)`,
+    ).bind(roundId, amountRaw, `R${roundId}:reward_nostaker`, now, now),
+    env.DB.prepare('UPDATE rounds SET burned_raw = ?, updated_at = ? WHERE round_id = ?').bind(amountRaw, now, roundId),
+  ]);
 }
 
 export async function insertBookLevels(env: Env, rows: BookRow[]): Promise<void> {

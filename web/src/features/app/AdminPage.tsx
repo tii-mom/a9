@@ -478,7 +478,8 @@ export default function AdminPage() {
         { label: 'Oracle Adapter', value: config.contracts.oracleAdapter },
         { label: 'Code hash', value: config.contracts.codeHash },
         { label: 'Oracle config hash', value: config.contracts.oracleConfigHash },
-        { label: 'Multisig', value: config.contracts.multisig },
+        { label: 'Admin owner（单密钥）', value: config.contracts.adminOwner },
+        { label: 'Team wallet（owner=Controller）', value: config.contracts.teamWallet },
         { label: 'Audit report', value: config.contracts.auditReportUrl },
       ]
     : [];
