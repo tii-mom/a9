@@ -1,6 +1,6 @@
 # 02 --- 轮次状态机与结算流程
 
-> **口径声明（V4）**：报名窗口 48h、上一轮结算后 48h 开启下一轮、观察窗口 48h、每轮奖励 7 亿、无人质押照常启动观察、0 人质押且通过 → 奖励销毁、团队每轮 1.2 亿随轮次释放/销毁、失败销毁三笔。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V5）**：报名窗口 **72h**（上一轮结算后立即开启，无间隔）、观察窗口 48h、每轮奖励 7 亿、无人质押照常启动观察、0 人质押且通过 → 奖励销毁、团队每轮 1.2 亿由 TeamVault 释放/销毁、失败销毁三笔、奖励 pull claim（可跨轮累积）。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 状态定义
 
@@ -82,18 +82,18 @@ OBSERVING -> ORACLE_PAUSED -> OBSERVING
 
 轮次编号从1开始。
 
-## 4. 质押窗口（V3：48 小时）
+## 4. 质押窗口（V5：72 小时）
 
-V3 已确认报名窗口为 **48 小时（172,800 秒）**，在**上一轮结算完成后 48 小时**开启。
+V5 已确认报名窗口为 **72 小时（259,200 秒）**，在**上一轮结算完成后立即开启**（无间隔）。
 
 参数： - `stakeOpenAt` - `stakeCloseAt` - `stakeDuration` - `stakeGap` - `roundId` - `prevSettledAt`
 
 时间定义：
 
 ``` text
-stakeOpenAt  = prevSettledAt + STAKE_GAP_SECONDS      // 上一轮结算后 48h；R1 由项目方指定
-stakeCloseAt = stakeOpenAt + STAKE_DURATION_SECONDS   // 报名窗口 48h
-stakeDuration = stakeCloseAt - stakeOpenAt = 172,800  // 秒
+stakeOpenAt  = prevSettledAt + STAKE_GAP_SECONDS      // STAKE_GAP_SECONDS = 0：结算后立即开启；R1 由项目方指定
+stakeCloseAt = stakeOpenAt + STAKE_DURATION_SECONDS   // 报名窗口 72h
+stakeDuration = stakeCloseAt - stakeOpenAt = 259,200  // 秒
 ```
 
 规则： 1. 只有 `STAKING_OPEN` 状态接受新质押。 2. 当前链上时间必须满足
@@ -126,8 +126,8 @@ V3 已确认：**报名窗口关闭即进入观察**，不额外等待、不做 
 
 第12根结束时间： `observationEnd = observationStart + 172800`
 
-若主网要求 K 线对齐 UTC 4 小时边界，应在**开轮时**把 `stakeOpenAt` 对齐到 UTC 4h 整点（这样
-`stakeCloseAt` 自然落在 4h 边界），禁止在报名结束后对 `observationStart` 做 `ceil` 平移（会产生无观察数据的空窗）。
+若主网要求 K 线对齐 UTC 4 小时边界：因间隔为 0，应在**结算时**让 `prevSettledAt` 落在 UTC 4h 边界（从而
+`stakeOpenAt = prevSettledAt`、`stakeCloseAt = prevSettledAt + 72h` 自然对齐）；禁止在报名结束后对 `observationStart` 做 `ceil` 平移（会产生无观察数据的空窗）。
 
 观察窗口必须使用12个连续完整区间。不得由前端或管理员任意指定起止时间。
 
@@ -169,10 +169,9 @@ V3 已确认：**报名窗口关闭即进入观察**，不额外等待、不做 
 
 进入 `SETTLING_SUCCESS` 后： 1. 禁止继续质押。 2. 固化
 `totalStake`、用户 stake 账本及奖励权重快照。 3. 本金变为可领取状态。 4.
-奖励池变为可领取状态（本轮 7 亿；**一次性发放、无归属期**，D-16/D-17 已确认）。 5. 用户主动调用 `claimPrincipal` 和
-`claimReward`（领取方式 D-25 待定，推荐 pull claim）。 6. 每个用户、每轮、每种领取类型均有独立幂等标记。 7.
-**团队 1.2 亿立即转出**：从控制器托管的团队额度钱包转到团队收款钱包（D-20，无 cliff / 无线性；释放记录幂等）。 8.
-全部操作完成后可标记 `SUCCEEDED`；如果采用 pull claim，状态可先进入
+奖励池变为可领取状态（本轮 7 亿；**一次性发放、无归属期**，D-16/D-17 已确认）。 5. 用户主动调用 `claimPrincipal` / `claimReward`；奖励采用 **pull claim（D-25 已定）**：可带 roundId 列表或 `claimAll`，一次领走多轮，最多遍历 10 轮，合并为一笔转账，gas 由用户付。 6. 每个用户、每轮、每种领取类型均有独立幂等标记。 7.
+**团队 1.2 亿立即转出**：RoundController 指令 **TeamVault** 转到团队收款钱包（D-20，无 cliff / 无线性；释放记录幂等）。 8.
+全部操作完成后可标记 `SUCCEEDED`；采用 pull claim 时状态可先进入
 `SUCCEEDED`，未领取余额继续留在金库。
 
 ## 9. 失败结算
@@ -180,7 +179,7 @@ V3 已确认：**报名窗口关闭即进入观察**，不额外等待、不做 
 进入 `SETTLING_FAILURE` 后： 1. 立即冻结该轮所有质押和奖励领取。 2.
 冻结本轮用户 stake ledger。 3. 计算
 `expectedStakeBurn = totalAcceptedStake`。 4. 请求销毁本轮 `700,000,000`
-奖励（kind = `reward`）。 5. 请求销毁本轮团队额度 `120,000,000`（kind = `team`）。 6. 请求销毁本轮全部已接受质押本金（kind = `principal`）。 7. 每个 burn 请求必须有唯一
+奖励（kind = `reward`）。 5. 指令 **TeamVault** 销毁本轮团队额度 `120,000,000`（kind = `team`）。 6. 请求销毁本轮全部已接受质押本金（kind = `principal`）。 7. 每个 burn 请求必须有唯一
 `burnId`。 8. Jetton Master 确认供应量已减少后，向协议发送 burn
 acknowledgement。 9. 协议核对**三笔**销毁金额和 burnId。 10.
 全部销毁确认后，标记 `FAILED_PERMANENT`。 11. 下一轮按固定价格阶梯开放。
@@ -202,9 +201,9 @@ TON 合约之间异步交互，不得假设多个合约可以在同一原子事�
 
 ## 11. 后续轮次
 
-上一轮进入 `SUCCEEDED` 或 `FAILED_PERMANENT` 后，再等待 **48 小时**（`prevSettledAt + 48h`）才允许开启下一轮报名。
+上一轮进入 `SUCCEEDED` 或 `FAILED_PERMANENT` 后，**立即开启下一轮报名**（间隔 0），报名窗口 72 小时。
 
 失败轮次不会导致价格阶梯重置： - Round 1 失败，Round 2 目标仍为 4×P0。 -
 Round 2 失败，Round 3 目标仍为 8×P0。 - 依此类推。
 
-即使市场价格已高于下一轮目标，也必须完成该轮自己的质押窗口和完整48小时考核。
+即使市场价格已高于下一轮目标，也必须完成该轮自己的报名窗口和完整 48 小时考核（该「现价已超目标价」问题列为 V5 待决策，见 docs/00 §7）。

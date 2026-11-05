@@ -11,6 +11,13 @@ export const USD_SCALE = 100_000_000n;
 /** P0 = $0.001 → USD_E8（V3：第 10 轮目标 = 1024 × P0 = $1.024） */
 export const P0_USD_E8 = 100_000n;
 export const PRICE_MULTIPLIER = 2;
+/**
+ * 目标价模式（V5 待决策，先用配置开关，避免定案后改合约参数名）：
+ * - FIXED_LADDER：target = P0 × 2^n（当前口径）
+ * - RELATIVE_DOUBLE：target = 报名截止时的参考 TWAP × 2（方案 A，待项目方确认后启用）
+ */
+export type TargetMode = 'FIXED_LADDER' | 'RELATIVE_DOUBLE';
+export const DEFAULT_TARGET_MODE: TargetMode = 'FIXED_LADDER';
 export const ROUND_COUNT = 10;
 
 /** 每轮奖励预算 700,000,000 A9（raw）：70% 奖励池 ÷ 10 轮 */
@@ -25,10 +32,10 @@ export const CANDLE_SECONDS = 14_400;
 export const CANDLE_COUNT = 12;
 export const MIN_QUALIFIED_CANDLES = 8;
 export const OBSERVATION_SECONDS = CANDLE_SECONDS * CANDLE_COUNT;
-/** 真实规格：报名窗口 48 小时（V3 决策：上一轮结算后 48h 开启，窗口 48h） */
-export const STAKE_DURATION_SECONDS = 48 * 3600;
-/** 轮次间隔：上一轮结算完成后 48 小时开启下一轮报名 */
-export const STAKE_GAP_SECONDS = 48 * 3600;
+/** 真实规格：报名窗口 72 小时（V5 口径：上一轮结算后即开启，窗口 72h） */
+export const STAKE_DURATION_SECONDS = 72 * 3600;
+/** 轮次间隔：上一轮结算完成后开启下一轮报名的缓冲（V5 暂定 0，价格闸门方案待定） */
+export const STAKE_GAP_SECONDS = 0;
 export const RISK_DISCLOSURE_VERSION = 1;
 
 /** 演示加速：默认 90s / 根（wrangler.toml 可覆盖） */
@@ -86,6 +93,8 @@ export interface Params {
   stakeGapSeconds: number;
   /** 团队每轮额度（raw）：达标释放、失败销毁 */
   teamRoundRaw: bigint;
+  /** 目标价模式（V5 待决策） */
+  targetMode: TargetMode;
   observationSeconds: number;
   dataSource: DataSource;
   network: 'mainnet' | 'testnet' | 'demo';

@@ -18,6 +18,8 @@ import {
   STAKE_DURATION_SECONDS,
   STAKE_GAP_SECONDS,
   TEAM_ROUND_RAW,
+  DEFAULT_TARGET_MODE,
+  type TargetMode,
   TOTAL_SUPPLY_RAW,
   RISK_DISCLOSURE_VERSION,
   CANDLE_SECONDS,
@@ -106,6 +108,7 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
     stakeDurationSeconds: numberFrom(kv, 'stake_duration_seconds', STAKE_DURATION_SECONDS),
     stakeGapSeconds: numberFrom(kv, 'stake_gap_seconds', STAKE_GAP_SECONDS),
     teamRoundRaw: bigintFrom(kv, 'team_round_raw', TEAM_ROUND_RAW),
+    targetMode: parseTargetMode(kv.get('target_mode')),
     observationSeconds: numberFrom(kv, 'observation_seconds', candleSeconds * CANDLE_COUNT),
     dataSource,
     network: networkValue === 'mainnet' ? 'mainnet' : networkValue === 'demo' ? 'demo' : 'testnet',
@@ -124,6 +127,11 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
     ),
     now,
   };
+}
+
+/** 目标价模式：V5 待决策，默认固定阶梯。 */
+function parseTargetMode(raw: string | undefined): TargetMode {
+  return raw === 'RELATIVE_DOUBLE' ? 'RELATIVE_DOUBLE' : DEFAULT_TARGET_MODE;
 }
 
 /** DEMO_AUTOPLAY 开关：env 优先，其次 D1 config；默认开启，仅 demo 数据源生效。 */

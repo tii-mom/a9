@@ -479,7 +479,8 @@ export default function AdminPage() {
         { label: 'Code hash', value: config.contracts.codeHash },
         { label: 'Oracle config hash', value: config.contracts.oracleConfigHash },
         { label: 'Admin owner（单密钥）', value: config.contracts.adminOwner },
-        { label: 'Team wallet（owner=Controller）', value: config.contracts.teamWallet },
+        { label: 'Team Vault（12 亿托管）', value: config.contracts.teamVault },
+        { label: 'Team wallet（收款）', value: config.contracts.teamWallet },
         { label: 'Audit report', value: config.contracts.auditReportUrl },
       ]
     : [];

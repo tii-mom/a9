@@ -38,8 +38,8 @@ const TOTAL_SUPPLY_TOKENS = 10_000_000_000n;
 const ROUND_REWARD_RAW = ROUND_REWARD_TOKENS * TOKEN_SCALE;
 const TOTAL_SUPPLY_RAW = TOTAL_SUPPLY_TOKENS * TOKEN_SCALE;
 const RISK_DISCLOSURE_VERSION = 1;
-const STAKE_DURATION_SECONDS = 48 * 3600; // V3：报名窗口 48h
-const STAKE_GAP_SECONDS = 48 * 3600; // 上一轮结算后 48h 开启下一轮
+const STAKE_DURATION_SECONDS = 72 * 3600; // V5：报名窗口 72h
+const STAKE_GAP_SECONDS = 0; // 上一轮结算后即开启下一轮（V5 暂定）
 
 const EPOCH = Number(process.env.EPOCH || Date.now());
 const DEMO_CANDLE_SECONDS = Math.max(1, Number(process.env.DEMO_CANDLE_SECONDS || 90));
@@ -113,7 +113,7 @@ const ROUND_STAKES_TOKENS = {
 const R3_SEEDED_CANDLES = 6;
 const R3_OBSERVATION_START = EPOCH - R3_SEEDED_CANDLES * C;
 const R3_STAKE_CLOSE = R3_OBSERVATION_START;
-const R3_STAKE_OPEN = R3_STAKE_CLOSE - 2 * DAY;
+const R3_STAKE_OPEN = R3_STAKE_CLOSE - 3 * DAY;
 
 const R1_STAKE_CLOSE = EPOCH - 21 * DAY;
 const R2_STAKE_CLOSE = EPOCH - 14 * DAY;
@@ -136,7 +136,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
 
   if (roundId === 1) {
     state = 'SUCCEEDED';
-    stakeOpen = n(R1_STAKE_CLOSE - 2 * DAY);
+    stakeOpen = n(R1_STAKE_CLOSE - 3 * DAY);
     stakeClose = n(R1_STAKE_CLOSE);
     observationStart = n(R1_STAKE_CLOSE);
     observationEnd = n(R1_STAKE_CLOSE + CANDLE_COUNT * C);
@@ -148,7 +148,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     updatedAt = R1_STAKE_CLOSE + CANDLE_COUNT * C;
   } else if (roundId === 2) {
     state = 'FAILED_PERMANENT';
-    stakeOpen = n(R2_STAKE_CLOSE - 2 * DAY);
+    stakeOpen = n(R2_STAKE_CLOSE - 3 * DAY);
     stakeClose = n(R2_STAKE_CLOSE);
     observationStart = n(R2_STAKE_CLOSE);
     observationEnd = n(R2_STAKE_CLOSE + CANDLE_COUNT * C);
@@ -414,6 +414,7 @@ const configRows = [
   ['risk_disclosure_version', String(RISK_DISCLOSURE_VERSION)],
   ['stake_duration_seconds', String(STAKE_DURATION_SECONDS)],
   ['stake_gap_seconds', String(STAKE_GAP_SECONDS)],
+  ['target_mode', 'FIXED_LADDER'],
   ['observation_seconds', String(OBSERVATION_SECONDS)],
   ['network', 'demo'],
   ['data_source', 'demo'],
@@ -438,6 +439,7 @@ const configRows = [
   ['contract_code_hash', ''],
   ['contract_oracle_config_hash', ''],
   ['contract_admin_owner', ''],
+  ['contract_team_vault', ''],
   ['contract_team_wallet', ''],
   ['contract_audit_report_url', ''],
 ];

@@ -126,6 +126,7 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
       codeHash: contract('contract_code_hash'),
       oracleConfigHash: contract('contract_oracle_config_hash'),
       adminOwner: contract('contract_admin_owner'),
+      teamVault: contract('contract_team_vault'),
       teamWallet: contract('contract_team_wallet'),
       auditReportUrl: contract('contract_audit_report_url'),
     },

@@ -1,6 +1,6 @@
 # 05 --- 安全要求、威胁模型与测试清单
 
-> **口径声明（V4）**：奖励池 70 亿、每轮 7 亿；团队每轮 1.2 亿随轮次释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；报名 48h；无人质押启动观察（0 人通过 → 奖励销毁）；不设多签（单密钥 owner）。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V5）**：奖励池 70 亿、每轮 7 亿；团队 12 亿由 **TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；不设多签（单密钥 owner，RC 不可升级）；奖励 **pull claim / claimAll**（≤10 轮、合并一笔）。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 威胁模型
 
@@ -30,7 +30,11 @@
 
   管理员滥权              修改价格目标或恢复失败轮次   不可变配置、单密钥 owner 权限最小化、终态不可逆
 
-  单密钥泄露/丢失          owner 私钥或托管钱包失窃      硬件钱包、冷热分离、地址公开、密钥备份与轮换演练、控制器不可升级
+  单密钥泄露/丢失          owner 私钥或托管钱包失窃      硬件钱包、冷热分离、热钱包最小余额、至少向审计/交易所披露、密钥备份与轮换演练、控制器不可升级
+
+  伪造团队指令            非 RoundController 向 TeamVault 发指令   TeamVault 校验 sender = RoundController，其余拒绝
+
+  领取重放/越界           重复 claim、单次遍历超 10 轮   (round,owner,type) 幂等标记；claimAll 固定上界 10 轮；金额先校验后合并一笔转账
 
   资金卡死                预言机长期不可用             ORACLE_PAUSED 与技术性退款路径
 
@@ -65,6 +69,11 @@
 21. 同一轮的团队额度不得同时释放和销毁；每轮最多发生一次。
 22. 成功轮团队释放量精确等于 1.2 亿；失败轮团队 burn 量精确等于 1.2 亿。
 23. 0 人质押且轮次通过时，本轮 7 亿奖励必须销毁（不得留存、回流或转移）。
+24. TeamVault 只执行 RoundController 的指令；其他发送者一律拒绝。
+25. 同一轮团队额度的释放与销毁互斥且幂等（每轮最多一次，重复指令返回已有结果）。
+26. `claimAll` 单次最多遍历 10 轮，逐轮幂等，合并为一笔 Jetton 转账；重复调用不得重复派发。
+27. 报名窗口严格为 72 小时（259,200 秒），`stakeOpenAt = prevSettledAt`（间隔 0），观察起点 = 报名截止时刻。
+28. RoundController 不可升级；管理员不得修改已开轮参数或转移用户质押本金。
 
 ## 3. 单元测试
 
@@ -102,7 +111,7 @@
 -   0金额：拒绝。
 -   超过最大限额：按配置拒绝或拆分处理，不能静默少记。
 
-### 3.4 成功结算
+### 3.4 成功结算（含 TeamVault 释放与 claimAll）
 
 -   质押本金总返还量等于已接受质押总量。
 -   每个用户只能领取一次本金。
@@ -114,6 +123,10 @@
 -   成功轮团队额度精确释放 1.2 亿，且只释放一次。
 -   团队释放失败（bounce）时可重试且不重复释放。
 -   0 人质押且通过：7 亿奖励全部销毁，无任何领取记录。
+-   **TeamVault 释放**：RoundController 指令成功 → TeamVault 转出 1.2 亿；非 RC 来源指令被拒；重复指令不重复转出。
+-   **claimAll**：跨 2~10 轮一次性领取，金额等于各轮 `floor(reward×weight/totalWeight)` 之和；每轮标记后不可重复领取；超过 10 轮的输入被拒绝或截断（固定上界）。
+-   **claimAll 合并转账**：多轮金额只产生一笔 Jetton transfer；gas 由用户承担；bounce 时不丢状态，可重试。
+-   **claimAll 部分成功**：任一金额校验失败时整笔回滚，不得出现半领取。
 
 ### 3.5 失败结算
 
@@ -126,14 +139,31 @@
 -   burn 未确认时轮次不得标记为最终失败。
 -   失败终态不能重新打开。
 -   下一轮价格目标保持原公式。
+-   TeamVault 销毁由 RoundController 的 `BurnTeamQuota` 触发；非 RC 指令不得销毁。
+-   TeamVault 销毁失败/未确认时，轮次不得标记为最终失败。
 
-### 3.6 无人质押（V3，V4 补充）
+### 3.6 无人质押（V3，V4/V5 补充）
 
 -   报名关闭时 `totalAcceptedStake == 0`：仍进入 `OBSERVING`，不跳过、不延期。
--   `stakeOpenAt = prevSettledAt + 48h`、`stakeCloseAt = stakeOpenAt + 48h`、`observationStart = stakeCloseAt` 三个时间点必须精确。
+-   `stakeOpenAt = prevSettledAt`（间隔 0）、`stakeCloseAt = stakeOpenAt + 72h`（259,200 秒）、`observationStart = stakeCloseAt` 三个时间点必须精确。
 -   无人质押 + 失败：奖励 burn 金额精确等于 7 亿、团队 burn 1.2 亿，本金 burn 金额为 0。
 -   无人质押 + 通过：奖励按质押比例分配；单一质押人获得全部 7 亿；**0 名质押人时本轮 7 亿奖励销毁**（D-18b 已定，不得留存或转移），且不得死锁轮次。
 -   无人质押不得导致轮次卡在 `STAKING_CLOSED` 或重复开轮。
+
+### 3.7 TeamVault 与领取边界（V5）
+
+-   TeamVault 余额初始化精确等于 12 亿；十轮累计释放 + 销毁 = 12 亿。
+-   成功轮 TeamVault 转出 1.2 亿后余额减少；失败轮销毁 1.2 亿后 total_supply 减少。
+-   TeamVault 收到非 RoundController 指令：拒绝且不改变状态。
+-   TeamVault 同一轮先 release 后 burn（或反之）：第二次指令返回已有结果，不重复执行。
+-   claimAll 传入空列表 / 全为已领轮次：返回 0，不发转账，不消耗多余 gas。
+-   claimAll 传入包含未结算轮次：拒绝该轮（或整笔拒绝），不得提前领取。
+-   历史未领奖励可累积：隔多轮后一次 claimAll，金额与逐轮领取之和一致。
+
+### 3.8 V5 待决策的价格语义
+
+-   当前仍按固定阶梯 `P0 × 2^n` 测试（`targetMode = FIXED_LADDER`）。
+-   若项目方选定 docs/00 §7 的方案 A（相对翻倍）：需新增「报名截止时锁定目标价 = 2 × 参考 TWAP」的测试、参考窗口/覆盖率校验、锁定后不可改的测试；方案 B/C 同理。选定前不要按新语义写测试。
 
 ## 4. 集成测试
 
@@ -141,11 +171,11 @@
 StakingVault Jetton Wallet -\> StakingVault notification。 2.
 StakingVault -\> RoundController stake ledger 更新。 3. Keeper -\>
 OracleAdapter -\> RoundController candle 记录。 4. RoundController -\>
-RewardVault/团队钱包/StakingVault 的 burn 或 release request。 5. Vault owner -\> Jetton Wallet
+RewardVault/TeamVault/StakingVault 的 burn 或 release request。 5. Vault owner -\> Jetton Wallet
 burn。 6. Jetton Wallet -\> Jetton Master burn_notification。 7. Jetton
 Master -\> RoundController BurnAck（三笔）。 8. 成功轮：RoundController -\>
-团队钱包（1.2 亿释放）。 9. 用户 claim -\> Vault -\> Jetton
-transfer -\> 用户 Jetton Wallet。
+TeamVault（1.2 亿释放到团队收款钱包）。 9. 用户 claimAll -\> RoundController -\> Vault -\> Jetton
+transfer -\> 用户 Jetton Wallet（合并一笔）。
 
 每个环节都要测试成功、bounce、重复消息、超时和重试。
 
@@ -160,9 +190,9 @@ payload； - 任意 bounce 状态。
 
 ## 6. 主网前安全要求
 
--   第三方智能合约安全审计（自研面仅 RoundController，含团队释放/销毁、0 人质押分支、领取逻辑）。
+-   第三方智能合约安全审计（自研面 **RoundController + TeamVault**，含团队释放/销毁、0 人质押分支、claimAll、不可升级与权限边界）。
 -   Jetton Master/Wallet 及自定义 burn ack 扩展专项审计。
--   密钥托管专项检查：单密钥 owner 与个人钱包的权限最小化、硬件钱包与备份流程。
+-   密钥托管专项检查：单密钥 owner 与个人热钱包的权限最小化、硬件钱包与备份流程、地址不公开情况下的审计披露路径。
 -   OracleAdapter 签名验证专项审计。
 -   经济攻击模拟（低流动性拉盘、价格回落、预言机延迟）。
 -   大额质押与失败销毁压力测试。
@@ -174,8 +204,9 @@ payload； - 任意 bounce 状态。
 ## 7. 用户界面风险确认
 
 质押 UI 必须在签名交易前显示： - 本轮目标价格； -
-48小时/12根K线/至少8根达标规则； - 失败后奖励额度销毁； -
+报名窗口 72 小时；观察 48 小时 / 12 根 K 线 / 至少 8 根达标规则； - 失败后奖励额度销毁； -
 失败后本轮全部质押本金100%销毁； - 技术故障与市场失败的区别； -
-该轮失败永久关闭； - 用户质押数量及预计承担的最大本金损失。
+该轮失败永久关闭； - 用户质押数量及预计承担的最大本金损失； -
+奖励领取方式：pull claim（用户自付 gas，可跨轮累积、一次领取）。
 
 用户必须主动勾选风险确认，且确认版本写入链上 stake payload。

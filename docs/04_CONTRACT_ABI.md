@@ -1,6 +1,6 @@
 # 04 --- 智能合约架构、存储与消息接口
 
-> **口径声明（V4）**：RewardVault 70 亿 / 每轮 7 亿；团队每轮 1.2 亿随轮次释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；报名窗口 48h；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner；奖励领取方式待定（推荐 pull claim）。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V5）**：RewardVault 70 亿 / 每轮 7 亿；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 推荐架构
 
@@ -34,12 +34,19 @@
                  | signature / feed   |
                  +--------------------+
 
-团队 / 营销 / 流动性（V4）：
+团队额度（V5）：
 +------------------------+
-| 个人钱包（非合约）      |
-| team / marketing / liq |
-| no multisig / no lockup|
+|       TeamVault        |
+| 12 亿 Jetton Wallet 托管 |
+| 只接受 RoundController  |
+| 每轮：转出 1.2 亿 / 销毁  |
 +------------------------+
+              |
++-------------v-----------------------------+
+| 收款钱包（个人热钱包，地址不公开）          |
+| team / marketing / liquidity              |
+| 不部署 multisig / lockup                   |
++-------------------------------------------+
 ```
 
 ## 2. 合约模块
@@ -59,10 +66,12 @@ Wallet。协议不得假设用户代币余额集中在 Master 合约。
 职责： - 保存 P0、目标价公式和轮次状态。 - 开启/关闭轮次。 -
 记录观察窗口时间和12根K线结果。 - 统计达标数量。 - 进入成功/失败结算。 -
 验证后续轮次只能按顺序开启。 - 接收 RewardVault、StakingVault 和 Jetton
-Master 的结算确认。 - **团队额度释放/销毁**：成功时向团队钱包转出本轮
-1.2 亿；失败时发起团队额度 1.2 亿 burn（kind = `team`）。 -
-**单密钥 owner 权限最小化**：owner 不能转移用户质押本金，不能修改已开轮的目标价 /
-阈值 / oracle config hash；不设多签、不设升级代理。
+Master 的结算确认。 - **向 TeamVault 下发团队额度指令**：成功时 `ReleaseTeamQuota`
+（转 1.2 亿到团队收款钱包）；失败时 `BurnTeamQuota`（销毁 1.2 亿，kind = `team`）。 -
+**pull claim / claimAll**：按（round, owner, type）做幂等记账，一次最多遍历 10 轮，合并为一笔转账。 -
+**单密钥 owner 权限最小化**：owner 仅能开轮、关报名、暂停/恢复预言机、必要时触发结算；
+不能转移用户质押本金，不能修改已开轮的目标价 / 阈值 / oracle config hash。 -
+**不可升级**（D-24）：无升级代理；不设多签。
 
 ### 2.3 StakingVault
 
@@ -83,14 +92,23 @@ roundId、nonce 和风险确认 payload。 - 记录每轮每个用户的质押�
 feedId、有效期、nonce、配置版本。 - 向 RoundController 提供经过验证的
 Candle 结果。 - 防止未授权来源伪造数据。
 
-### 2.6 团队 / 营销 / 流动性钱包（个人钱包，非合约）
+### 2.6 TeamVault（团队金库，自研）
 
-V4 决策：**项目不部署多签，也不部署 Lockup/Vesting**。
+V5 决策：团队额度**不再放在 RoundController 钱包**，改由独立 TeamVault 合约托管。
 
-- 团队 12%：**由 RoundController 持有的 Jetton Wallet 托管**（控制器才有 burn 权限）；成功轮转出 1.2 亿到团队个人收款钱包，失败轮销毁 1.2 亿。
-- 营销 5%、流动性 10%：**个人钱包**持有，无链上治理约束。
-- 合约不假设存在多签或时间锁；相关密钥管理要求见 docs/06 §8 与 docs/10 §9。
-- ContributionRegistry 已在 V2 删除，不再作为可选模块。
+职责： - 持有 12 亿对应的 Jetton Wallet（owner = TeamVault 合约）。 - **只接受
+RoundController 的指令**，其他来源消息一律拒绝。 - `ReleaseTeamQuota(roundId)`：
+把本轮 1.2 亿转出到团队收款钱包（成功结算）。 - `BurnTeamQuota(roundId)`：
+销毁本轮 1.2 亿（失败结算，kind = `team`）。 - 同一轮释放/销毁**互斥且幂等**：
+重复指令返回已有结果，每轮最多一次。 - 团队收款钱包地址在部署前写入 TeamVault
+的 config（个人热钱包，地址不对外披露）。
+
+### 2.7 收款钱包（团队 / 营销 / 流动性，个人热钱包）
+
+- 团队收款钱包、营销 5%、流动性 10% 均为**个人热钱包**（非合约）。
+- **地址不对外披露**：项目方部署前提供并填入 config；至少向审计方/交易所披露。
+- 项目不部署 Multisig，也不部署 Lockup/Vesting；合约不假设存在多签或时间锁。
+- 密钥与风险要求见 docs/06 §8 与 docs/10 §9；ContributionRegistry 已在 V2 删除。
 
 ## 3. 推荐存储结构
 
@@ -103,13 +121,15 @@ ProtocolConfig {
     jettonWalletOfRewardVault: address
     roundController: address
     oracleAdapter: address
-    teamWallet: address          // 团队个人钱包（单密钥持有）
+    teamVault: address           // TeamVault 合约（持有 12 亿）
+    teamWallet: address          // 团队收款钱包（个人热钱包，地址不公开）
+    adminOwner: address          // 单密钥 owner（最小权限，不可升级）
     p0UsdE8: uint128
     tokenDecimals: uint8
     roundRewardRaw: uint128     // 700,000,000 × 10^decimals
     teamRoundRaw: uint128       // 120,000,000 × 10^decimals（每轮）
-    stakeDurationSeconds: uint32 // 172800：报名窗口 48h
-    stakeGapSeconds: uint32      // 172800：上一轮结算后 48h 开启下一轮
+    stakeDurationSeconds: uint32 // 259200：报名窗口 72h
+    stakeGapSeconds: uint32      // 0：上一轮结算后立即开启报名
     candleSeconds: uint32       // 14400
     candleCount: uint8          // 12
     minQualifiedCandles: uint8  // 8
@@ -218,7 +238,11 @@ ABI 文档。
 
   `ResumeOracle`                    `0x5254000B` 经验证的恢复流程         RoundController
 
-  `ReleaseTeamQuota`                `0x5254000C` RoundController          团队收款钱包（成功转出 1.2 亿）
+  `ReleaseTeamQuota`                `0x5254000C` RoundController          TeamVault（成功转 1.2 亿到团队收款钱包）
+
+  `BurnTeamQuota`                   `0x5254000D` RoundController          TeamVault（失败销毁 1.2 亿）
+
+  `ClaimAll`                        `0x5254000E` 用户                     RoundController（多轮奖励合并领取，≤10 轮）
   --------------------------------------------------------------------------------------------------
 
 ## 6. 关键 Get Methods
@@ -228,8 +252,10 @@ ABI 文档。
 `get_round_candle(round_id, candle_index)` -
 `get_user_stake(round_id, owner)` - `get_round_total_stake(round_id)` -
 `get_user_reward_estimate(round_id, owner)` -
+`get_claimable_all(owner)`（返回所有已结算轮次的未领金额，供前端展示/claimAll 使用） -
 `get_round_burn_status(round_id)` -
-`get_total_burned_by_round(round_id)`
+`get_total_burned_by_round(round_id)` -
+`get_team_vault_state()`（TeamVault 余额、已释放/已销毁轮次）
 
 Get method 只读，不能被其他合约当作同步跨合约调用使用。
 
@@ -246,7 +272,7 @@ TON 合约间通过异步消息交互。Controller
 1.  Controller 将轮次设为 `SETTLING_FAILURE`，冻结所有 claim。
 2.  Controller 创建唯一 `burnId = hash(roundId, failure, configHash)`。
 3.  RewardVault 对本轮7亿发送 burn 请求（kind = `reward`）。
-4.  RoundController 从团队额度钱包（owner = RoundController）销毁本轮 1.2 亿（kind = `team`）。
+4.  RoundController 向 **TeamVault** 发 `BurnTeamQuota`，由 TeamVault 销毁其持有的本轮 1.2 亿（kind = `team`）。
 5.  StakingVault 对本轮 `totalAcceptedStakeRaw` 发送 burn 请求（kind = `principal`）。
 6.  Jetton Wallet 执行标准 burn 操作。
 7.  Jetton Master 接收 `burn_notification` 并减少 total_supply。
@@ -261,7 +287,7 @@ Master，必须另行设计可信的销毁确认方案；不能把普通 keeper
 
 ## 8. 成功奖励领取
 
-为避免链上无界循环，**推荐**采用 pull claim（D-25 待确认，见 §8.1）。
+采用 **pull claim**（D-25 已确认，见 §8.1），避免链上无界循环。
 
 V3 已确认的纯质押比例公式（D-14，不再叠加任何贡献积分）：
 
@@ -276,17 +302,28 @@ V3 已确认的纯质押比例公式（D-14，不再叠加任何贡献积分）�
 
 本金返还同样使用用户主动领取。转账操作必须幂等，避免重复领取。
 
-### 8.1 奖励领取方式（D-25，待确认）
+### 8.1 奖励领取方式（D-25，V5 已确认：pull claim）
 
-两种候选方案，V4 文档同时列出并标注待确认：
+**结论：采用方案 B（控制器 pull claim）**，不采用方案 A 批量转账（无多签 → 单私钥手动操作，中心化）。
 
-| 方案 | 做法 | 优点 | 缺点 | 结论 |
-| --- | --- | --- | --- | --- |
-| A. 结算后批量转账 | 管理员在结算后按质押比例批量转账给质押人 | 简单、无新增代码、gas 由项目方承担 | **本项目无多签 → 等于单私钥手动操作**；中心化、易出错、用户不能自助、无法保证及时性 | ❌ 与本项目「不设多签」决策冲突，**不推荐** |
-| B. 控制器 pull claim | 用户调用 `ClaimReward(roundId)` 自助领取，按质押比例、幂等 | 去信任、可自助、可审计、无需人工 | 需在 RoundController 实现领取逻辑（约 100~150 行）与 pending 状态 | ✅ **推荐** |
+已确认的领取设计：
 
-推荐采用 **方案 B（pull claim）**，并纳入 RoundController 的最小自研范围；若最终选 A，
-必须在文档中明确记录「单私钥手动操作」的中心化风险与运营要求。
+1. 前端展示**所有已结算轮次（含历史未领）**的可领金额（含本金与奖励分别列示）。
+2. 用户一次调用 `claim`：携带 roundId 列表（或 `claimAll` 自动扫描已结算未领轮次）。
+3. 合约内部**最多遍历 10 轮**（固定上界，不做无界循环；轮次数本身就是 10）。
+4. 每轮按（round, owner, type）做**幂等标记**，重复调用不得重复派发。
+5. 多轮金额**合并为一笔 Jetton 转账**（降低 gas）；gas 由用户承担。
+6. 本金与奖励可以一次领取或分开领取，但都走同一套幂等状态。
+
+方案对比（存档）：
+
+| 方案 | 做法 | 结论 |
+| --- | --- | --- |
+| A. 结算后批量转账 | 管理员按质押比例批量转账 | ❌ 无多签 = 单私钥手动操作，中心化、易错、用户不能自助；不采用 |
+| B. 控制器 pull claim | 用户自助领取、逐轮幂等、可跨轮合并 | ✅ V5 已确认采用 |
+
+RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`；`claimAll`
+循环上限 10；先全部校验再发一笔转账，失败回滚状态；pending 状态用于消息重试。
 
 ## 9. TON 异步消息安全
 
@@ -313,7 +350,7 @@ V3 已确认的纯质押比例公式（D-14，不再叠加任何贡献积分）�
 ## 11. V3 变更注记（2026-11-05）
 
 - **奖励金库总量**：RewardVault 持有 **70 亿**（原 75 亿），十轮独立账本每轮 **700,000,000**（7 亿），合计 10 × 7 亿 = 70 亿。
-- **报名窗口参数**：新增 `stakeDurationSeconds = 172,800`（48h）与 `stakeGapSeconds = 172,800`（上一轮结算后 48h 开启）；`stakeOpenAt = prevSettledAt + stakeGap`，`stakeCloseAt = stakeOpenAt + stakeDuration`，报名关闭即进入观察（`observationStart = stakeCloseAt`）。
+- **报名窗口参数**：新增 `stakeDurationSeconds = 172,800`（48h）与 `stakeGapSeconds = 172,800`（上一轮结算后 48h 开启）；`stakeOpenAt = prevSettledAt + stakeGap`，`stakeCloseAt = stakeOpenAt + stakeDuration`，报名关闭即进入观察（`observationStart = stakeCloseAt`）。（**V5 已改为 72h / gap 0**，见 §13）
 - **无人质押分支**：报名关闭时 `totalAcceptedStake == 0` 仍启动观察（不跳过、不延期、不判负）；失败照常销毁本轮 7 亿奖励，通过则按质押比例分配（0 人质押且通过时奖励销毁，D-18b 已定，见 §12）。
 - **奖励领取**：成功后**一次性发放、无归属期**（D-16/D-17 已定）；`ClaimReward` 仍是 pull claim，需幂等。
 - **价格参数**：`p0UsdE8 = 100,000`（P0 = $0.001），`target(roundId) = P0 × 2^roundId`，R10 = $1.024；`roundRewardRaw = 700,000,000 × 10^decimals`。
@@ -323,9 +360,20 @@ V3 已确认的纯质押比例公式（D-14，不再叠加任何贡献积分）�
 
 ## 12. V4 变更注记（2026-11-05）
 
-- **团队额度**：新增 `teamWallet`（团队个人钱包）与 `teamRoundRaw = 120,000,000 × 10^decimals`；成功轮释放本轮 1.2 亿（新增 `ReleaseTeamQuota` opcode），失败轮销毁 1.2 亿（kind = `team`）。不部署 Lockup/Vesting 合约。
+- **团队额度**：新增 `teamWallet`（团队个人钱包）与 `teamRoundRaw = 120,000,000 × 10^decimals`；成功轮释放本轮 1.2 亿（`ReleaseTeamQuota`），失败轮销毁 1.2 亿（kind = `team`）。不部署 Lockup/Vesting 合约。（**V5 已改为独立 TeamVault 托管**，见 §13）
 - **失败销毁三笔**：`reward`（7 亿）+ `team`（1.2 亿）+ `principal`（本轮本金），三笔独立 burnId 与确认状态；`RoundData` 增加 `teamReleaseConfirmed` / `teamBurnConfirmed`。
 - **不设多签**：移除 Multisig 相关假设；架构中的营销/流动性/团队为**个人钱包**（非合约）；管理员为 RoundController 单密钥 owner，权限最小化、控制器不可升级（待 D-24 最终确认）。
 - **D-18b**：0 人质押且本轮通过 → 本轮 7 亿奖励销毁（不回流、不留存、不补发）。
-- **奖励领取方式**：见 §8.1，方案 A（批量转账，与无多签冲突，不推荐）/ 方案 B（pull claim，推荐），**待确认**。
+- **奖励领取方式**：见 §8.1，方案 A（批量转账，与无多签冲突，不推荐）/ 方案 B（pull claim，推荐），当时**待确认**。
+
+---
+
+## 13. V5 变更注记（2026-11-05）
+
+- **团队额度改为 TeamVault 合约托管**：新增 `TeamVault`（自研）与 `teamVault` 地址；12 亿存于 TeamVault 的 Jetton Wallet（owner = TeamVault）。RoundController 通过 `ReleaseTeamQuota` / `BurnTeamQuota` 指令控制，TeamVault **只接受 RoundController**、同轮释放/销毁互斥且幂等。团队收款钱包为个人热钱包、地址不公开。
+- **报名窗口 72h**：`stakeDurationSeconds = 259,200`；`stakeGapSeconds = 0`（上一轮结算后立即开启）；观察窗口仍 48h / 12 根 4h。
+- **奖励领取确定 pull claim（D-25）**：新增 `ClaimAll`（0x5254000E）与 `get_claimable_all(owner)`；单次最多遍历 10 轮、逐轮幂等、合并为一笔转账、gas 由用户承担。方案 A 不采用。
+- **D-24 已确认不可升级**：RoundController 无升级代理；管理员仅保留开轮/关报名/暂停恢复/触发结算的最小权限。
+- **收款钱包**：团队/营销/流动性均为个人热钱包，地址不对外披露（部署前填入 config，至少向审计/交易所披露）；相应风险登记见 docs/10 §9。
+- **待决策**：报名窗口 72h 下的「现价已超目标价 → 无风险白拿」问题（方案 A/B/C）见 docs/00 §7，尚未定案，当前仍按 `FIXED_LADDER` 运行。
 

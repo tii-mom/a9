@@ -48,7 +48,9 @@ export interface ProtocolConfig {
     oracleConfigHash: string | null;
     /** 管理员 owner（单密钥，项目不设多签） */
     adminOwner: string | null;
-    /** 团队额度钱包（owner = RoundController） */
+    /** 团队额度托管合约地址（TeamVault，持有 12 亿） */
+    teamVault: string | null;
+    /** 团队收款钱包（每轮成功由 TeamVault 转入 1.2 亿） */
     teamWallet: string | null;
     auditReportUrl: string | null;
   };

@@ -1,6 +1,6 @@
-# 09 — 前端与 Cloudflare 后端实施基线（V1.0）
+# 09 — 前端与 Cloudflare 后端实施基线（V5 口径）
 
-> **口径声明（V4）**：P0 = $0.001（USD_E8 = "100000"）、每轮奖励 7 亿（700M）、团队每轮 1.2 亿随轮次释放/销毁、失败销毁三笔（奖励 + 团队 + 本金）、报名 48h、失败 100% 罚没、0 人质押且通过 → 奖励销毁、不设多签。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V5）**：P0 = $0.001（USD_E8 = "100000"）、每轮奖励 7 亿（700M）、团队 12 亿由 TeamVault 托管、每轮 1.2 亿释放/销毁、失败销毁三笔（奖励 + 团队 + 本金）、**报名 72h（结算后立即开启）**、观察 48h、失败 100% 罚没、0 人质押且通过 → 奖励销毁、不设多签、**奖励 pull claim / claimAll**。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 >
 > 本文件是本次开发任务的**唯一协作契约**。所有参与者（Lead / frontend-dev / app-dev / backend-dev）以本文件为准。
 > 原型：根目录 `FUSE 引信协议.html`（1060 行单文件，含全部视觉与交互）。业务规则：`README.md`、`docs/01~08`。
@@ -79,7 +79,7 @@ BAM/
 | GET | `/api/book` | `OrderBook` | 盘口深度 |
 | GET | `/api/me?address=` | `MeResponse` | 某地址全部质押、可领取、累计 |
 | POST | `/api/stake` | `{accepted, position}` | 演示质押（写 D1）；校验 risk version / 窗口 / 余额 |
-| POST | `/api/claim` | `{claimed, amountRaw}` | 演示领取本金/奖励（幂等） |
+| POST | `/api/claim` | `{claimed, amountRaw}` | 演示领取本金/奖励（幂等）；支持多轮合并领取语义（对应链上 `claimAll`） |
 | GET | `/api/admin/overview` | `AdminOverview` | 需 `Authorization: Bearer <ADMIN_TOKEN>` |
 | POST | `/api/admin/tick` | `AdminOverview` | 手动推进状态机一步 |
 | POST | `/api/admin/oracle/pause|resume` | `AdminOverview` | 预言机暂停/恢复 |
@@ -96,11 +96,12 @@ BAM/
 - Round 1：`SUCCEEDED`（10/12 达标，7 亿已解锁 + 团队 1.2 亿已释放）；Round 2：`FAILED_PERMANENT`（6/12，已销毁 7 亿奖励 + 1.2 亿团队额度 + 241,500,000 质押本金 = **1,061,500,000 A9**）。
 - Round 3：`OBSERVING`，观察中，K 线随时间推进（演示加速 `DEMO_CANDLE_SECONDS`，默认 90s/根），达标判定用 `twap >= target`。
 - Round 4：`UNOPENED`（上一轮结算后可开启）。
-- 演示加速只影响 K 线进度条与报名窗口（`DEMO_STAKE_SECONDS`，默认 900s/轮），**判定规则、8/12 阈值、销毁语义必须与规格一致**；真实参数为报名 48h（`STAKE_DURATION_SECONDS = 172800`）、轮次间隔 48h（`STAKE_GAP_SECONDS = 172800`）。
+- 演示加速只影响 K 线进度条与报名窗口（`DEMO_STAKE_SECONDS`，默认 900s/轮），**判定规则、8/12 阈值、销毁语义必须与规格一致**；真实参数为报名 **72h**（`STAKE_DURATION_SECONDS = 259200`）、轮次间隔 **0**（`STAKE_GAP_SECONDS = 0`，结算后立即开启）。
 - 分配口径：十轮奖励 70%（每轮 7 亿）、内盘及流动性 13%（内盘 3% + 流动性 10%）、团队 12%（每轮 1.2 亿，成功释放/失败销毁）、营销 5%（个人钱包持有，不设多签）。
 - 演示地址：8~12 个 `UQ...` 假地址 + 随机质押，聚合出排行榜；`/api/me` 对未质押地址返回空对象。
 - 销毁账本：`burn_ledger` 记录每次销毁（轮次、类型 `reward` / `team` / `principal`、数量、确认状态），供应量 = 初始 - 已确认销毁；R2 三笔合计 1,061,500,000 A9。
-- 团队释放（成功轮）：`teamRoundRaw = 120000000e9` 由控制器托管的团队额度钱包转出到团队收款钱包；前端展示团队额度已释放/已销毁状态（若面板涉及团队分配）。
+- 团队释放（成功轮）：TeamVault 将 `teamRoundRaw = 120000000e9` 转出到团队收款钱包；失败轮 TeamVault 销毁 1.2 亿。前端展示团队额度已释放/已销毁状态（若面板涉及团队分配）。
+- 领取（V5）：MyPage 必须展示**所有已结算轮次（含历史未领）**的可领本金/奖励，支持一次 `claimAll` 领取多轮（合并一笔交易）；演示环境走 `/api/claim`，真实链上由用户自付 gas。
 
 不改动不可变语义：失败轮次不得反向恢复；预言机暂停不销毁本金；K 线未满 12 根不得判失败。
 
@@ -146,7 +147,7 @@ cd .. && npm run build && cd worker && npx wrangler deploy
 - 落地页与原型对比：版块齐全、配色/字体一致、图表与 12 格 K 线可交互、沙盘推演可点击。
 - API 全部实现且被前端真实调用（Network 里能看到轮询）。
 - 中英切换覆盖全站可见文案；刷新后语言保持。
-- 管理员后台能登录（token）、暂停/恢复预言机、推进轮次。
+- 管理员后台能登录（token）、暂停/恢复预言机、推进轮次；后台只暴露最小权限操作（不可改已开轮参数、不可转移质押本金、无升级入口）。
 - README/运维文档更新，部署命令可复现。
 
 
@@ -175,6 +176,7 @@ export function WalletButton(): JSX.Element;
 规则：
 - 地址变化 → `refreshBalances()` 自动触发，并让 `useQuery` 依赖 address 的页面自动刷新。
 - TON Connect 只读：真实钱包可连接/断开、展示地址与余额；**任何交易按钮禁用**并提示「合约部署后开放」。
+- 合约部署后（后续阶段）：质押走 Jetton transfer + payload；领取走 `claim`/`claimAll`（可带 roundId 列表，最多 10 轮，合并一笔交易，gas 由用户承担）；每笔操作需回执与幂等刷新。
 - 连接失败/用户拒绝/环境不支持 → 自动降级 `demo: true`：本地生成 `UQ...` 地址存 localStorage，余额来自 `/api/me`（无则显示 0）。
 - `WalletProvider` 由 Lead 在 `App.tsx` 统一挂载（已挂载则勿重复）。若需要修改 `App.tsx`，消息 Lead。
 
