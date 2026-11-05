@@ -1,0 +1,25 @@
+/* 钱包组件样式（仅 features/wallet 作用域，令牌沿用 fuse.css） */
+.wl{position:relative;display:inline-flex}
+.wl-trigger{max-width:200px;overflow:hidden}
+.wl-trigger>span:not(.wl-tag){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wl-dot{width:7px;height:7px;border-radius:50%;background:var(--pass);box-shadow:0 0 8px var(--pass);flex:none}
+.wl-tag{font:600 9px var(--f-mono);letter-spacing:.08em;color:var(--ember);border:1px solid #5a3f12;padding:1px 4px;background:rgba(255,182,61,.08)}
+.wl-pop{position:absolute;right:0;top:calc(100% + 10px);z-index:64;width:min(340px,calc(100vw - 24px));background:var(--panel);border:1px solid var(--line-2);box-shadow:0 18px 40px rgba(0,0,0,.6);padding:14px;display:grid;gap:10px}
+.wl-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.wl-x{background:none;border:0;color:var(--muted);font:400 18px/1 var(--f-mono);padding:2px 4px}
+.wl-x:hover{color:var(--text)}
+.wl-note{margin:0;font-size:12px;line-height:1.55;color:var(--text-2)}
+.wl-muted{color:var(--muted);font-size:11.5px}
+.wl-notice{border:1px solid #5a3f12;background:rgba(255,182,61,.08);color:var(--ember);font-size:11.5px;padding:7px 9px;line-height:1.5}
+.wl-kv{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
+.wl-kv b,.wl-kv code{font:600 12px var(--f-mono);color:var(--text);font-variant-numeric:tabular-nums}
+.wl-kv code{cursor:default}
+.wl-kv em{font:500 11px var(--f-mono);color:var(--muted);font-style:normal;text-align:right}
+.wl-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wl-danger{color:#ffb3b3;border-color:#5a2222}
+.wl-danger:hover{border-color:var(--fail)}
+.wl-pop .btn.full{width:100%}
+/* 小屏：SiteHeader 会隐藏 .nav-r .btn，因此小屏把钱包挂到 body 上做悬浮入口（避开底部操作条） */
+.wl-floating{position:fixed;right:12px;bottom:calc(80px + env(safe-area-inset-bottom,0px));z-index:57}
+.wl-floating .wl-trigger{max-width:170px;padding:9px 12px;font-size:12px;box-shadow:0 10px 26px rgba(0,0,0,.55)}
+.wl-floating .wl-pop{position:fixed;left:12px;right:12px;top:auto;bottom:calc(148px + env(safe-area-inset-bottom,0px));width:auto;max-height:60vh;overflow-y:auto}

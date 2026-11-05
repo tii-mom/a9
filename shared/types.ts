@@ -50,6 +50,8 @@ export interface ProtocolConfig {
     auditReportUrl: string | null;
   };
   tonConnectManifestUrl: string | null;
+  /** TON/USD 报价汇率，USD_E8（"300000000" = $3.00）。演示环境固定，主网上线后改为预言机/行情源 */
+  tonUsdE8: string;
   /** 上线阻断项完成度：已冻结/待确认 */
   frozenParams: { key: string; label: string; status: 'frozen' | 'pending'; value: string }[];
 }

@@ -1,0 +1,768 @@
+- generic [ref=f5e2]:
+  - banner [ref=f5e3]:
+    - generic [ref=f5e5]:
+      - generic [ref=f5e6]:
+        - generic [ref=f5e7]: FUSE/USD$0.03182 ▲ 0.83%
+        - generic [ref=f5e8]: R03 target$0.03200 below
+        - generic [ref=f5e9]:
+          - text: Lit
+          - generic [ref=f5e10]: 0 / 8
+        - generic [ref=f5e11]:
+          - text: Missed
+          - generic [ref=f5e12]: 0 / 5
+        - generic [ref=f5e13]: Staked3.86 亿 FUSE
+        - generic [ref=f5e14]: Burned9.91 亿 FUSE
+        - generic [ref=f5e15]: 24H vol$4.28M
+        - generic [ref=f5e16]: B 188.45 万 @ $0.03180
+        - generic [ref=f5e17]: B 211.53 万 @ $0.03215
+        - generic [ref=f5e18]: B 82.72 万 @ $0.03220
+        - generic [ref=f5e19]: B 211.66 万 @ $0.03169
+      - generic [ref=f5e20]:
+        - generic [ref=f5e21]: FUSE/USD$0.03182 ▲ 0.83%
+        - generic [ref=f5e22]: R03 target$0.03200 below
+        - generic [ref=f5e23]:
+          - text: Lit
+          - generic [ref=f5e24]: 0 / 8
+        - generic [ref=f5e25]:
+          - text: Missed
+          - generic [ref=f5e26]: 0 / 5
+        - generic [ref=f5e27]: Staked3.86 亿 FUSE
+        - generic [ref=f5e28]: Burned9.91 亿 FUSE
+        - generic [ref=f5e29]: 24H vol$4.28M
+        - generic [ref=f5e30]: B 188.45 万 @ $0.03180
+        - generic [ref=f5e31]: B 211.53 万 @ $0.03215
+        - generic [ref=f5e32]: B 82.72 万 @ $0.03220
+        - generic [ref=f5e33]: B 211.66 万 @ $0.03169
+    - navigation "Main navigation" [ref=f5e932]:
+      - link "FUSE 引信协议" [ref=f5e35] [cursor=pointer]:
+        - /url: /
+        - text: FUSE
+        - generic [ref=f5e39]: Ignition Protocol
+      - generic [ref=f5e40]:
+        - link "Battle" [ref=f5e933] [cursor=pointer]:
+          - /url: "#war"
+        - link "Order Flow" [ref=f5e934] [cursor=pointer]:
+          - /url: "#floor"
+        - link "Ladder" [ref=f5e935] [cursor=pointer]:
+          - /url: "#ladder"
+        - link "Rules" [ref=f5e936] [cursor=pointer]:
+          - /url: "#rules"
+        - link "Supply" [ref=f5e937] [cursor=pointer]:
+          - /url: "#supply"
+        - link "Risk" [ref=f5e938] [cursor=pointer]:
+          - /url: "#risk"
+        - link "My War" [ref=f5e939] [cursor=pointer]:
+          - /url: /me
+        - link "Leaderboard" [ref=f5e940] [cursor=pointer]:
+          - /url: /leaderboard
+      - generic [ref=f5e49]:
+        - generic "Demo data" [ref=f5e941]: Prototype · Demo
+        - button "Toggle up/down colors" [ref=f5e942] [cursor=pointer]: Colors US
+        - button "Switch language" [active] [ref=f5e943] [cursor=pointer]: 中文
+        - 'button "Wallet: UQAY7V…4uZa" [ref=f5e944] [cursor=pointer]':
+          - generic [ref=f5e56]: UQAY7V…4uZa
+          - generic [ref=f5e57]: DEMO
+        - link "Enter Battle" [ref=f5e945] [cursor=pointer]:
+          - /url: /#cmd
+  - main [ref=f5e59]:
+    - generic [ref=f5e61]:
+      - generic [ref=f5e62]:
+        - generic [ref=f5e63]:
+          - generic [ref=f5e64]: TON · Price-driven token
+          - generic [ref=f5e65]: Target doubles every round, 10 rounds
+        - heading [level=1] [ref=f5e946]:
+          - text: Light 8 of 12 candles —
+          - emphasis [ref=f5e68]: 750M FUSE unlocks.
+        - paragraph [ref=f5e69]: Each round sets a target price and users stake to fight. Over 48 hours there are twelve 4-hour candles; if the TWAP reaches the target in at least 8 of them, rewards open for claiming and principal is returned. Miss by one candle and the round's 750M reward plus all staked principal are burned. The round closes forever.
+        - generic [ref=f5e70]:
+          - link "Stake & fight" [ref=f5e947] [cursor=pointer]:
+            - /url: "#cmd"
+          - link "Buy FUSE" [ref=f5e948] [cursor=pointer]:
+            - /url: "#cmd"
+          - link "Read the rules" [ref=f5e949] [cursor=pointer]:
+            - /url: "#rules"
+      - generic "TON · Price-driven token" [ref=f5e950]:
+        - generic [ref=f5e75]:
+          - text: Total supply
+          - generic [ref=f5e76]: 10Btokens
+        - generic [ref=f5e77]:
+          - text: Unlock rounds
+          - generic [ref=f5e78]: 10rounds × 750M
+        - generic [ref=f5e79]:
+          - text: Round n target
+          - generic [ref=f5e80]:
+            - text: P0×2
+            - superscript [ref=f5e81]: "n"
+    - generic [ref=f5e82]:
+      - region "CURRENT BATTLE" [ref=f5e951]:
+        - generic [ref=f5e84]:
+          - generic [ref=f5e85]:
+            - text: CURRENT BATTLE
+            - heading "03/ 10" [level=2] [ref=f5e658]
+          - generic [ref=f5e87]: STAKING · STAKING_OPEN
+          - generic [ref=f5e89]:
+            - text: Staking closes
+            - generic [ref=f5e90]: 00:00:00
+          - generic [ref=f5e91]:
+            - generic [ref=f5e92]: Oracle online
+            - generic [ref=f5e94]: Valid sources 5 / 5
+            - generic [ref=f5e95]: Coverage 99.5%
+            - generic [ref=f5e96]: Config v1.0.0-demo · pending
+        - generic [ref=f5e97]:
+          - generic [ref=f5e98]:
+            - text: PRICE FUSE / USD
+            - generic [ref=f5e99]: $0.03182
+            - generic [ref=f5e100]: Not reached · needs 0.6%
+          - generic [ref=f5e103]:
+            - text: Round target · 8×P0
+            - generic [ref=f5e104]: $0.03200
+            - generic [ref=f5e105]: No candles before observation
+          - generic [ref=f5e106]:
+            - text: Provisional TWAP
+            - generic [ref=f5e107]: —
+            - generic [ref=f5e108]: Counted after observation starts
+        - generic [ref=f5e109]:
+          - img "Round price versus target price chart" [ref=f5e952]
+          - generic: Observation has not started · staking-period prices below
+        - generic "Round price versus target price chart" [ref=f5e953]:
+          - generic [ref=f5e112]:
+            - generic [ref=f5e113]: "01"
+            - generic [ref=f5e114]: 01:00
+            - generic [ref=f5e115]: —
+            - generic [ref=f5e117]: WAIT
+          - generic [ref=f5e118]:
+            - generic [ref=f5e119]: "02"
+            - generic [ref=f5e120]: 05:00
+            - generic [ref=f5e121]: —
+            - generic [ref=f5e123]: WAIT
+          - generic [ref=f5e124]:
+            - generic [ref=f5e125]: "03"
+            - generic [ref=f5e126]: 09:00
+            - generic [ref=f5e127]: —
+            - generic [ref=f5e129]: WAIT
+          - generic [ref=f5e130]:
+            - generic [ref=f5e131]: "04"
+            - generic [ref=f5e132]: 13:00
+            - generic [ref=f5e133]: —
+            - generic [ref=f5e135]: WAIT
+          - generic [ref=f5e136]:
+            - generic [ref=f5e137]: "05"
+            - generic [ref=f5e138]: 17:00
+            - generic [ref=f5e139]: —
+            - generic [ref=f5e141]: WAIT
+          - generic [ref=f5e142]:
+            - generic [ref=f5e143]: "06"
+            - generic [ref=f5e144]: 21:00
+            - generic [ref=f5e145]: —
+            - generic [ref=f5e147]: WAIT
+          - generic [ref=f5e148]:
+            - generic [ref=f5e149]: "07"
+            - generic [ref=f5e150]: 01:00
+            - generic [ref=f5e151]: —
+            - generic [ref=f5e153]: WAIT
+          - generic [ref=f5e154]:
+            - generic [ref=f5e155]: "08"
+            - generic [ref=f5e156]: 05:00
+            - generic [ref=f5e157]: —
+            - generic [ref=f5e159]: WAIT
+          - generic [ref=f5e160]:
+            - generic [ref=f5e161]: "09"
+            - generic [ref=f5e162]: 09:00
+            - generic [ref=f5e163]: —
+            - generic [ref=f5e165]: WAIT
+          - generic [ref=f5e166]:
+            - generic [ref=f5e167]: "10"
+            - generic [ref=f5e168]: 13:00
+            - generic [ref=f5e169]: —
+            - generic [ref=f5e171]: WAIT
+          - generic [ref=f5e172]:
+            - generic [ref=f5e173]: "11"
+            - generic [ref=f5e174]: 17:00
+            - generic [ref=f5e175]: —
+            - generic [ref=f5e177]: WAIT
+          - generic [ref=f5e178]:
+            - generic [ref=f5e179]: "12"
+            - generic [ref=f5e180]: 21:00
+            - generic [ref=f5e181]: —
+            - generic [ref=f5e183]: WAIT
+        - generic [ref=f5e184]:
+          - generic [ref=f5e185]:
+            - text: Lit / needed
+            - generic [ref=f5e186]: 0/ 8
+            - generic [ref=f5e196]: Counted after observation starts
+          - generic [ref=f5e197]:
+            - text: Missed / fail line
+            - generic [ref=f5e198]: 0/ 5
+            - generic [ref=f5e205]: Up to 4 misses allowed
+          - generic [ref=f5e206]:
+            - text: Remaining
+            - generic [ref=f5e207]: 12candles
+            - generic [ref=f5e208]: 12 full candles total
+        - generic [ref=f5e210]:
+          - text: Staking live, target $0.03200
+          - generic [ref=f5e211]: Price must rise 0.6% to reach the target. After staking closes, 48 hours start from the next UTC 4-hour boundary.
+      - complementary "COMMAND · 指挥台" [ref=f5e954]:
+        - generic [ref=f5e213]:
+          - generic [ref=f5e214]: COMMAND · 指挥台
+          - button "Disconnect" [ref=f5e955] [cursor=pointer]
+        - generic [ref=f5e216]:
+          - generic [ref=f5e217]: UQAY7V…4uZa · demo wallet
+          - generic [ref=f5e218]:
+            - text: TON
+            - generic [ref=f5e219]: 1,150
+          - generic [ref=f5e220]:
+            - text: FUSE
+            - generic [ref=f5e221]: 259,023
+          - generic [ref=f5e222]:
+            - text: Staked this round
+            - generic [ref=f5e223]: "0"
+        - tablist [ref=f5e224]:
+          - tab "① Buy FUSE" [selected] [ref=f5e956] [cursor=pointer]
+          - tab "② Stake & fight" [ref=f5e957] [cursor=pointer]
+        - tabpanel [ref=f5e228]:
+          - generic [ref=f5e906]:
+            - text: Pay TON
+            - generic [ref=f5e907]:
+              - spinbutton "Pay TON TON" [ref=f5e958]: "100"
+              - generic [ref=f5e909]: TON
+          - generic [ref=f5e910]:
+            - button "50" [ref=f5e911] [cursor=pointer]
+            - button "100" [ref=f5e912] [cursor=pointer]
+            - button "500" [ref=f5e913] [cursor=pointer]
+            - button "MAX" [ref=f5e914] [cursor=pointer]
+          - generic [ref=f5e859]:
+            - text: You receive
+            - generic [ref=f5e915]: 9,023 FUSE
+            - generic [ref=f5e916]: ≈ $300 · 1 TON ≈ 3.00 (demo rate)
+          - generic [ref=f5e863]:
+            - generic [ref=f5e864]:
+              - term [ref=f5e865]: Avg price
+              - definition [ref=f5e866]: $0.03315
+            - generic [ref=f5e867]:
+              - term [ref=f5e868]: Price impact
+              - definition [ref=f5e869]: +4.167%
+            - generic [ref=f5e870]:
+              - term [ref=f5e871]: Fee 0.3%
+              - definition [ref=f5e872]: $0.90
+            - generic [ref=f5e917]:
+              - term [ref=f5e918]: Min received (1% slippage)
+              - definition [ref=f5e919]: 8,932 FUSE
+          - button "Buy FUSE" [ref=f5e959] [cursor=pointer]
+          - paragraph [ref=f5e921]: Bought FUSE stays in your wallet and can be moved into the staking vault while staking is open. The demo creates no real trade.
+    - generic [ref=f5e257]:
+      - generic [ref=f5e258]:
+        - generic [ref=f5e259]: ORDER FLOW · 成交流
+        - heading "Every trade pushes the price line" [level=2] [ref=f5e960]
+        - paragraph [ref=f5e261]: Time & sales, order-book depth and this round's key numbers. Whether the price holds above target decides how many of the 12 candles light up.
+      - generic [ref=f5e262]:
+        - generic [ref=f5e263]:
+          - generic [ref=f5e264]:
+            - generic [ref=f5e265]: TIME & SALES
+            - generic [ref=f5e673]: 24H $4.28M
+          - generic [ref=f5e266]:
+            - generic [ref=f5e267]: Time UTC
+            - generic [ref=f5e268]: Side
+            - generic [ref=f5e269]: Size FUSE
+            - generic [ref=f5e270]: Price
+            - generic [ref=f5e271]: Value USD
+          - generic [ref=f5e272]:
+            - generic [ref=f5e878]:
+              - generic [ref=f5e879]: 01:44:00
+              - generic [ref=f5e880]: BUY
+              - generic [ref=f5e881]:
+                - text: 1,884,465
+                - generic [ref=f5e882]: block
+              - generic [ref=f5e883]: $0.03180
+              - generic [ref=f5e884]: $59916.942
+            - generic [ref=f5e885]:
+              - generic [ref=f5e886]: 01:43:32
+              - generic [ref=f5e887]: BUY
+              - generic [ref=f5e888]:
+                - text: 2,115,349
+                - generic [ref=f5e889]: block
+              - generic [ref=f5e890]: $0.03215
+              - generic [ref=f5e891]: $68002.547
+            - generic [ref=f5e892]:
+              - generic [ref=f5e893]: 01:42:59
+              - generic [ref=f5e894]: BUY
+              - generic [ref=f5e895]:
+                - text: 827,249
+                - generic [ref=f5e896]: block
+              - generic [ref=f5e897]: $0.03220
+              - generic [ref=f5e898]: $26641.389
+            - generic [ref=f5e899]:
+              - generic [ref=f5e900]: 01:42:14
+              - generic [ref=f5e901]: BUY
+              - generic [ref=f5e902]:
+                - text: 2,116,620
+                - generic [ref=f5e903]: block
+              - generic [ref=f5e904]: $0.03169
+              - generic [ref=f5e905]: $67068.068
+            - generic [ref=f5e674]:
+              - generic [ref=f5e675]: 01:41:40
+              - generic [ref=f5e676]: BUY
+              - generic [ref=f5e677]:
+                - text: 1,362,851
+                - generic [ref=f5e678]: block
+              - generic [ref=f5e679]: $0.03172
+              - generic [ref=f5e680]: $43227.453
+            - generic [ref=f5e681]:
+              - generic [ref=f5e682]: 01:41:39
+              - generic [ref=f5e683]: BUY
+              - generic [ref=f5e684]:
+                - text: 1,362,851
+                - generic [ref=f5e685]: block
+              - generic [ref=f5e686]: $0.03172
+              - generic [ref=f5e687]: $43227.453
+            - generic [ref=f5e688]:
+              - generic [ref=f5e689]: 01:41:39
+              - generic [ref=f5e690]: BUY
+              - generic [ref=f5e691]:
+                - text: 1,362,851
+                - generic [ref=f5e692]: block
+              - generic [ref=f5e693]: $0.03172
+              - generic [ref=f5e694]: $43227.453
+            - generic [ref=f5e695]:
+              - generic [ref=f5e696]: 01:41:39
+              - generic [ref=f5e697]: BUY
+              - generic [ref=f5e698]:
+                - text: 1,362,851
+                - generic [ref=f5e699]: block
+              - generic [ref=f5e700]: $0.03172
+              - generic [ref=f5e701]: $43227.453
+            - generic [ref=f5e702]:
+              - generic [ref=f5e703]: 01:41:39
+              - generic [ref=f5e704]: BUY
+              - generic [ref=f5e705]:
+                - text: 1,362,851
+                - generic [ref=f5e706]: block
+              - generic [ref=f5e707]: $0.03172
+              - generic [ref=f5e708]: $43227.453
+            - generic [ref=f5e709]:
+              - generic [ref=f5e710]: 01:41:35
+              - generic [ref=f5e711]: BUY
+              - generic [ref=f5e712]:
+                - text: 1,439,200
+                - generic [ref=f5e713]: block
+              - generic [ref=f5e714]: $0.03225
+              - generic [ref=f5e715]: $46418.230
+            - generic [ref=f5e716]:
+              - generic [ref=f5e717]: 01:41:24
+              - generic [ref=f5e718]: SELL
+              - generic [ref=f5e719]:
+                - text: 2,412,788
+                - generic [ref=f5e720]: block
+              - generic [ref=f5e721]: $0.03168
+              - generic [ref=f5e722]: $76429.403
+            - generic [ref=f5e723]:
+              - generic [ref=f5e724]: 01:41:24
+              - generic [ref=f5e725]: SELL
+              - generic [ref=f5e726]:
+                - text: 2,412,788
+                - generic [ref=f5e727]: block
+              - generic [ref=f5e728]: $0.03168
+              - generic [ref=f5e729]: $76429.403
+            - generic [ref=f5e730]:
+              - generic [ref=f5e731]: 01:41:24
+              - generic [ref=f5e732]: SELL
+              - generic [ref=f5e733]:
+                - text: 2,412,788
+                - generic [ref=f5e734]: block
+              - generic [ref=f5e735]: $0.03168
+              - generic [ref=f5e736]: $76429.403
+            - generic [ref=f5e737]:
+              - generic [ref=f5e738]: 01:41:24
+              - generic [ref=f5e739]: SELL
+              - generic [ref=f5e740]:
+                - text: 2,412,788
+                - generic [ref=f5e741]: block
+              - generic [ref=f5e742]: $0.03168
+              - generic [ref=f5e743]: $76429.403
+            - generic [ref=f5e744]:
+              - generic [ref=f5e745]: 01:41:24
+              - generic [ref=f5e746]: SELL
+              - generic [ref=f5e747]:
+                - text: 2,412,788
+                - generic [ref=f5e748]: block
+              - generic [ref=f5e749]: $0.03168
+              - generic [ref=f5e750]: $76429.403
+            - generic [ref=f5e751]:
+              - generic [ref=f5e752]: 01:41:14
+              - generic [ref=f5e753]: BUY
+              - generic [ref=f5e754]:
+                - text: 2,418,950
+                - generic [ref=f5e755]: block
+              - generic [ref=f5e756]: $0.03210
+              - generic [ref=f5e757]: $77646.360
+        - generic [ref=f5e274]:
+          - generic [ref=f5e275]:
+            - generic [ref=f5e276]: ORDER BOOK
+            - generic [ref=f5e277]: Internal
+          - generic [ref=f5e278]:
+            - generic [ref=f5e786]:
+              - generic [ref=f5e787]: $0.03213
+              - generic [ref=f5e788]: 24,169
+            - generic [ref=f5e789]:
+              - generic [ref=f5e790]: $0.03212
+              - generic [ref=f5e791]: 21,362
+            - generic [ref=f5e792]:
+              - generic [ref=f5e793]: $0.03210
+              - generic [ref=f5e794]: 9,225
+            - generic [ref=f5e795]:
+              - generic [ref=f5e796]: $0.03208
+              - generic [ref=f5e797]: 36,812
+            - generic [ref=f5e798]:
+              - generic [ref=f5e799]: $0.03206
+              - generic [ref=f5e800]: 8,683
+            - generic [ref=f5e801]:
+              - generic [ref=f5e802]: $0.03204
+              - generic [ref=f5e803]: 12,252
+            - generic [ref=f5e804]:
+              - generic [ref=f5e805]: $0.03202
+              - generic [ref=f5e806]: 21,246
+            - generic [ref=f5e807]:
+              - generic [ref=f5e808]: $0.03281
+              - generic [ref=f5e809]: Target $0.03200
+            - generic [ref=f5e810]:
+              - generic [ref=f5e811]: $0.03198
+              - generic [ref=f5e812]: 32,841
+            - generic [ref=f5e813]:
+              - generic [ref=f5e814]: $0.03196
+              - generic [ref=f5e815]: 5,461
+            - generic [ref=f5e816]:
+              - generic [ref=f5e817]: $0.03194
+              - generic [ref=f5e818]: 36,645
+            - generic [ref=f5e819]:
+              - generic [ref=f5e820]: $0.03192
+              - generic [ref=f5e821]: 39,556
+            - generic [ref=f5e822]:
+              - generic [ref=f5e823]: $0.03190
+              - generic [ref=f5e824]: 12,553
+            - generic [ref=f5e825]:
+              - generic [ref=f5e826]: $0.03188
+              - generic [ref=f5e827]: 21,629
+            - generic [ref=f5e828]:
+              - generic [ref=f5e829]: $0.03187
+              - generic [ref=f5e830]: 26,479
+        - generic [ref=f5e279]:
+          - generic [ref=f5e280]:
+            - generic [ref=f5e281]: Battle data
+            - generic [ref=f5e282]: Live
+          - generic [ref=f5e283]:
+            - generic [ref=f5e961]:
+              - text: 24H volume
+              - generic [ref=f5e962]: $4.28M
+            - generic [ref=f5e963]:
+              - text: Internal liquidity
+              - generic [ref=f5e964]: $1.8K
+            - generic [ref=f5e965]:
+              - text: Total supply
+              - generic [ref=f5e966]: 90.08 亿
+            - generic [ref=f5e967]:
+              - text: Burned
+              - generic [ref=f5e968]: 9.91 亿
+            - generic [ref=f5e969]:
+              - text: Round stake pool
+              - generic [ref=f5e970]: 3.86 亿
+            - generic [ref=f5e971]:
+              - text: Participants
+              - generic [ref=f5e972]: "12"
+            - generic [ref=f5e973]:
+              - text: Round reward budget
+              - generic [ref=f5e974]: 7.5 亿
+            - generic [ref=f5e975]:
+              - text: Reward / stake
+              - generic [ref=f5e976]: 1.94 ×
+    - generic [ref=f5e301]:
+      - generic [ref=f5e302]:
+        - generic [ref=f5e303]: LADDER · 轮次阶梯
+        - heading "Ten gates, each target doubles" [level=2] [ref=f5e977]
+        - paragraph [ref=f5e305]: Round n target = P0 × 2ⁿ; round 10 is 1024× P0. A failed round never rolls the next target back and is never re-issued. P0 = $0.00400, frozen on-chain from a multi-source 7-day TWAP before launch.
+      - generic [ref=f5e306]:
+        - generic [ref=f5e307]:
+          - generic [ref=f5e308]: R01
+          - generic [ref=f5e309]: Lit · unlocked
+          - generic [ref=f5e310]: $0.00800
+          - generic [ref=f5e311]: ×2
+          - generic [ref=f5e314]: 7.5 亿 open for claiming
+        - generic [ref=f5e315]:
+          - generic [ref=f5e316]: R02
+          - generic [ref=f5e317]: Out · permanently closed
+          - generic [ref=f5e318]: $0.01600
+          - generic [ref=f5e319]: ×4
+          - generic [ref=f5e322]: 7.5 亿 burned
+        - generic [ref=f5e323]:
+          - generic [ref=f5e324]: R03
+          - generic [ref=f5e325]: Staking
+          - generic [ref=f5e326]: $0.03200
+          - generic [ref=f5e327]: ×8
+          - generic [ref=f5e330]: 7.5 亿 pending
+        - generic [ref=f5e331]:
+          - generic [ref=f5e332]: R04
+          - generic [ref=f5e333]: Not opened
+          - generic [ref=f5e334]: $0.06400
+          - generic [ref=f5e335]: ×16
+          - generic [ref=f5e338]: 7.5 亿 locked
+        - generic [ref=f5e339]:
+          - generic [ref=f5e340]: R05
+          - generic [ref=f5e341]: Not opened
+          - generic [ref=f5e342]: $0.12800
+          - generic [ref=f5e343]: ×32
+          - generic [ref=f5e346]: 7.5 亿 locked
+        - generic [ref=f5e347]:
+          - generic [ref=f5e348]: R06
+          - generic [ref=f5e349]: Not opened
+          - generic [ref=f5e350]: $0.25600
+          - generic [ref=f5e351]: ×64
+          - generic [ref=f5e354]: 7.5 亿 locked
+        - generic [ref=f5e355]:
+          - generic [ref=f5e356]: R07
+          - generic [ref=f5e357]: Not opened
+          - generic [ref=f5e358]: $0.51200
+          - generic [ref=f5e359]: ×128
+          - generic [ref=f5e362]: 7.5 亿 locked
+        - generic [ref=f5e363]:
+          - generic [ref=f5e364]: R08
+          - generic [ref=f5e365]: Not opened
+          - generic [ref=f5e366]: $1.024
+          - generic [ref=f5e367]: ×256
+          - generic [ref=f5e370]: 7.5 亿 locked
+        - generic [ref=f5e371]:
+          - generic [ref=f5e372]: R09
+          - generic [ref=f5e373]: Not opened
+          - generic [ref=f5e374]: $2.048
+          - generic [ref=f5e375]: ×512
+          - generic [ref=f5e378]: 7.5 亿 locked
+        - generic [ref=f5e379]:
+          - generic [ref=f5e380]: R10
+          - generic [ref=f5e381]: Not opened
+          - generic [ref=f5e382]: $4.096
+          - generic [ref=f5e383]: ×1024
+          - generic [ref=f5e386]: 7.5 亿 locked
+      - paragraph [ref=f5e387]: "The bar is a log scale: every step right doubles the target price."
+    - generic [ref=f5e389]:
+      - generic [ref=f5e390]:
+        - generic [ref=f5e391]: BRIEFING · 作战规则
+        - heading "One campaign, four stages" [level=2] [ref=f5e978]
+        - paragraph [ref=f5e393]: The rules live in the contract. Admins cannot change the target, candle threshold or oracle config of a round that has started.
+      - generic [ref=f5e394]:
+        - generic [ref=f5e395]:
+          - generic [ref=f5e396]: "01"
+          - heading "Stake to enlist" [level=3] [ref=f5e979]
+          - paragraph [ref=f5e398]: During the staking window, move FUSE into the staking vault and write the risk acceptance into the transaction. After the window closes it cannot be topped up, moved or withdrawn early.
+          - generic [ref=f5e399]: Suggested 7-day window · confirm before launch
+        - generic [ref=f5e400]:
+          - generic [ref=f5e401]: "02"
+          - heading "48-hour observation" [level=3] [ref=f5e980]
+          - paragraph [ref=f5e403]: Starting at the next UTC 4-hour boundary, twelve complete candles. Each one uses the multi-source TWAP — not the high, not the spot price.
+          - generic [ref=f5e404]: 4h × 12 = 48h · no partial candles
+        - generic [ref=f5e405]:
+          - generic [ref=f5e406]: "03"
+          - heading "Verdict" [level=3] [ref=f5e981]
+          - paragraph [ref=f5e408]: At least 8 candles with a TWAP at or above the target pass the round; they need not be consecutive. Exactly equal to target counts.
+          - generic [ref=f5e409]: ≥ 8 qualified passes · ≤ 7 fails
+        - generic [ref=f5e410]:
+          - generic [ref=f5e411]: "04"
+          - heading "Settlement" [level=3] [ref=f5e982]
+          - paragraph [ref=f5e413]: "Pass: principal returns and the 750M reward is claimable pro rata. Fail: the 750M reward and all staked principal are actually burned, reducing supply."
+          - generic [ref=f5e414]: Pull claims · idempotent per tx
+      - generic [ref=f5e415]:
+        - generic [ref=f5e416]: WAR GAME · 沙盘推演
+        - heading "Click the candles and try the verdict yourself" [level=3] [ref=f5e983]
+        - paragraph [ref=f5e418]: The default is exactly 8 qualified. Turn one off and see what happens.
+      - generic [ref=f5e419]:
+        - generic [ref=f5e420]:
+          - generic [ref=f5e421]:
+            - generic [ref=f5e422]: 12 × 4h candles · click to toggle
+            - generic [ref=f5e423]: 7 / 12 qualified
+          - generic [ref=f5e424]:
+            - button "Candle 1, qualified" [pressed] [ref=f5e984] [cursor=pointer]:
+              - generic [ref=f5e426]: "01"
+              - generic [ref=f5e429]: 点亮
+            - button "Candle 2, qualified" [pressed] [ref=f5e985] [cursor=pointer]:
+              - generic [ref=f5e431]: "02"
+              - generic [ref=f5e434]: 点亮
+            - button "Candle 3, not qualified" [ref=f5e986] [cursor=pointer]:
+              - generic [ref=f5e436]: "03"
+              - generic [ref=f5e439]: 熄灭
+            - button "Candle 4, qualified" [pressed] [ref=f5e987] [cursor=pointer]:
+              - generic [ref=f5e441]: "04"
+              - generic [ref=f5e444]: 点亮
+            - button "Candle 5, qualified" [pressed] [ref=f5e988] [cursor=pointer]:
+              - generic [ref=f5e446]: "05"
+              - generic [ref=f5e449]: 点亮
+            - button "Candle 6, not qualified" [ref=f5e989] [cursor=pointer]:
+              - generic [ref=f5e451]: "06"
+              - generic [ref=f5e454]: 熄灭
+            - button "Candle 7, qualified" [pressed] [ref=f5e990] [cursor=pointer]:
+              - generic [ref=f5e456]: "07"
+              - generic [ref=f5e459]: 点亮
+            - button "Candle 8, qualified" [pressed] [ref=f5e991] [cursor=pointer]:
+              - generic [ref=f5e461]: "08"
+              - generic [ref=f5e464]: 点亮
+            - button "Candle 9, not qualified" [ref=f5e992] [cursor=pointer]:
+              - generic [ref=f5e466]: "09"
+              - generic [ref=f5e469]: 熄灭
+            - button "Candle 10, not qualified" [ref=f5e993] [cursor=pointer]:
+              - generic [ref=f5e471]: "10"
+              - generic [ref=f5e474]: 熄灭
+            - button "Candle 11, qualified" [pressed] [ref=f5e994] [cursor=pointer]:
+              - generic [ref=f5e476]: "11"
+              - generic [ref=f5e479]: 点亮
+            - button "Candle 12, not qualified" [ref=f5e995] [cursor=pointer]:
+              - generic [ref=f5e481]: "12"
+              - generic [ref=f5e484]: 熄灭
+          - generic [ref=f5e485]:
+            - button "Light all" [ref=f5e996] [cursor=pointer]
+            - button "Exactly 8" [ref=f5e997] [cursor=pointer]
+            - button "Short by one" [ref=f5e998] [cursor=pointer]
+            - button "Extinguish all" [ref=f5e999] [cursor=pointer]
+          - generic [ref=f5e494]:
+            - generic [ref=f5e495]: "0"
+            - generic [ref=f5e496]: Pass line 8
+            - generic [ref=f5e497]: "12"
+        - generic [ref=f5e498]:
+          - generic [ref=f5e499]: VERDICT
+          - heading "Fail · fuse out" [level=3] [ref=f5e1000]
+          - paragraph [ref=f5e501]: Only 7 candles qualified. Short by exactly one. The round closes forever; the 7.5 亿 reward budget and all staked principal are burned together.
+          - generic [ref=f5e502]:
+            - generic [ref=f5e503]:
+              - term [ref=f5e504]: Your loss
+              - definition [ref=f5e505]: 100,000 FUSE（100%）
+            - generic [ref=f5e506]:
+              - term [ref=f5e507]: Reward pool burned
+              - definition [ref=f5e508]: 7.5 亿 FUSE
+            - generic [ref=f5e509]:
+              - term [ref=f5e510]: Stake pool burned (incl. yours)
+              - definition [ref=f5e511]: 3.86 亿 FUSE
+      - generic [ref=f5e512]:
+        - text: Suppose I stake (FUSE)
+        - generic [ref=f5e513]:
+          - spinbutton "Suppose I stake (FUSE) FUSE" [ref=f5e1001]: "100000"
+          - generic [ref=f5e515]: FUSE
+      - generic [ref=f5e516]:
+        - generic [ref=f5e1002]:
+          - heading "A failure closes forever" [level=4] [ref=f5e1003]
+          - paragraph [ref=f5e1004]: No reopen, no retry, no re-issue — even admins cannot restore it. If round 2 fails, round 3 still targets 8×P0.
+        - generic [ref=f5e1005]:
+          - heading "Outages are not failures" [level=4] [ref=f5e1006]
+          - paragraph [ref=f5e1007]: If the oracle lacks data, signatures are invalid or sources are insufficient, scoring pauses and no principal is burned. A full 12-candle window restarts after recovery.
+        - generic [ref=f5e1008]:
+          - heading "The oracle decides price" [level=4] [ref=f5e1009]
+          - paragraph [ref=f5e1010]: Multi-source signed data plus 4-hour TWAP; anyone can submit valid data. No single backend or pool decides the outcome.
+        - generic [ref=f5e1011]:
+          - heading "Burns are real burns" [level=4] [ref=f5e1012]
+          - paragraph [ref=f5e1013]: On failure a Jetton burn executes and the Jetton Master total supply is checked to have decreased — balances are not merely marked unusable.
+    - generic [ref=f5e530]:
+      - generic [ref=f5e531]:
+        - generic [ref=f5e532]: SUPPLY · 筹码分配
+        - heading "10B tokens, 75% reserved for battle" [level=2] [ref=f5e1014]
+        - paragraph [ref=f5e534]: Ten 7.5% blocks map to the ten round rewards and follow each round's real outcome. Failed blocks are burned and never moved to other rounds.
+      - img "10B token allocation diagram" [ref=f5e1015]:
+        - generic [ref=f5e536]:
+          - generic [ref=f5e537]: R1
+          - generic [ref=f5e538]: 7.5%
+        - generic [ref=f5e539]:
+          - generic [ref=f5e540]: R2
+          - generic [ref=f5e541]: 7.5%
+        - generic [ref=f5e542]:
+          - generic [ref=f5e543]: R3
+          - generic [ref=f5e544]: 7.5%
+        - generic [ref=f5e545]:
+          - generic [ref=f5e546]: R4
+          - generic [ref=f5e547]: 7.5%
+        - generic [ref=f5e548]:
+          - generic [ref=f5e549]: R5
+          - generic [ref=f5e550]: 7.5%
+        - generic [ref=f5e551]:
+          - generic [ref=f5e552]: R6
+          - generic [ref=f5e553]: 7.5%
+        - generic [ref=f5e554]:
+          - generic [ref=f5e555]: R7
+          - generic [ref=f5e556]: 7.5%
+        - generic [ref=f5e557]:
+          - generic [ref=f5e558]: R8
+          - generic [ref=f5e559]: 7.5%
+        - generic [ref=f5e560]:
+          - generic [ref=f5e561]: R9
+          - generic [ref=f5e562]: 7.5%
+        - generic [ref=f5e563]:
+          - generic [ref=f5e564]: R10
+          - generic [ref=f5e565]: 7.5%
+        - generic [ref=f5e566]:
+          - generic [ref=f5e567]: Liquidity
+          - generic [ref=f5e568]: 10%
+        - generic [ref=f5e569]:
+          - generic [ref=f5e570]: Team
+          - generic [ref=f5e571]: 10%
+        - generic [ref=f5e572]:
+          - generic [ref=f5e573]: Marketing
+          - generic [ref=f5e574]: 5%
+      - table [ref=f5e576]:
+        - rowgroup [ref=f5e577]:
+          - row [ref=f5e1016]:
+            - columnheader "Allocation" [ref=f5e1017]
+            - columnheader "Share" [ref=f5e1018]
+            - columnheader "Amount" [ref=f5e1019]
+        - rowgroup [ref=f5e582]:
+          - row [ref=f5e1020]:
+            - cell "Ten round unlock rewards (750M each)" [ref=f5e1021]
+            - cell "75%" [ref=f5e585]
+            - cell "7,500,000,000" [ref=f5e586]
+          - row [ref=f5e1022]:
+            - cell "Internal market & liquidity" [ref=f5e1023]
+            - cell "10%" [ref=f5e589]
+            - cell "1,000,000,000" [ref=f5e590]
+          - row [ref=f5e1024]:
+            - cell "Team" [ref=f5e1025]
+            - cell "10%" [ref=f5e593]
+            - cell "1,000,000,000" [ref=f5e594]
+          - row [ref=f5e1026]:
+            - cell "Marketing" [ref=f5e1027]
+            - cell "5%" [ref=f5e597]
+            - cell "500,000,000" [ref=f5e598]
+          - row [ref=f5e1028]:
+            - cell "Total" [ref=f5e1029]
+            - cell "100%" [ref=f5e601]
+            - cell "10,000,000,000" [ref=f5e602]
+    - generic [ref=f5e606]:
+      - generic [ref=f5e607]:
+        - generic [ref=f5e608]: WARNING · 参战前必读
+        - generic [ref=f5e609]: Risk disclosure v1
+      - list [ref=f5e610]:
+        - listitem [ref=f5e611]:
+          - generic [ref=f5e614]: If the round fails, 100% of staked principal is burned. The 750M reward for that round is burned as well. Your stake has no capital protection.
+        - listitem [ref=f5e615]:
+          - generic [ref=f5e618]: The target doubles every round. Round 10 targets 1024× the initial reference price. The protocol does not guarantee price appreciation or that rewards will be realized.
+        - listitem [ref=f5e619]:
+          - generic [ref=f5e622]: TWAP and multi-source oracles only raise the cost of manipulation. They cannot guarantee the price is unmanipulable and cannot prevent selling.
+        - listitem [ref=f5e623]:
+          - generic [ref=f5e626]: Technical failure and market failure are different things. An oracle outage only pauses scoring and never burns principal. Smart contracts may still contain undiscovered bugs; the audit report will be published before mainnet opens.
+        - listitem [ref=f5e627]:
+          - generic [ref=f5e630]: Splitting across wallets cannot be fully prevented. Per-address caps only mitigate; they cannot prove a unique human.
+        - listitem [ref=f5e631]:
+          - generic [ref=f5e634]: Compliance risk is yours to judge. This mechanism may touch rules on financial products, gambling, promotions and consumer protection in various jurisdictions. Seek professional advice before participating. This page is not investment advice.
+  - contentinfo [ref=f5e635]:
+    - generic [ref=f5e636]:
+      - generic [ref=f5e637]:
+        - generic [ref=f5e638]: FUSE
+        - paragraph [ref=f5e642]: Demo environment. Prices, trades, addresses and balances are simulated and do not represent any real market.
+        - paragraph [ref=f5e643]: Extremely high risk. Not investment advice. No guarantee of price appreciation or rewards.
+        - generic [ref=f5e644]:
+          - link "My War" [ref=f5e1030] [cursor=pointer]:
+            - /url: /me
+          - link "Leaderboard" [ref=f5e1031] [cursor=pointer]:
+            - /url: /leaderboard
+          - link "Admin" [ref=f5e1032] [cursor=pointer]:
+            - /url: /admin
+      - generic [ref=f5e648]:
+        - heading "On-chain" [level=5] [ref=f5e1033]
+        - paragraph [ref=f5e650]: Jetton Master · TBA
+        - paragraph [ref=f5e651]: RoundController · TBA
+        - paragraph [ref=f5e652]: Code hash · TBA
+      - generic [ref=f5e653]:
+        - heading "Transparency" [level=5] [ref=f5e1034]
+        - paragraph [ref=f5e655]: Audit report · pending
+        - paragraph [ref=f5e656]: Oracle config hash · pending
+        - paragraph [ref=f5e657]: Multisig · pending
+  - status: 演示环境不产生真实交易（已模拟买入 9,023 FUSE）

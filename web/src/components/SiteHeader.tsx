@@ -69,13 +69,13 @@ export function SiteHeader({ tape, isLanding = false }: { tape?: ReactNode; isLa
           <span className="badge" title={lang === 'zh' ? '价格、成交、地址为演示数据' : 'Demo data'}>
             {lang === 'zh' ? '原型 · 模拟数据' : 'Prototype · Demo'}
           </span>
-          <button className="chroma" type="button" onClick={onChroma} aria-label={lang === 'zh' ? '切换涨跌颜色' : 'Toggle up/down colors'}>
+          <button className="chroma chroma-color" type="button" onClick={onChroma} aria-label={lang === 'zh' ? '切换涨跌颜色' : 'Toggle up/down colors'}>
             {lang === 'zh'
               ? '涨跌色 ' + (chromaCn ? '红涨绿跌' : '绿涨红跌')
               : 'Colors ' + (chromaCn ? 'CN' : 'US')}
           </button>
           <button
-            className="chroma"
+            className="chroma chroma-lang"
             type="button"
             onClick={toggle}
             aria-label={lang === 'zh' ? '切换语言' : 'Switch language'}

@@ -1,0 +1,31 @@
+/* Landing-only layout tweaks layered on top of the shared fuse.css (no shared-file edits). */
+
+/* Keep anchor jumps / CTA scrolling clear of the sticky header (tape 32px + nav 52px). */
+#war,
+#cmd,
+#floor,
+#ladder,
+#rules,
+#supply,
+#risk {
+  scroll-margin-top: 96px;
+}
+
+@media (max-width: 640px) {
+  #war,
+  #cmd,
+  #floor,
+  #ladder,
+  #rules,
+  #supply,
+  #risk {
+    scroll-margin-top: 88px;
+  }
+}
+
+/* Long English state labels must not push the board clock out of the header row. */
+@media (max-width: 700px) {
+  .board .b-head .pill {
+    white-space: normal;
+  }
+}

@@ -4,8 +4,9 @@ compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# 前端构建产物（web/dist）由同一个 Worker 托管，SPA 回退
-assets = { directory = "../web/dist", binding = "ASSETS", not_found_handling = "single-page-application", run_worker_first = ["/api/*"] }
+# 前端构建产物（web/dist）由同一个 Worker 托管，SPA 回退。
+# run_worker_first = true：所有请求（含静态资源）都经过 Worker，以便统一追加安全响应头。
+assets = { directory = "../web/dist", binding = "ASSETS", not_found_handling = "single-page-application", run_worker_first = true }
 
 [observability]
 enabled = true
@@ -25,4 +26,16 @@ DATA_SOURCE = "demo"
 DEMO_CANDLE_SECONDS = "90"
 # 演示钱包初始余额（raw units，9 位精度）
 DEMO_WALLET_BALANCE = "250000000000000"
+# 演示自维持：终态后自动开下一轮 / 十轮结束后重置演示（chain 模式强制关闭）
+DEMO_AUTOPLAY = "true"
+# 演示质押窗口时长（秒）
+DEMO_STAKE_SECONDS = "900"
 ALLOWED_ORIGINS = "*"
+# 语义化版本 / 部署核对信息（部署时可用 --var GIT_SHA:xxx --var DEPLOYED_AT:xxx 覆盖）
+VERSION = "1.0.0"
+# GIT_SHA = ""
+# DEPLOYED_AT = ""
+# GET 微缓存秒数（0 = 关闭），降低页面 2~3s 轮询对 D1 的读取压力
+EDGE_CACHE_SECONDS = "1"
+# TON Connect manifest（由前端 public/ 提供）
+TONCONNECT_MANIFEST_URL = "/tonconnect-manifest.json"

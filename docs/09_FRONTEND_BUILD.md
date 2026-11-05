@@ -143,3 +143,40 @@ cd .. && npm run build && cd worker && npx wrangler deploy
 - 中英切换覆盖全站可见文案；刷新后语言保持。
 - 管理员后台能登录（token）、暂停/恢复预言机、推进轮次。
 - README/运维文档更新，部署命令可复现。
+
+
+## 12. 钱包模块契约（强制）
+
+`web/src/features/wallet/index.ts` 必须导出以下 API，landing 与 app 页面都只依赖这份契约：
+
+```ts
+export interface WalletState {
+  address: string | null;      // TON 地址（UQ...）；未连接为 null
+  connected: boolean;
+  connecting: boolean;
+  demo: boolean;               // true = 降级演示钱包（非真实 TON Connect）
+  tonBalance: string | null;   // TON 余额，人类可读字符串（"1250.42"）
+  fuseBalance: string | null;  // FUSE 余额，raw units 字符串（9 位精度）
+  error: string | null;
+  connect: () => void;
+  disconnect: () => void;
+  refreshBalances: () => void;
+}
+export function useWallet(): WalletState;
+export function WalletProvider(props: { children: React.ReactNode }): JSX.Element;
+export function WalletButton(): JSX.Element;
+```
+
+规则：
+- 地址变化 → `refreshBalances()` 自动触发，并让 `useQuery` 依赖 address 的页面自动刷新。
+- TON Connect 只读：真实钱包可连接/断开、展示地址与余额；**任何交易按钮禁用**并提示「合约部署后开放」。
+- 连接失败/用户拒绝/环境不支持 → 自动降级 `demo: true`：本地生成 `UQ...` 地址存 localStorage，余额来自 `/api/me`（无则显示 0）。
+- `WalletProvider` 由 Lead 在 `App.tsx` 统一挂载（已挂载则勿重复）。若需要修改 `App.tsx`，消息 Lead。
+
+## 13. 演示模式下的买入行为
+
+`/api/*` **没有 swap/buy 端点**（避免伪造真实成交）。CommandPanel 的买入：
+- 报价按 `config.tonUsdE8`（演示 $3.00）+ 0.3% 手续费 + 加深池价格影响实时计算；
+- 点击买入：演示钱包内本地扣减 TON、增加 FUSE，并明确 toast「演示环境不产生真实交易」；
+- 真实钱包（demon:false）点击买入 → 提示「合约部署后开放」，不做任何状态变更。
+

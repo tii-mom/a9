@@ -15,6 +15,12 @@ import type {
 } from '@shared/types';
 import { ENDPOINTS } from '@shared/types';
 
+function newNonce(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export class ApiError extends Error {
   code: string;
   constructor(code: string, message: string) {
@@ -55,10 +61,21 @@ export const api = {
   trades: (limit = 20) => request<Trade[]>(`${ENDPOINTS.trades}?limit=${limit}`),
   book: () => request<OrderBook>(ENDPOINTS.book),
   me: (address: string) => request<MeResponse>(ENDPOINTS.me(address)),
-  stake: (payload: { address: string; roundId: number; amountRaw: string; riskDisclosureVersion: number; acceptFullPrincipalBurn: boolean }) =>
+  /**
+   * 演示质押。depositNonce 为幂等键：不传则自动生成（crypto.randomUUID），
+   * 后端以 (roundId, address, nonce) 唯一去重，重复提交返回 409。
+   */
+  stake: (payload: {
+    address: string;
+    roundId: number;
+    amountRaw: string;
+    riskDisclosureVersion: number;
+    acceptFullPrincipalBurn: boolean;
+    depositNonce?: string;
+  }) =>
     request<{ accepted: boolean; position: { roundId: number; amountRaw: string } }>(ENDPOINTS.stake, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, depositNonce: payload.depositNonce ?? newNonce() }),
     }),
   claim: (payload: { address: string; roundId: number; kind: 'principal' | 'reward' }) =>
     request<{ claimed: boolean; amountRaw: string }>(ENDPOINTS.claim, {

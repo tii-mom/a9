@@ -1,0 +1,83 @@
+import type { ProtocolConfig, RoundSummary } from '@shared/types';
+import { formatUsdE8, pad2 } from '../../lib/format';
+import { ladderLetter, targetFromConfig, type LadderLetter } from './derive';
+import { IcoDot, IcoNo, IcoOk } from './icons';
+import { useLang } from '../../lib/lang';
+import { fill, type LandingCopy } from './landing.i18n';
+import { formatCompactToken, usdNum } from './utils';
+
+interface Props {
+  cfg: ProtocolConfig | null;
+  rounds: RoundSummary[];
+  copy: LandingCopy;
+}
+
+export function RoundLadder({ cfg, rounds, copy }: Props) {
+  const { lang } = useLang();
+  const decimals = cfg?.token.decimals ?? 9;
+  const p0 = cfg ? '$' + (usdNum(cfg.p0UsdE8) ?? 0).toFixed(5) : copy.common.dash;
+  const roundCount = cfg?.roundCount ?? 10;
+  const total = Math.max(10, roundCount);
+
+  const tagOf = (letter: LadderLetter) => {
+    switch (letter) {
+      case 'S':
+        return { text: copy.ladder.tagS, icon: <IcoOk /> };
+      case 'F':
+        return { text: copy.ladder.tagF, icon: <IcoNo /> };
+      case 'O':
+        return { text: copy.ladder.tagO, icon: <IcoDot /> };
+      case 'K':
+        return { text: copy.ladder.tagK, icon: <IcoDot /> };
+      default:
+        return { text: copy.ladder.tagU, icon: null };
+    }
+  };
+
+  const outcomeOf = (letter: LadderLetter, amount: string) => {
+    const value = formatCompactToken(amount, decimals, lang);
+    if (letter === 'S') return value + ' ' + copy.ladder.outClaim;
+    if (letter === 'F') return value + ' ' + copy.ladder.outBurned;
+    if (letter === 'O' || letter === 'K') return value + ' ' + copy.ladder.outPending;
+    return value + ' ' + copy.ladder.outLocked;
+  };
+
+  return (
+    <section className="sec" id="ladder">
+      <div className="wrap">
+        <div className="sec-h">
+          <span className="lbl">{copy.ladder.lbl}</span>
+          <h2>{copy.ladder.title}</h2>
+          <p>{fill(copy.ladder.intro, { p0 })}</p>
+        </div>
+        <div className="ladder" id="ladderBody">
+          {Array.from({ length: total }).map((_, index) => {
+            const roundId = index + 1;
+            const round = rounds.find((item) => item.roundId === roundId) ?? null;
+            const letter = ladderLetter(round?.state);
+            const tag = tagOf(letter);
+            const target = round?.targetPriceUsdE8 ?? targetFromConfig(cfg, roundId);
+            const rewardRaw = round?.rewardBudgetRaw ?? cfg?.roundRewardRaw ?? '0';
+            const mult = Math.pow(cfg?.priceMultiplier ?? 2, roundId);
+            return (
+              <div className={'lrow ' + letter} key={roundId}>
+                <span className="lr">{'R' + pad2(roundId)}</span>
+                <span className="lt">
+                  {tag.icon}
+                  {tag.text}
+                </span>
+                <span className="lp">{target === null ? copy.common.dash : formatUsdE8(target)}</span>
+                <span className="lm">{'×' + mult}</span>
+                <span className="lbar">
+                  <i style={{ width: roundId * 10 + '%' }} />
+                </span>
+                <span className="lo">{outcomeOf(letter, rewardRaw)}</span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="note">{copy.ladder.note}</p>
+      </div>
+    </section>
+  );
+}

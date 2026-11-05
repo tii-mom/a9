@@ -1,0 +1,580 @@
+- generic [ref=f16e2]:
+  - banner [ref=f16e3]:
+    - generic [ref=f16e5]:
+      - generic [ref=f16e6]:
+        - generic [ref=f16e7]: FUSE/USD— —
+        - generic [ref=f16e8]: R-- 目标—
+        - generic [ref=f16e9]:
+          - text: 点亮
+          - generic [ref=f16e10]: 0 / 8
+        - generic [ref=f16e11]:
+          - text: 失守
+          - generic [ref=f16e12]: 0 / 5
+        - generic [ref=f16e13]: 本轮质押0 FUSE
+        - generic [ref=f16e14]: 已销毁0 FUSE
+        - generic [ref=f16e15]: 24H 成交—
+        - generic [ref=f16e16]: —
+        - generic [ref=f16e17]: —
+        - generic [ref=f16e18]: —
+        - generic [ref=f16e19]: —
+      - generic [ref=f16e20]:
+        - generic [ref=f16e21]: FUSE/USD— —
+        - generic [ref=f16e22]: R-- 目标—
+        - generic [ref=f16e23]:
+          - text: 点亮
+          - generic [ref=f16e24]: 0 / 8
+        - generic [ref=f16e25]:
+          - text: 失守
+          - generic [ref=f16e26]: 0 / 5
+        - generic [ref=f16e27]: 本轮质押0 FUSE
+        - generic [ref=f16e28]: 已销毁0 FUSE
+        - generic [ref=f16e29]: 24H 成交—
+        - generic [ref=f16e30]: —
+        - generic [ref=f16e31]: —
+        - generic [ref=f16e32]: —
+        - generic [ref=f16e33]: —
+    - navigation "主导航" [ref=f16e34]:
+      - link "FUSE 引信协议" [ref=f16e35] [cursor=pointer]:
+        - /url: /
+        - text: FUSE
+        - generic [ref=f16e39]: 引信协议
+      - generic [ref=f16e40]:
+        - generic "价格、成交、地址为演示数据" [ref=f16e41]: 原型 · 模拟数据
+        - button "切换涨跌颜色" [ref=f16e42] [cursor=pointer]: 涨跌色 绿涨红跌
+        - button "切换语言" [ref=f16e43] [cursor=pointer]: EN
+        - 'button "钱包: UQAY7V…4uZa" [ref=f16e45] [cursor=pointer]':
+          - generic [ref=f16e47]: UQAY7V…4uZa
+          - generic [ref=f16e48]: DEMO
+        - link "立即参战" [ref=f16e49] [cursor=pointer]:
+          - /url: /#cmd
+  - main [ref=f16e50]:
+    - generic [ref=f16e52]:
+      - generic [ref=f16e53]:
+        - generic [ref=f16e54]:
+          - generic [ref=f16e55]: TON · 价格驱动型代币
+          - generic [ref=f16e56]: 10 轮目标价逐轮翻倍
+        - heading [level=1] [ref=f16e58]:
+          - text: 12 根 K 线点亮 8 根，
+          - emphasis [ref=f16e59]: 7.5 亿枚才会解锁。
+        - paragraph [ref=f16e60]: 每一轮设一个目标价，用户质押参战。48 小时内 12 根 4 小时 K 线，TWAP 触及目标价的至少 8 根，奖励开放认领、本金退还。差一根，本轮 7.5 亿奖励与全部质押本金一起销毁，本轮永久关闭。
+        - generic [ref=f16e61]:
+          - link "质押参战" [ref=f16e62] [cursor=pointer]:
+            - /url: "#cmd"
+          - link "买入 FUSE" [ref=f16e63] [cursor=pointer]:
+            - /url: "#cmd"
+          - link "读懂规则" [ref=f16e64] [cursor=pointer]:
+            - /url: "#rules"
+      - generic "TON · 价格驱动型代币" [ref=f16e65]:
+        - generic [ref=f16e66]:
+          - text: 总发行
+          - generic [ref=f16e67]: 100亿枚
+        - generic [ref=f16e68]:
+          - text: 解锁轮次
+          - generic [ref=f16e69]: 10轮 × 7.5 亿
+        - generic [ref=f16e70]:
+          - text: 第 n 轮目标
+          - generic [ref=f16e71]:
+            - text: P0×2
+            - superscript [ref=f16e72]: "n"
+    - generic [ref=f16e73]:
+      - region "当前战役" [ref=f16e74]:
+        - generic [ref=f16e75]:
+          - generic [ref=f16e76]:
+            - text: 当前战役
+            - heading "--/ 10" [level=2] [ref=f16e77]
+          - generic [ref=f16e78]: 未开启 · UNOPENED
+          - generic [ref=f16e80]:
+            - text: 本轮
+            - generic [ref=f16e81]: —
+          - generic [ref=f16e82]:
+            - generic [ref=f16e83]: —
+            - generic [ref=f16e85]: —
+            - generic [ref=f16e86]: —
+            - generic [ref=f16e87]: —
+        - generic [ref=f16e88]:
+          - generic [ref=f16e89]:
+            - text: 现价 FUSE / USD
+            - generic [ref=f16e90]: —
+            - generic [ref=f16e91]: 未触及目标价
+          - generic [ref=f16e94]:
+            - text: 本轮目标价 · 2^n×P0
+            - generic [ref=f16e95]: —
+            - generic [ref=f16e96]: —
+          - generic [ref=f16e97]:
+            - text: 本根暂定 TWAP
+            - generic [ref=f16e98]: —
+            - generic [ref=f16e99]: 观察开始后统计
+        - generic [ref=f16e100]:
+          - img "本轮价格走势与目标价对比图" [ref=f16e101]
+          - generic: 观察窗口尚未开始 · 以下为报名期价格走势
+        - generic "本轮价格走势与目标价对比图" [ref=f16e102]:
+          - generic [ref=f16e103]:
+            - generic [ref=f16e104]: "01"
+            - generic [ref=f16e105]: 08:00
+            - generic [ref=f16e106]: —
+            - generic [ref=f16e108]: 待观察
+          - generic [ref=f16e109]:
+            - generic [ref=f16e110]: "02"
+            - generic [ref=f16e111]: 12:00
+            - generic [ref=f16e112]: —
+            - generic [ref=f16e114]: 待观察
+          - generic [ref=f16e115]:
+            - generic [ref=f16e116]: "03"
+            - generic [ref=f16e117]: 16:00
+            - generic [ref=f16e118]: —
+            - generic [ref=f16e120]: 待观察
+          - generic [ref=f16e121]:
+            - generic [ref=f16e122]: "04"
+            - generic [ref=f16e123]: 20:00
+            - generic [ref=f16e124]: —
+            - generic [ref=f16e126]: 待观察
+          - generic [ref=f16e127]:
+            - generic [ref=f16e128]: "05"
+            - generic [ref=f16e129]: 00:00
+            - generic [ref=f16e130]: —
+            - generic [ref=f16e132]: 待观察
+          - generic [ref=f16e133]:
+            - generic [ref=f16e134]: "06"
+            - generic [ref=f16e135]: 04:00
+            - generic [ref=f16e136]: —
+            - generic [ref=f16e138]: 待观察
+          - generic [ref=f16e139]:
+            - generic [ref=f16e140]: "07"
+            - generic [ref=f16e141]: 08:00
+            - generic [ref=f16e142]: —
+            - generic [ref=f16e144]: 待观察
+          - generic [ref=f16e145]:
+            - generic [ref=f16e146]: "08"
+            - generic [ref=f16e147]: 12:00
+            - generic [ref=f16e148]: —
+            - generic [ref=f16e150]: 待观察
+          - generic [ref=f16e151]:
+            - generic [ref=f16e152]: "09"
+            - generic [ref=f16e153]: 16:00
+            - generic [ref=f16e154]: —
+            - generic [ref=f16e156]: 待观察
+          - generic [ref=f16e157]:
+            - generic [ref=f16e158]: "10"
+            - generic [ref=f16e159]: 20:00
+            - generic [ref=f16e160]: —
+            - generic [ref=f16e162]: 待观察
+          - generic [ref=f16e163]:
+            - generic [ref=f16e164]: "11"
+            - generic [ref=f16e165]: 00:00
+            - generic [ref=f16e166]: —
+            - generic [ref=f16e168]: 待观察
+          - generic [ref=f16e169]:
+            - generic [ref=f16e170]: "12"
+            - generic [ref=f16e171]: 04:00
+            - generic [ref=f16e172]: —
+            - generic [ref=f16e174]: 待观察
+        - generic [ref=f16e175]:
+          - generic [ref=f16e176]:
+            - text: 已点亮 / 需要
+            - generic [ref=f16e177]: 0/ 8
+            - generic [ref=f16e187]: 还差 8 根
+          - generic [ref=f16e188]:
+            - text: 已失守 / 判负线
+            - generic [ref=f16e189]: 0/ 5
+            - generic [ref=f16e196]: 还可失守 4 根
+          - generic [ref=f16e197]:
+            - text: 剩余 K 线
+            - generic [ref=f16e198]: 12根
+            - generic [ref=f16e199]: 需再亮 ≥ 8 根
+        - generic [ref=f16e201]:
+          - text: 胜负未定
+          - generic [ref=f16e202]: 剩余 12 根里还需再亮 8 根；再失守 5 根即判负。
+        - generic: 等待轮次数据…
+      - complementary "指挥台 · COMMAND" [ref=f16e203]:
+        - generic [ref=f16e204]:
+          - generic [ref=f16e205]: 指挥台 · COMMAND
+          - button "断开" [ref=f16e206] [cursor=pointer]
+        - generic [ref=f16e207]:
+          - generic [ref=f16e208]: UQAY7V…4uZa · 演示钱包
+          - generic [ref=f16e209]:
+            - text: TON
+            - generic [ref=f16e210]: 1,250
+          - generic [ref=f16e211]:
+            - text: FUSE
+            - generic [ref=f16e212]: 250,000
+          - generic [ref=f16e213]:
+            - text: 本轮已质押
+            - generic [ref=f16e214]: "0"
+        - tablist [ref=f16e215]:
+          - tab "① 买入 FUSE" [selected] [ref=f16e216] [cursor=pointer]
+          - tab "② 质押参战" [ref=f16e217] [cursor=pointer]
+        - tabpanel [ref=f16e219]:
+          - generic [ref=f16e220]:
+            - text: 支付 TON
+            - generic [ref=f16e221]:
+              - spinbutton "支付 TON TON" [ref=f16e222]: "100"
+              - generic [ref=f16e223]: TON
+          - generic [ref=f16e224]:
+            - button "50" [ref=f16e225] [cursor=pointer]
+            - button "100" [ref=f16e226] [cursor=pointer]
+            - button "500" [ref=f16e227] [cursor=pointer]
+            - button "MAX" [ref=f16e228] [cursor=pointer]
+          - generic [ref=f16e229]:
+            - text: 预计获得
+            - generic [ref=f16e230]: —
+            - generic [ref=f16e231]: ≈ $0 · 1 TON ≈ $—（演示汇率）
+          - generic [ref=f16e232]:
+            - generic [ref=f16e233]:
+              - term [ref=f16e234]: 成交均价
+              - definition [ref=f16e235]: —
+            - generic [ref=f16e236]:
+              - term [ref=f16e237]: 价格影响
+              - definition [ref=f16e238]: +0.000%
+            - generic [ref=f16e239]:
+              - term [ref=f16e240]: 手续费 0.3%
+              - definition [ref=f16e241]: $0.00
+            - generic [ref=f16e242]:
+              - term [ref=f16e243]: 最少收到（滑点 1%）
+              - definition [ref=f16e244]: —
+          - button "买入 FUSE" [ref=f16e245] [cursor=pointer]
+          - paragraph [ref=f16e246]: 买入的 FUSE 留在你的钱包，在报名期内可转入质押金库参战。演示环境不会产生真实交易。
+    - generic [ref=f16e248]:
+      - generic [ref=f16e249]:
+        - generic [ref=f16e250]: ORDER FLOW · 成交流
+        - heading "每一笔买卖都在推着价格线" [level=2] [ref=f16e251]
+        - paragraph [ref=f16e252]: 逐笔成交、买卖盘口和本轮关键数字。价格线能否守在目标价之上，决定 12 根 K 线里有几根点亮。
+      - generic [ref=f16e253]:
+        - generic [ref=f16e254]:
+          - generic [ref=f16e255]: 逐笔成交 · TIME & SALES
+          - generic [ref=f16e257]:
+            - generic [ref=f16e258]: 时间 UTC
+            - generic [ref=f16e259]: 方向
+            - generic [ref=f16e260]: 数量 FUSE
+            - generic [ref=f16e261]: 价格
+            - generic [ref=f16e262]: 金额 USD
+          - generic [ref=f16e263]: 等待成交…
+        - generic [ref=f16e265]:
+          - generic [ref=f16e266]:
+            - generic [ref=f16e267]: 盘口深度 · ORDER BOOK
+            - generic [ref=f16e268]: 内盘
+          - generic [ref=f16e269]: 等待成交…
+        - generic [ref=f16e270]:
+          - generic [ref=f16e271]:
+            - generic [ref=f16e272]: 战场数据
+            - generic [ref=f16e273]: 实时
+          - generic [ref=f16e274]:
+            - generic [ref=f16e275]:
+              - text: 24H 成交额
+              - generic [ref=f16e276]: —
+            - generic [ref=f16e277]:
+              - text: 内盘流动性
+              - generic [ref=f16e278]: —
+            - generic [ref=f16e279]:
+              - text: 总供应量
+              - generic [ref=f16e280]: "0"
+            - generic [ref=f16e281]:
+              - text: 已销毁
+              - generic [ref=f16e282]: "0"
+            - generic [ref=f16e283]:
+              - text: 本轮质押池
+              - generic [ref=f16e284]: "0"
+            - generic [ref=f16e285]:
+              - text: 参战地址
+              - generic [ref=f16e286]: "0"
+            - generic [ref=f16e287]:
+              - text: 本轮奖励预算
+              - generic [ref=f16e288]: "0"
+            - generic [ref=f16e289]:
+              - text: 奖励 / 质押
+              - generic [ref=f16e290]: —
+    - generic [ref=f16e292]:
+      - generic [ref=f16e293]:
+        - generic [ref=f16e294]: LADDER · 轮次阶梯
+        - heading "十道关卡，每道目标价翻一倍" [level=2] [ref=f16e295]
+        - paragraph [ref=f16e296]: 第 n 轮目标价 = P0 × 2ⁿ，第 10 轮是 P0 的 1024 倍。某一轮失败后，下一轮目标价不会回滚，也不会补发。P0 = —，上线前由多源 7 日 TWAP 冻结上链。
+      - generic [ref=f16e297]:
+        - generic [ref=f16e298]:
+          - generic [ref=f16e299]: R01
+          - generic [ref=f16e300]: 未开启
+          - generic [ref=f16e301]: —
+          - generic [ref=f16e302]: ×2
+          - generic [ref=f16e305]: 0 未解锁
+        - generic [ref=f16e306]:
+          - generic [ref=f16e307]: R02
+          - generic [ref=f16e308]: 未开启
+          - generic [ref=f16e309]: —
+          - generic [ref=f16e310]: ×4
+          - generic [ref=f16e313]: 0 未解锁
+        - generic [ref=f16e314]:
+          - generic [ref=f16e315]: R03
+          - generic [ref=f16e316]: 未开启
+          - generic [ref=f16e317]: —
+          - generic [ref=f16e318]: ×8
+          - generic [ref=f16e321]: 0 未解锁
+        - generic [ref=f16e322]:
+          - generic [ref=f16e323]: R04
+          - generic [ref=f16e324]: 未开启
+          - generic [ref=f16e325]: —
+          - generic [ref=f16e326]: ×16
+          - generic [ref=f16e329]: 0 未解锁
+        - generic [ref=f16e330]:
+          - generic [ref=f16e331]: R05
+          - generic [ref=f16e332]: 未开启
+          - generic [ref=f16e333]: —
+          - generic [ref=f16e334]: ×32
+          - generic [ref=f16e337]: 0 未解锁
+        - generic [ref=f16e338]:
+          - generic [ref=f16e339]: R06
+          - generic [ref=f16e340]: 未开启
+          - generic [ref=f16e341]: —
+          - generic [ref=f16e342]: ×64
+          - generic [ref=f16e345]: 0 未解锁
+        - generic [ref=f16e346]:
+          - generic [ref=f16e347]: R07
+          - generic [ref=f16e348]: 未开启
+          - generic [ref=f16e349]: —
+          - generic [ref=f16e350]: ×128
+          - generic [ref=f16e353]: 0 未解锁
+        - generic [ref=f16e354]:
+          - generic [ref=f16e355]: R08
+          - generic [ref=f16e356]: 未开启
+          - generic [ref=f16e357]: —
+          - generic [ref=f16e358]: ×256
+          - generic [ref=f16e361]: 0 未解锁
+        - generic [ref=f16e362]:
+          - generic [ref=f16e363]: R09
+          - generic [ref=f16e364]: 未开启
+          - generic [ref=f16e365]: —
+          - generic [ref=f16e366]: ×512
+          - generic [ref=f16e369]: 0 未解锁
+        - generic [ref=f16e370]:
+          - generic [ref=f16e371]: R10
+          - generic [ref=f16e372]: 未开启
+          - generic [ref=f16e373]: —
+          - generic [ref=f16e374]: ×1024
+          - generic [ref=f16e377]: 0 未解锁
+      - paragraph [ref=f16e378]: 进度条为对数刻度：每向右一格，目标价翻一倍。
+    - generic [ref=f16e380]:
+      - generic [ref=f16e381]:
+        - generic [ref=f16e382]: BRIEFING · 作战规则
+        - heading "一轮战役，四个阶段" [level=2] [ref=f16e383]
+        - paragraph [ref=f16e384]: 规则写进合约，管理员不能修改已开始轮次的目标价、K 线阈值和预言机配置。
+      - generic [ref=f16e385]:
+        - generic [ref=f16e386]:
+          - generic [ref=f16e387]: "01"
+          - heading "报名质押" [level=3] [ref=f16e388]
+          - paragraph [ref=f16e389]: 报名窗口内，把 FUSE 转入质押金库，并在交易里写入风险确认。窗口关闭后不能追加、转移或提前取回。
+          - generic [ref=f16e390]: 建议窗口 7 天 · 参数上线前确认
+        - generic [ref=f16e391]:
+          - generic [ref=f16e392]: "02"
+          - heading "48 小时观察" [level=3] [ref=f16e393]
+          - paragraph [ref=f16e394]: 从下一个 UTC 4 小时整点起，连续 12 根完整 K 线。每根取多源 TWAP，不用最高价，不用瞬时价。
+          - generic [ref=f16e395]: 4h × 12 = 48h · 不使用部分 K 线
+        - generic [ref=f16e396]:
+          - generic [ref=f16e397]: "03"
+          - heading "判定" [level=3] [ref=f16e398]
+          - paragraph [ref=f16e399]: TWAP 大于等于目标价的 K 线至少 8 根即通过，不要求连续。恰好等于目标价也算达标。
+          - generic [ref=f16e400]: 达标数 ≥ 8 通过 · ≤ 7 失败
+        - generic [ref=f16e401]:
+          - generic [ref=f16e402]: "04"
+          - heading "结算" [level=3] [ref=f16e403]
+          - paragraph [ref=f16e404]: 通过：本金退还，7.5 亿奖励按质押占比认领。失败：7.5 亿奖励与本轮全部质押本金实际销毁，供应量随之减少。
+          - generic [ref=f16e405]: 用户主动认领 · 每笔幂等
+      - generic [ref=f16e406]:
+        - generic [ref=f16e407]: WAR GAME · 沙盘推演
+        - heading "点击 K 线，自己试一次判定" [level=3] [ref=f16e408]
+        - paragraph [ref=f16e409]: 默认刚好 8 根达标。取消任意一根，看看会发生什么。
+      - generic [ref=f16e410]:
+        - generic [ref=f16e411]:
+          - generic [ref=f16e412]:
+            - generic [ref=f16e413]: 12 根 4 小时 K 线 · 点击切换
+            - generic [ref=f16e414]: 8 / 12 达标
+          - generic [ref=f16e415]:
+            - button "第 1 根K线，达标" [pressed] [ref=f16e416] [cursor=pointer]:
+              - generic [ref=f16e417]: "01"
+              - generic [ref=f16e420]: 点亮
+            - button "第 2 根K线，达标" [pressed] [ref=f16e421] [cursor=pointer]:
+              - generic [ref=f16e422]: "02"
+              - generic [ref=f16e425]: 点亮
+            - button "第 3 根K线，未达标" [ref=f16e426] [cursor=pointer]:
+              - generic [ref=f16e427]: "03"
+              - generic [ref=f16e430]: 熄灭
+            - button "第 4 根K线，达标" [pressed] [ref=f16e431] [cursor=pointer]:
+              - generic [ref=f16e432]: "04"
+              - generic [ref=f16e435]: 点亮
+            - button "第 5 根K线，达标" [pressed] [ref=f16e436] [cursor=pointer]:
+              - generic [ref=f16e437]: "05"
+              - generic [ref=f16e440]: 点亮
+            - button "第 6 根K线，未达标" [ref=f16e441] [cursor=pointer]:
+              - generic [ref=f16e442]: "06"
+              - generic [ref=f16e445]: 熄灭
+            - button "第 7 根K线，达标" [pressed] [ref=f16e446] [cursor=pointer]:
+              - generic [ref=f16e447]: "07"
+              - generic [ref=f16e450]: 点亮
+            - button "第 8 根K线，达标" [pressed] [ref=f16e451] [cursor=pointer]:
+              - generic [ref=f16e452]: "08"
+              - generic [ref=f16e455]: 点亮
+            - button "第 9 根K线，达标" [pressed] [ref=f16e456] [cursor=pointer]:
+              - generic [ref=f16e457]: "09"
+              - generic [ref=f16e460]: 点亮
+            - button "第 10 根K线，未达标" [ref=f16e461] [cursor=pointer]:
+              - generic [ref=f16e462]: "10"
+              - generic [ref=f16e465]: 熄灭
+            - button "第 11 根K线，达标" [pressed] [ref=f16e466] [cursor=pointer]:
+              - generic [ref=f16e467]: "11"
+              - generic [ref=f16e470]: 点亮
+            - button "第 12 根K线，未达标" [ref=f16e471] [cursor=pointer]:
+              - generic [ref=f16e472]: "12"
+              - generic [ref=f16e475]: 熄灭
+          - generic [ref=f16e476]:
+            - button "全部点亮" [ref=f16e477] [cursor=pointer]
+            - button "刚好 8 根" [ref=f16e478] [cursor=pointer]
+            - button "只差 1 根" [ref=f16e479] [cursor=pointer]
+            - button "全部熄灭" [ref=f16e480] [cursor=pointer]
+          - generic [ref=f16e485]:
+            - generic [ref=f16e486]: "0"
+            - generic [ref=f16e487]: 通过线 8
+            - generic [ref=f16e488]: "12"
+        - generic [ref=f16e489]:
+          - generic [ref=f16e490]: 判定结果
+          - heading "通过 · 引信点燃" [level=3] [ref=f16e491]
+          - paragraph [ref=f16e492]: 8 根达标，达到 8 根的通过线。0 FUSE 奖励开放认领，质押本金可全额取回。
+          - generic [ref=f16e493]:
+            - generic [ref=f16e494]:
+              - term [ref=f16e495]: 取回本金
+              - definition [ref=f16e496]: 100,000 FUSE
+            - generic [ref=f16e497]:
+              - term [ref=f16e498]: 预计奖励（按当前质押池占比）
+              - definition [ref=f16e499]: 0 FUSE
+            - generic [ref=f16e500]:
+              - term [ref=f16e501]: 合计
+              - definition [ref=f16e502]: 100,000 FUSE
+      - generic [ref=f16e503]:
+        - text: 假设我质押（FUSE）
+        - generic [ref=f16e504]:
+          - spinbutton "假设我质押（FUSE） FUSE" [ref=f16e505]: "100000"
+          - generic [ref=f16e506]: FUSE
+      - generic [ref=f16e507]:
+        - generic [ref=f16e508]:
+          - heading "失败永久关闭" [level=4] [ref=f16e509]
+          - paragraph [ref=f16e510]: 不重开、不重试、不补发，管理员也无法恢复。第 2 轮失败，第 3 轮目标仍是 8×P0。
+        - generic [ref=f16e511]:
+          - heading "故障不算败" [level=4] [ref=f16e512]
+          - paragraph [ref=f16e513]: 预言机缺数据、签名无效、来源不足时，考核暂停，不销毁任何本金。恢复后重新收满完整 12 根。
+        - generic [ref=f16e514]:
+          - heading "价格由预言机裁决" [level=4] [ref=f16e515]
+          - paragraph [ref=f16e516]: 多源签名数据加 4 小时 TWAP，任何人都可以提交有效数据。单一后台、单个池子都不能决定结果。
+        - generic [ref=f16e517]:
+          - heading "销毁是真销毁" [level=4] [ref=f16e518]
+          - paragraph [ref=f16e519]: 失败时执行 Jetton burn，并核对 Jetton Master 的总供应量确实减少，不是把余额标成不可用。
+    - generic [ref=f16e521]:
+      - generic [ref=f16e522]:
+        - generic [ref=f16e523]: SUPPLY · 筹码分配
+        - heading "100 亿枚，75% 留给战场" [level=2] [ref=f16e524]
+        - paragraph [ref=f16e525]: 十个 7.5% 的方块对应十轮奖励预算，颜色跟随每一轮的实际结果。失败的方块被销毁，不会转移到其他轮次。
+      - img "100亿枚代币分配示意" [ref=f16e526]:
+        - generic [ref=f16e527]:
+          - generic [ref=f16e528]: R1
+          - generic [ref=f16e529]: 7.5%
+        - generic [ref=f16e530]:
+          - generic [ref=f16e531]: R2
+          - generic [ref=f16e532]: 7.5%
+        - generic [ref=f16e533]:
+          - generic [ref=f16e534]: R3
+          - generic [ref=f16e535]: 7.5%
+        - generic [ref=f16e536]:
+          - generic [ref=f16e537]: R4
+          - generic [ref=f16e538]: 7.5%
+        - generic [ref=f16e539]:
+          - generic [ref=f16e540]: R5
+          - generic [ref=f16e541]: 7.5%
+        - generic [ref=f16e542]:
+          - generic [ref=f16e543]: R6
+          - generic [ref=f16e544]: 7.5%
+        - generic [ref=f16e545]:
+          - generic [ref=f16e546]: R7
+          - generic [ref=f16e547]: 7.5%
+        - generic [ref=f16e548]:
+          - generic [ref=f16e549]: R8
+          - generic [ref=f16e550]: 7.5%
+        - generic [ref=f16e551]:
+          - generic [ref=f16e552]: R9
+          - generic [ref=f16e553]: 7.5%
+        - generic [ref=f16e554]:
+          - generic [ref=f16e555]: R10
+          - generic [ref=f16e556]: 7.5%
+        - generic [ref=f16e557]:
+          - generic [ref=f16e558]: 流动性
+          - generic [ref=f16e559]: 10%
+        - generic [ref=f16e560]:
+          - generic [ref=f16e561]: 团队
+          - generic [ref=f16e562]: 10%
+        - generic [ref=f16e563]:
+          - generic [ref=f16e564]: 营销
+          - generic [ref=f16e565]: 5%
+      - table [ref=f16e567]:
+        - rowgroup [ref=f16e568]:
+          - row [ref=f16e569]:
+            - columnheader "分配" [ref=f16e570]
+            - columnheader "占比" [ref=f16e571]
+            - columnheader "数量（枚）" [ref=f16e572]
+        - rowgroup [ref=f16e573]:
+          - row [ref=f16e574]:
+            - cell "十轮目标解锁奖励（每轮 7.5 亿）" [ref=f16e575]
+            - cell "75%" [ref=f16e576]
+            - cell "7,500,000,000" [ref=f16e577]
+          - row [ref=f16e578]:
+            - cell "内盘及流动性" [ref=f16e579]
+            - cell "10%" [ref=f16e580]
+            - cell "1,000,000,000" [ref=f16e581]
+          - row [ref=f16e582]:
+            - cell "团队" [ref=f16e583]
+            - cell "10%" [ref=f16e584]
+            - cell "1,000,000,000" [ref=f16e585]
+          - row [ref=f16e586]:
+            - cell "营销推广" [ref=f16e587]
+            - cell "5%" [ref=f16e588]
+            - cell "500,000,000" [ref=f16e589]
+          - row [ref=f16e590]:
+            - cell "合计" [ref=f16e591]
+            - cell "100%" [ref=f16e592]
+            - cell "10,000,000,000" [ref=f16e593]
+    - generic [ref=f16e597]:
+      - generic [ref=f16e598]:
+        - generic [ref=f16e599]: WARNING · 参战前必读
+        - generic [ref=f16e600]: 风险披露 v1
+      - list [ref=f16e601]:
+        - listitem [ref=f16e602]:
+          - generic [ref=f16e605]: 本轮失败，全部质押本金 100% 销毁。 同时销毁该轮 7.5 亿奖励额度。你的质押没有任何保本机制。
+        - listitem [ref=f16e606]:
+          - generic [ref=f16e609]: 目标价逐轮翻倍。 第 10 轮目标是初始参考价的 1024 倍。协议不保证价格上涨，也不保证奖励实现。
+        - listitem [ref=f16e610]:
+          - generic [ref=f16e613]: TWAP 与多源预言机只能提高操纵成本。 它们不能保证价格无法被操纵，也不能防止抛售。
+        - listitem [ref=f16e614]:
+          - generic [ref=f16e617]: 技术故障和市场失败是两回事。 预言机故障只会暂停考核，不会销毁本金。但智能合约仍可能存在未被发现的漏洞，审计报告将在主网开放前公布。
+        - listitem [ref=f16e618]:
+          - generic [ref=f16e621]: 多钱包拆分无法被完全阻止。 每地址上限只能缓解，不能证明真人唯一。
+        - listitem [ref=f16e622]:
+          - generic [ref=f16e625]: 合规风险由你自行判断。 该机制可能触及不同司法辖区对金融产品、博彩、促销和消费者保护的规定，参与前请咨询专业意见。本页不构成投资建议。
+  - contentinfo [ref=f16e626]:
+    - generic [ref=f16e627]:
+      - generic [ref=f16e628]:
+        - generic [ref=f16e629]: FUSE
+        - paragraph [ref=f16e633]: 本页为官网演示环境。价格、成交、地址、钱包余额均为演示数据，不代表任何真实市场。
+        - paragraph [ref=f16e634]: 协议具有极高风险，不构成投资建议，也不保证价格上涨或奖励实现。
+        - generic [ref=f16e635]:
+          - link "我的战况" [ref=f16e636] [cursor=pointer]:
+            - /url: /me
+          - link "排行榜" [ref=f16e637] [cursor=pointer]:
+            - /url: /leaderboard
+          - link "运维后台" [ref=f16e638] [cursor=pointer]:
+            - /url: /admin
+      - generic [ref=f16e639]:
+        - heading "链上信息" [level=5] [ref=f16e640]
+        - paragraph [ref=f16e641]: Jetton Master · 主网部署后公布
+        - paragraph [ref=f16e642]: RoundController · 主网部署后公布
+        - paragraph [ref=f16e643]: 代码哈希 · 部署后公布
+      - generic [ref=f16e644]:
+        - heading "透明度" [level=5] [ref=f16e645]
+        - paragraph [ref=f16e646]: 第三方审计报告 · 待发布
+        - paragraph [ref=f16e647]: 预言机配置哈希 · 冻结后公布
+        - paragraph [ref=f16e648]: 多签地址与阈值 · 待公布
+  - generic [ref=f16e649]:
+    - button "买入 FUSE" [ref=f16e650] [cursor=pointer]
+    - button "质押参战" [ref=f16e651] [cursor=pointer]
+  - status

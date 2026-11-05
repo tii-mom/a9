@@ -1,6 +1,7 @@
 packages:
   - web
   - worker
+  - qa
 
 allowBuilds:
   esbuild: true

@@ -8,4 +8,8 @@ coverage/
 web/dist/
 worker/.wrangler/
 .venv/
-__pycache__/
+__pycache__/qa/shots*/
+qa/prod/
+qa/final/
+qa/*.png
+worker/scripts/*.sql

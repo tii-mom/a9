@@ -263,3 +263,13 @@ cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
 ---
 
 *本清单与 docs/07 的上线阻断项一一对应。凡与合约实际实现冲突处，以经审计的合约与签署参数为准。*
+
+---
+
+## 12. 已知技术 TODO（本次交付遗留，按优先级）
+
+1. **CSP 未启用**：TON Connect 桥接域名（bridge.tonapi.io、各钱包 UI 域）尚未最终确定，Worker 暂只返回基础安全头（nosniff / X-Frame-Options / Referrer-Policy / Permissions-Policy / COOP）。上线前需补充严格 CSP（connect-src / frame-src / font-src 白名单）并做一次回归。
+2. **真实链适配器**：worker/src/sources/chain.ts 为带 8 条 TODO 的桩（RPC / Get methods / OracleAdapter / BurnAck / 事件索引 / 对账 / 缓存 / 降级）。切真链时实现它并把 DATA_SOURCE 改为 chain，同时关闭 stake/claim 的演示写入。
+3. **质押幂等键**：前端已为每笔演示质押生成 depositNonce（crypto.randomUUID）；真链上需写入 Jetton transfer 的 forward payload，并在合约侧按 (roundId, owner, nonce) 去重。
+4. **钱包交易**：当前 TON Connect 只读；合约部署后需补 payload 构造（roundId / depositNonce / riskDisclosureVersion / acceptFullPrincipalBurn）、boc 打包、回执轮询。
+5. **D1 备份与密钥轮换**：wrangler d1 export 到 R2 的每日定时任务、ADMIN_TOKEN 轮换流程尚未自动化。

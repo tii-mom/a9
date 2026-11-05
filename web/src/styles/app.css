@@ -34,3 +34,22 @@
 .foot-links{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
 .foot-links a{text-decoration:none}
 .foot-links a:hover{color:var(--text)}
+/* ---------- 头部响应式：960~1200px 收紧导航，641~959px 精简，避免英文溢出（Lead） ---------- */
+@media (max-width:1200px){
+  .nav{gap:12px}
+  .links{gap:12px}
+  .links a{font-size:12px}
+  .nav-r{gap:8px}
+  .nav-r .badge{display:none}
+}
+@media (max-width:1040px){
+  .nav-r .badge{display:none}
+  .nav-r .chroma-color{display:none}
+}
+@media (max-width:960px){
+  .links{display:none}
+  .logo small{display:none}
+}
+@media (max-width:760px){
+  .nav-r .btn.fire.sm{display:none}
+}
