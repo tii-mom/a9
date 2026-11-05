@@ -252,7 +252,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
           </div>
           <div className="recv">
             <span className="lbl">{copy.cmd.receive}</span>
-            <div className="mono">{fuseOut === null ? '—' : intFmt(fuseOut) + ' FUSE'}</div>
+            <div className="mono">{fuseOut === null ? '—' : intFmt(fuseOut) + ' A9'}</div>
             <div className="sub">
               {fill(copy.cmd.receiveSub, {
                 usd: compactUsd(usd),
@@ -275,7 +275,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
             </div>
             <div>
               <dt>{copy.cmd.minReceive}</dt>
-              <dd>{fuseOut === null ? '—' : intFmt(fuseOut * 0.99) + ' FUSE'}</dd>
+              <dd>{fuseOut === null ? '—' : intFmt(fuseOut * 0.99) + ' A9'}</dd>
             </div>
           </dl>
           <button className="btn fire full" type="button" onClick={onBuy}>
@@ -310,7 +310,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                     <dl className="kv">
                       <div>
                         <dt>{copy.cmd.lockClosedMine}</dt>
-                        <dd>{intFmt(myStake)} FUSE</dd>
+                        <dd>{intFmt(myStake)} A9</dd>
                       </div>
                     </dl>
                   ) : null}
@@ -343,7 +343,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                 </div>
                 <div>
                   <dt>{copy.cmd.stakeTotal}</dt>
-                  <dd>{formatCompactToken(board.totalStakeRaw, decimals, lang) + ' FUSE'}</dd>
+                  <dd>{formatCompactToken(board.totalStakeRaw, decimals, lang) + ' A9'}</dd>
                 </div>
                 <div>
                   <dt>{copy.cmd.stakeAddrs}</dt>
@@ -362,7 +362,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                     value={stakeAmount}
                     onChange={(event) => setStakeAmount(event.target.value)}
                   />
-                  <span>FUSE</span>
+                  <span>A9</span>
                 </div>
               </label>
               <div className="chips">
@@ -383,7 +383,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                 </div>
                 <div>
                   <dt>{copy.cmd.rewardEst}</dt>
-                  <dd className="ok">{intFmt(estReward) + ' FUSE'}</dd>
+                  <dd className="ok">{intFmt(estReward) + ' A9'}</dd>
                 </div>
                 <div>
                   <dt>{copy.cmd.share}</dt>

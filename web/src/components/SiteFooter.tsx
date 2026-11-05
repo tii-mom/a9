@@ -10,7 +10,7 @@ export function SiteFooter() {
       <div className="wrap foot">
         <div>
           <div className="logo" style={{ marginBottom: 10 }}>
-            <Logo size={22} />FUSE
+            <Logo size={22} />A9
           </div>
           <p>{zh ? '本页为官网演示环境。价格、成交、地址、钱包余额均为演示数据，不代表任何真实市场。' : 'Demo environment. Prices, trades, addresses and balances are simulated and do not represent any real market.'}</p>
           <p>{zh ? '协议具有极高风险，不构成投资建议，也不保证价格上涨或奖励实现。' : 'Extremely high risk. Not investment advice. No guarantee of price appreciation or rewards.'}</p>

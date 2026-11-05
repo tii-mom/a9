@@ -13,9 +13,9 @@ export const P0_USD_E8 = 400_000n;
 export const PRICE_MULTIPLIER = 2;
 export const ROUND_COUNT = 10;
 
-/** 每轮奖励预算 750,000,000 FUSE（raw） */
+/** 每轮奖励预算 750,000,000 A9（raw） */
 export const ROUND_REWARD_RAW = 750_000_000n * TOKEN_SCALE;
-/** 初始总供应 10,000,000,000 FUSE（raw） */
+/** 初始总供应 10,000,000,000 A9（raw） */
 export const TOTAL_SUPPLY_RAW = 10_000_000_000n * TOKEN_SCALE;
 
 /** 真实规格：4 小时一根，共 12 根，至少 8 根达标 */

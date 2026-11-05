@@ -137,7 +137,7 @@ function oracleStatus(params: Params, kv: Map<string, string>, now: number): Ora
 }
 
 /**
- * 演示成交：主体 2,000 ~ 200,000 FUSE（对齐原型 2k~200k），约 10% 为 30 万+ 大单并标记 big。
+ * 演示成交：主体 2,000 ~ 200,000 A9（对齐原型 2k~200k），约 10% 为 30 万+ 大单并标记 big。
  * 成交额 = amountRaw × price / 1e9（USD_E8），与价格自洽。
  */
 function buildTrades(params: Params, round: RoundRow, count: number, fromTs: number, now: number): TradeRow[] {
@@ -177,7 +177,7 @@ function bookRows(params: Params, midUsdE8: bigint, levels: number): BookRow[] {
     const seedBid = hash32(7, i, 43);
     const askPrice = midUsdE8 + (midUsdE8 * BigInt(6 * (i + 1))) / 10000n;
     const bidPrice = midUsdE8 - (midUsdE8 * BigInt(6 * (i + 1))) / 10000n;
-    // 档位量级对齐原型：40,000 ~ 300,000 FUSE / 档
+    // 档位量级对齐原型：40,000 ~ 300,000 A9 / 档
     const askAmount = BigInt(40_000 + Math.floor(rand01(seedAsk) * 260_000)) * 1_000_000_000n;
     const bidAmount = BigInt(40_000 + Math.floor(rand01(seedBid) * 260_000)) * 1_000_000_000n;
     rows.push({ id: 0, side: 'ask', price_usd_e8: askPrice.toString(), amount_raw: askAmount.toString(), seq: i });

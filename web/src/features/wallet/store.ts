@@ -2,8 +2,8 @@ import type { MeResponse, RoundSummary } from '@shared/types';
 import { api } from '../../lib/api';
 import { generateDemoAddress, rawToFriendly } from './address';
 
-/** 演示钱包资金（与 worker 的 DEMO_WALLET_BALANCE 对齐：250,000 FUSE，raw units 9 位）。 */
-export const DEMO_FUSE_BALANCE_RAW = '250000000000000';
+/** 演示钱包资金（与 worker 的 DEMO_WALLET_BALANCE 对齐：250,000 A9，raw units 9 位）。 */
+export const DEMO_A9_BALANCE_RAW = '250000000000000';
 /** 演示钱包 TON 余额（人类可读）。 */
 export const DEMO_TON_BALANCE = '1,250.00';
 /** 演示钱包地址持久化 key。 */
@@ -26,7 +26,7 @@ export interface WalletStoreState {
   walletName: string | null;
   /** 人类可读 TON 余额 */
   tonBalance: string | null;
-  /** FUSE raw units（9 位） */
+  /** A9 raw units（9 位） */
   fuseBalance: string | null;
   error: string | null;
   /** 最近一次连接尝试是否降级为演示钱包 */
@@ -262,7 +262,7 @@ function adoptDemo(address: string, notice: string | null = null): void {
     network: 'demo',
     walletName: null,
     tonBalance: DEMO_TON_BALANCE,
-    fuseBalance: DEMO_FUSE_BALANCE_RAW,
+    fuseBalance: DEMO_A9_BALANCE_RAW,
     error: null,
     fellBack: notice !== null,
     notice,
@@ -321,13 +321,13 @@ async function fetchTonBalance(address: string, testnet: boolean): Promise<strin
 async function doRefreshBalances(): Promise<void> {
   if (state.status !== 'connected' || !state.address) return;
   if (state.mode === 'demo') {
-    patch({ tonBalance: DEMO_TON_BALANCE, fuseBalance: DEMO_FUSE_BALANCE_RAW });
+    patch({ tonBalance: DEMO_TON_BALANCE, fuseBalance: DEMO_A9_BALANCE_RAW });
     return;
   }
   const address = state.address;
   const network = state.network;
   const ton = await fetchTonBalance(address, network === 'testnet');
-  // 真实钱包：Jetton 未上线，FUSE 余额一律显示「—」（由 UI 渲染为占位）
+  // 真实钱包：Jetton 未上线，A9 余额一律显示「—」（由 UI 渲染为占位）
   let fuse: string | null = null;
   try {
     const me = (await api.me(address)) as MeResponse & { balanceRaw?: string };

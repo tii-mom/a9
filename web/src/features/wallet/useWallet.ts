@@ -12,7 +12,7 @@ export interface WalletState {
   demo: boolean;
   /** 人类可读 TON 余额，例如 "1,250.00"；查询失败为 null */
   tonBalance: string | null;
-  /** FUSE 余额 raw units（9 位）；真实钱包在 Jetton 上线前为 null */
+  /** A9 余额 raw units（9 位）；真实钱包在 Jetton 上线前为 null */
   fuseBalance: string | null;
   error: string | null;
   connect(): void;

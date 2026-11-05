@@ -61,7 +61,7 @@ function mulberry32(seed) {
   };
 }
 
-const rand = mulberry32(0x46555345); // "FUSE"
+const rand = mulberry32(0x46555345); // "A9"
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
@@ -334,7 +334,7 @@ let tradeTs = EPOCH - 15_000;
 for (let i = 0; i < TRADE_COUNT; i++) {
   const priceBps = Math.round((rand() - 0.5) * 200); // ±1%
   const price = R3_TARGET + (R3_TARGET * BigInt(priceBps)) / 10000n;
-  // 主体 2,000 ~ 200,000 FUSE（对齐原型 tape 量级），约 10% 为 30 万+ 大单
+  // 主体 2,000 ~ 200,000 A9（对齐原型 tape 量级），约 10% 为 30 万+ 大单
   const whale = rand() > 0.9;
   const tokens = whale ? 300_000 + Math.floor(rand() * 150_000) : 2_000 + Math.floor(rand() * 198_000);
   const amountRaw = BigInt(tokens) * TOKEN_SCALE;
@@ -357,7 +357,7 @@ const bookRows = [];
 for (let i = 0; i < 10; i++) {
   const askPrice = R3_TARGET + (R3_TARGET * BigInt(6 * (i + 1))) / 10000n;
   const bidPrice = R3_TARGET - (R3_TARGET * BigInt(6 * (i + 1))) / 10000n;
-  // 档位量级对齐原型：40,000 ~ 300,000 FUSE / 档
+  // 档位量级对齐原型：40,000 ~ 300,000 A9 / 档
   const askAmount = BigInt(40_000 + Math.floor(rand() * 260_000)) * TOKEN_SCALE;
   const bidAmount = BigInt(40_000 + Math.floor(rand() * 260_000)) * TOKEN_SCALE;
   bookRows.push([q('ask'), q(askPrice.toString()), q(askAmount.toString()), n(i)]);
@@ -368,26 +368,26 @@ for (let i = 0; i < 10; i++) {
 
 const eventRows = [
   [n(R1_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R1 质押窗口开启（演示种子）')],
-  [n(R1_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R1 质押窗口关闭：12 个地址，214,800,000 FUSE')],
+  [n(R1_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R1 质押窗口关闭：12 个地址，214,800,000 A9')],
   [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：10/12 根达标，本金不销毁，7.5 亿奖励开放领取')],
   [n(R2_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R2 质押窗口开启（演示种子）')],
-  [n(R2_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R2 质押窗口关闭：12 个地址，241,500,000 FUSE')],
+  [n(R2_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R2 质押窗口关闭：12 个地址，241,500,000 A9')],
   [
     n(R2_STAKE_CLOSE + CANDLE_COUNT * C),
     q('warn'),
     q('system'),
     q('ROUND_FAILED_PERMANENT'),
-    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 750,000,000 + 质押本金 241,500,000 = 991,500,000 FUSE'),
+    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 750,000,000 + 质押本金 241,500,000 = 991,500,000 A9'),
   ],
   [
     n(R2_STAKE_CLOSE + CANDLE_COUNT * C + 60_000),
     q('warn'),
     q('system'),
     q('BURN_CONFIRMED'),
-    q('R2 burnId R2:reward / R2:principal 已确认，供应量减少 991,500,000 FUSE'),
+    q('R2 burnId R2:reward / R2:principal 已确认，供应量减少 991,500,000 A9'),
   ],
   [n(R3_STAKE_OPEN), q('info'), q('system'), q('ROUND_OPENED'), q('R3 质押窗口开启（演示种子）')],
-  [n(R3_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R3 质押窗口关闭：12 个地址，386,200,000 FUSE')],
+  [n(R3_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R3 质押窗口关闭：12 个地址，386,200,000 A9')],
   [n(R3_OBSERVATION_START), q('info'), q('oracle'), q('OBSERVATION_STARTED'), q('R3 观察窗口开始：12 根，已收盘 5 根')],
   [n(EPOCH), q('info'), q('admin'), q('SEED_APPLIED'), q('演示种子数据写入完成（含 10 轮 / 36 笔质押 / 2 笔销毁）')],
 ];
@@ -396,8 +396,8 @@ const eventRows = [
 
 const configRows = [
   ['schema_version', '1'],
-  ['token_name', 'FUSE'],
-  ['token_symbol', 'FUSE'],
+  ['token_name', 'A9'],
+  ['token_symbol', 'A9'],
   ['token_decimals', String(TOKEN_DECIMALS)],
   ['p0_usd_e8', P0_USD_E8.toString()],
   ['price_multiplier', '2'],
@@ -453,7 +453,7 @@ const metricsRows = [
 
 const statementChunks = [];
 statementChunks.push(
-  '-- FUSE 引信协议 — 演示种子数据（由 worker/scripts/generate-seed.mjs 生成，请勿手改）\n' +
+  '-- A9 引信协议 — 演示种子数据（由 worker/scripts/generate-seed.mjs 生成，请勿手改）\n' +
     '-- EPOCH=' + EPOCH + ' (' + new Date(EPOCH).toISOString() + '), DEMO_CANDLE_SECONDS=' + DEMO_CANDLE_SECONDS + '\n' +
     '-- 状态：R1 SUCCEEDED(10/12)、R2 FAILED_PERMANENT(6/12, 销毁 991.5M)、R3 OBSERVING(5/12 已收盘)、R4..R10 UNOPENED\n' +
     '-- 幂等：先清空业务表再 INSERT OR REPLACE，可安全重复执行。\n',
@@ -586,7 +586,7 @@ console.log('  DEMO_CANDLE_SECONDS  :', DEMO_CANDLE_SECONDS);
 console.log('  rounds               :', roundRows.length, '(R1 SUCCEEDED / R2 FAILED_PERMANENT / R3 OBSERVING / R4-R10 UNOPENED)');
 console.log('  stakes               :', stakeRows.length, '（12 地址 × R1/R2/R3）');
 console.log('  claims               :', claimRows.length);
-console.log('  burn_ledger          :', burnRows.length, '(R2 reward 750,000,000 + principal 241,500,000 = 991,500,000 FUSE)');
+console.log('  burn_ledger          :', burnRows.length, '(R2 reward 750,000,000 + principal 241,500,000 = 991,500,000 A9)');
 console.log('  candles              :', candleSeedRows.length, '(R1 12 / R2 12 / R3 6)');
 console.log('  trades               :', tradeRows.length, '/ book_levels:', bookRows.length, '/ admin_events:', eventRows.length);
 console.log('  R3 已收盘 K 线       :', R3_SEEDED_CANDLES, '（4 达标 / 2 未达标，第 7 根为 live）');

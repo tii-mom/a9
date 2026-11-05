@@ -129,15 +129,15 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
               <dl className="kv">
                 <div>
                   <dt>{copy.rules.outWinPrincipal}</dt>
-                  <dd>{intFmt(stake) + ' FUSE'}</dd>
+                  <dd>{intFmt(stake) + ' A9'}</dd>
                 </div>
                 <div>
                   <dt>{copy.rules.outWinReward}</dt>
-                  <dd className="ok">{intFmt(reward) + ' FUSE'}</dd>
+                  <dd className="ok">{intFmt(reward) + ' A9'}</dd>
                 </div>
                 <div>
                   <dt>{copy.rules.outWinTotal}</dt>
-                  <dd>{intFmt(stake + reward) + ' FUSE'}</dd>
+                  <dd>{intFmt(stake + reward) + ' A9'}</dd>
                 </div>
               </dl>
             ) : (
@@ -148,11 +148,11 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
                 </div>
                 <div>
                   <dt>{copy.rules.outLoseRewardBurn}</dt>
-                  <dd>{rewardText + ' FUSE'}</dd>
+                  <dd>{rewardText + ' A9'}</dd>
                 </div>
                 <div>
                   <dt>{copy.rules.outLosePoolBurn}</dt>
-                  <dd>{formatCompactNumber(totalStake + stake, lang) + ' FUSE'}</dd>
+                  <dd>{formatCompactNumber(totalStake + stake, lang) + ' A9'}</dd>
                 </div>
               </dl>
             )}
@@ -170,7 +170,7 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
               value={stakeText}
               onChange={(event) => setStakeText(event.target.value)}
             />
-            <span>FUSE</span>
+            <span>A9</span>
           </div>
         </label>
 

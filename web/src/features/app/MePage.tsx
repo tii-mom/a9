@@ -278,7 +278,7 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
         const result = await api.claim({ address, roundId, kind });
         meQuery.refresh();
         roundsQuery.refresh();
-        show(`${d.toastClaimOk}${formatToken(result.amountRaw, decimals)} FUSE`, 'ok');
+        show(`${d.toastClaimOk}${formatToken(result.amountRaw, decimals)} A9`, 'ok');
       } catch (error) {
         show(`${d.toastClaimFail}${apiErrorText(error as ApiError, lang)}`, 'bad');
       } finally {
@@ -305,22 +305,22 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
       <div className="cards ap-sec">
         <Stat
           label={d.statMyStake}
-          value={`${myStake ? formatToken(myStake.amountRaw, decimals) : '0'} FUSE`}
+          value={`${myStake ? formatToken(myStake.amountRaw, decimals) : '0'} A9`}
           hint={currentRound ? `${c.round} #${currentRound.roundId}` : undefined}
         />
         <Stat
           label={d.statClaimPrincipal}
-          value={`${formatToken(claimablePrincipal, decimals)} FUSE`}
+          value={`${formatToken(claimablePrincipal, decimals)} A9`}
           hint={`${pendingCount} ${lang === 'zh' ? '项' : 'items'}`}
         />
         <Stat
           label={d.statClaimReward}
-          value={`${formatToken(claimableReward, decimals)} FUSE`}
+          value={`${formatToken(claimableReward, decimals)} A9`}
           hint={lang === 'zh' ? '主动领取 · 幂等' : 'Pull claim · idempotent'}
         />
-        <Stat label={d.statTotalStaked} value={`${formatToken(totals.stakedRaw, decimals)} FUSE`} />
-        <Stat label={d.statTotalReward} value={`${formatToken(totals.rewardRaw, decimals)} FUSE`} />
-        <Stat label={d.statTotalClaimed} value={`${formatToken(totals.claimedRaw, decimals)} FUSE`} />
+        <Stat label={d.statTotalStaked} value={`${formatToken(totals.stakedRaw, decimals)} A9`} />
+        <Stat label={d.statTotalReward} value={`${formatToken(totals.rewardRaw, decimals)} A9`} />
+        <Stat label={d.statTotalClaimed} value={`${formatToken(totals.claimedRaw, decimals)} A9`} />
       </div>
 
       <div className="ap-split ap-sec">
@@ -361,7 +361,7 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
                     </div>
                     <div>
                       <span className="lbl">{d.statMyStake}</span>
-                      <div className="v">{myStake ? `${formatToken(myStake.amountRaw, decimals)} FUSE` : '—'}</div>
+                      <div className="v">{myStake ? `${formatToken(myStake.amountRaw, decimals)} A9` : '—'}</div>
                     </div>
                     <div>
                       <span className="lbl">{c.share}</span>
@@ -373,7 +373,7 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
                     </div>
                     <div>
                       <span className="lbl">{c.estReward}</span>
-                      <div className="v">{myRow ? `${formatToken(myRow.rewardEstimateRaw, decimals)} FUSE` : '—'}</div>
+                      <div className="v">{myRow ? `${formatToken(myRow.rewardEstimateRaw, decimals)} A9` : '—'}</div>
                     </div>
                     <div>
                       <span className="lbl">{c.qualified}</span>
@@ -491,13 +491,13 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
                         <div>
                           <div className="lbl">{c.principal}</div>
                           <div className="ap-claim-amt">
-                            {formatToken(item.principalRaw, decimals)} <small>FUSE</small>
+                            {formatToken(item.principalRaw, decimals)} <small>A9</small>
                           </div>
                         </div>
                         <div>
                           <div className="lbl">{c.reward}</div>
                           <div className="ap-claim-amt">
-                            {formatToken(item.rewardRaw, decimals)} <small>FUSE</small>
+                            {formatToken(item.rewardRaw, decimals)} <small>A9</small>
                           </div>
                         </div>
                         <div className="spacer" />
@@ -550,15 +550,15 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
                 </div>
                 <div>
                   <dt>{d.statTotalStaked}</dt>
-                  <dd>{formatToken(totals.stakedRaw, decimals)} FUSE</dd>
+                  <dd>{formatToken(totals.stakedRaw, decimals)} A9</dd>
                 </div>
                 <div>
                   <dt>{d.statTotalReward}</dt>
-                  <dd>{formatToken(totals.rewardRaw, decimals)} FUSE</dd>
+                  <dd>{formatToken(totals.rewardRaw, decimals)} A9</dd>
                 </div>
                 <div>
                   <dt>{d.statTotalClaimed}</dt>
-                  <dd>{formatToken(totals.claimedRaw, decimals)} FUSE</dd>
+                  <dd>{formatToken(totals.claimedRaw, decimals)} A9</dd>
                 </div>
               </dl>
             </div>

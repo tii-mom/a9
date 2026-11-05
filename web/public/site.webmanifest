@@ -1,6 +1,6 @@
 {
-  "name": "FUSE 引信协议",
-  "short_name": "FUSE",
+  "name": "A9 引信协议",
+  "short_name": "A9",
   "description": "TON 价格驱动型代币 · 12 根 K 线判定",
   "start_url": "/",
   "display": "standalone",

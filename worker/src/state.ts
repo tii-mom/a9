@@ -88,8 +88,8 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
   const networkValue = stringFrom(kv, 'network', dataSource === 'demo' ? 'demo' : 'testnet');
 
   return {
-    tokenName: stringFrom(kv, 'token_name', 'FUSE'),
-    tokenSymbol: stringFrom(kv, 'token_symbol', 'FUSE'),
+    tokenName: stringFrom(kv, 'token_name', 'A9'),
+    tokenSymbol: stringFrom(kv, 'token_symbol', 'A9'),
     tokenDecimals: numberFrom(kv, 'token_decimals', 9),
     p0UsdE8: bigintFrom(kv, 'p0_usd_e8', P0_USD_E8),
     usdPriceScale: 100_000_000,

@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://fuse-protocol.348421501.workers.dev
+      url: https://a9.lat
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

@@ -64,8 +64,8 @@ cd worker && ./node_modules/.bin/wrangler domains add fuse.<your-domain>
 
 | 项 | 值 |
 | --- | --- |
-| 站点 | https://fuse-protocol.348421501.workers.dev |
-| Worker | fuse-protocol（Cloudflare Workers，含静态资源） |
+| 站点 | **https://a9.lat**（www.a9.lat 同步） |
+| Worker | fuse-protocol（Cloudflare Workers，含静态资源与自定义域名 a9.lat） |
 | D1 | fuse-protocol / b5945609-374e-4eaa-add2-80460ebcb680（APAC） |
 | 定时任务 | `* * * * *`（推进演示轮次 / DEMO_AUTOPLAY 自动开轮） |
 | 运维后台 | `/admin`（Bearer token，见 worker secret `ADMIN_TOKEN`） |

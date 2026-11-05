@@ -268,9 +268,9 @@ export const COMMON: Record<Lang, CommonDict> = {
     cumulative: '累计',
     notConnected: '未连接钱包',
     apiDownTitle: '接口不可用',
-    apiDownHint: '无法连接 FUSE API。请确认本地 worker 已启动（npm run dev:worker，127.0.0.1:8787），或稍后重试。',
+    apiDownHint: '无法连接 A9 API。请确认本地 worker 已启动（npm run dev:worker，127.0.0.1:8787），或稍后重试。',
     backHome: '返回首页',
-    fuseUnit: 'FUSE',
+    fuseUnit: 'A9',
     noWalletHint: '连接钱包后即可查看你的质押、可领取与历史记录。',
   },
   en: {
@@ -313,9 +313,9 @@ export const COMMON: Record<Lang, CommonDict> = {
     cumulative: 'Cumulative',
     notConnected: 'Wallet not connected',
     apiDownTitle: 'API unavailable',
-    apiDownHint: 'Cannot reach the FUSE API. Make sure the local worker is running (npm run dev:worker, 127.0.0.1:8787), then retry.',
+    apiDownHint: 'Cannot reach the A9 API. Make sure the local worker is running (npm run dev:worker, 127.0.0.1:8787), then retry.',
     backHome: 'Back to home',
-    fuseUnit: 'FUSE',
+    fuseUnit: 'A9',
     noWalletHint: 'Connect a wallet to view your stakes, claimables and history.',
   },
 };

@@ -1,5 +1,5 @@
 /**
- * FUSE 引信协议 Worker 入口：/api/* 走 API，其余交给 ASSETS（web/dist，SPA 回退）。
+ * A9 引信协议 Worker 入口：/api/* 走 API，其余交给 ASSETS（web/dist，SPA 回退）。
  */
 import type { Env } from './env';
 import { markIsolateStarted } from './env';

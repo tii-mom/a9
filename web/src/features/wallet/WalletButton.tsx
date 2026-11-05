@@ -53,7 +53,7 @@ const DICT: Record<'zh' | 'en', Dict> = {
     demoNetwork: '演示',
     walletName: '钱包应用',
     tonBalance: 'TON 余额',
-    fuseBalance: 'FUSE 余额',
+    fuseBalance: 'A9 余额',
     notDeployed: '合约部署后开放',
     refresh: '刷新余额',
     disconnect: '断开连接',
@@ -81,7 +81,7 @@ const DICT: Record<'zh' | 'en', Dict> = {
     demoNetwork: 'Demo',
     walletName: 'Wallet app',
     tonBalance: 'TON balance',
-    fuseBalance: 'FUSE balance',
+    fuseBalance: 'A9 balance',
     notDeployed: 'Available after contract deployment',
     refresh: 'Refresh balances',
     disconnect: 'Disconnect',
@@ -183,7 +183,7 @@ export function WalletButton() {
   const networkLabel =
     wallet.network === 'mainnet' ? d.mainnet : wallet.network === 'testnet' ? d.testnet : wallet.network === 'demo' ? d.demoNetwork : '—';
 
-  const fuseBalance = wallet.fuseBalance ? `${formatToken(wallet.fuseBalance, TOKEN_DECIMALS)} FUSE` : null;
+  const fuseBalance = wallet.fuseBalance ? `${formatToken(wallet.fuseBalance, TOKEN_DECIMALS)} A9` : null;
   const notice = fallbackText(wallet.notice, d);
 
   const node = (

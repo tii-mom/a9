@@ -46,9 +46,9 @@ export function SiteHeader({ tape, isLanding = false }: { tape?: ReactNode; isLa
       {tape}
       {!tape && <div className="tape" aria-hidden="true" />}
       <nav className="nav wrap" aria-label={lang === 'zh' ? '主导航' : 'Main navigation'}>
-        <Link className="logo" to="/" aria-label="FUSE 引信协议">
+        <Link className="logo" to="/" aria-label="A9 引信协议">
           <Logo />
-          FUSE <small>{lang === 'zh' ? '引信协议' : 'Ignition Protocol'}</small>
+          A9 <small>{lang === 'zh' ? '引信协议' : 'Ignition Protocol'}</small>
         </Link>
         <div className="links">
           {NAV.map((n) =>

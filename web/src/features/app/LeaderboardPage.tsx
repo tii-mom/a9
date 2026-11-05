@@ -159,8 +159,8 @@ function BoardSection({
     <>
       {myRow ? (
         <div className="note-box ap-note">
-          <b>{d.myRow}</b>：{c.rank} #{myRow.rank} · {formatToken(myRow.amountRaw, decimals)} FUSE ·{' '}
-          {sharePct(myRow.amountRaw, totalStaked)} · {formatToken(myRow.rewardEstimateRaw, decimals)} FUSE
+          <b>{d.myRow}</b>：{c.rank} #{myRow.rank} · {formatToken(myRow.amountRaw, decimals)} A9 ·{' '}
+          {sharePct(myRow.amountRaw, totalStaked)} · {formatToken(myRow.rewardEstimateRaw, decimals)} A9
         </div>
       ) : null}
 
@@ -318,9 +318,9 @@ export default function LeaderboardPage() {
 
         {round ? (
           <div className="cards">
-            <Stat label={d.summaryTotalStaked} value={`${formatToken(totalStaked, decimals)} FUSE`} />
+            <Stat label={d.summaryTotalStaked} value={`${formatToken(totalStaked, decimals)} A9`} />
             <Stat label={d.summaryStakers} value={stakerCount} />
-            <Stat label={d.summaryPool} value={`${formatToken(rewardPool, decimals)} FUSE`} hint={lang === 'zh' ? '每轮预算' : 'Per round'} />
+            <Stat label={d.summaryPool} value={`${formatToken(rewardPool, decimals)} A9`} hint={lang === 'zh' ? '每轮预算' : 'Per round'} />
             <Stat label={d.summaryMultiple} value={multiple} hint={d.multipleHint} tone="fire" />
           </div>
         ) : null}
