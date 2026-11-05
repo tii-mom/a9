@@ -57,6 +57,14 @@ test('allocation.sum', () => {
   assert(result.ok, '分配总和 != 100 亿');
   return result.sumRaw + ' raw';
 });
+test('params.set_jetton_wallet_code', () => {
+  assert(String(params.permissions.opcodes.SetJettonWalletCode || '').toLowerCase() === '0x5254001b', 'SetJettonWalletCode opcode 必须为 0x5254001B');
+  assert(Boolean(params.toolchain.adapters.acton.commands.setJettonWalletCode), '缺少 setJettonWalletCode 命令模板');
+  const order = params.deployOrder.join(' ');
+  assert(order.includes('SetJettonWalletCode'), 'deployOrder 缺少 SetJettonWalletCode 步骤');
+  assert(order.includes('teamWalletJettonWallet'), 'deployOrder 缺少 teamWalletJettonWallet 说明');
+  return '0x5254001B + 命令模板 + deployOrder 已就位';
+});
 test('liquidity.cold_start', () => {
   const liquidity = params.supply.allocations.liquidity;
   const tokens = asBigInt(liquidity.tokens);
@@ -252,6 +260,16 @@ test('dryrun.80.submit_candle_window_mismatch', () => {
   assert(result.code === 1, '窗口不一致未被拦截（exit ' + result.code + '）');
   assert(result.out.includes('不一致') || result.out.includes('observationStart'), '缺少窗口校验错误信息');
   return 'periodStart 不匹配 → ops 层拦截，未进入 acton';
+});
+
+section('自测：SetJettonWalletCode（P0 修复）');
+test('dryrun.65.set_code', () => {
+  const result = run([join(SCRIPTS, '65_set_jetton_wallets.mjs')], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, '65 dry-run 失败：' + result.out.slice(-900));
+  for (const expected of ['SetJettonWalletCode', 'teamWalletJettonWallet', '0x5254001B']) {
+    assert(result.out.includes(expected), '缺少新步骤字段：' + expected);
+  }
+  return '65 dry-run 含 SetJettonWalletCode + 三地址查询 + teamWalletJettonWallet';
 });
 
 section('自测：全部脚本语法');

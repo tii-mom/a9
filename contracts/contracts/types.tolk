@@ -19,6 +19,8 @@ struct ProtocolVaults {
     // Canonical Jetton Wallet owned by RoundController: holds principal + reward pools.
     stakingJettonWallet: address
     teamVault: address
+    // P0: code used to derive the recipient's Jetton Wallet for ReturnExcessesBack checks.
+    jettonWalletCode: cell
 }
 
 struct ProtocolEcon {
@@ -134,6 +136,8 @@ struct RoundData {
     // F-03: burn already sent but not yet confirmed (prevents double retry)
     rewardBurnDispatched: bool
     principalBurnDispatched: bool
+    // P2-1: at most one oracle pause per round
+    pauseCount: uint8
     // ref: candle hash + total weight + bonus/referred maps
     extra: Cell<RoundExtra>
 }
@@ -265,6 +269,7 @@ fun emptyRound(): RoundData {
         principalBurnConfirmed: false,
         rewardBurnDispatched: false,
         principalBurnDispatched: false,
+        pauseCount: 0,
         extra: emptyRoundExtra().toCell(),
     };
 }
@@ -401,6 +406,16 @@ struct (0x52540015) RetryPendingActions {
 }
 
 struct (0x52540016) SetJettonWallet {
+    wallet: address
+}
+
+// P0: one-time admin message storing the canonical Jetton Wallet code so the RC
+// can derive the expected ReturnExcessesBack sender for each claim owner.
+struct (0x5254001B) SetJettonWalletCode {
+    code: cell
+}
+
+struct (0x5254001C) SetTeamWalletJettonWallet {
     wallet: address
 }
 
@@ -543,9 +558,15 @@ struct TeamRoundState {
     queryId: uint64
 }
 
+struct TeamVaultExtra {
+    // P0: expected ReturnExcessesBack sender for team-wallet transfers.
+    teamWalletJettonWallet: address
+}
+
 struct TeamVaultStorage {
     config: TeamVaultConfig
     params: Cell<TeamVaultParams>
+    extra: Cell<TeamVaultExtra>
     rounds: map<uint8, TeamRoundState>
     // pending burn burnId per round (kept until Jetton Master confirms)
     pendingBurnIds: map<uint8, uint256>

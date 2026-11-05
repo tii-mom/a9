@@ -225,11 +225,10 @@ get fun `test RetryPendingActions resends missing failure burns`() {
     expect(rcStatus(f.rc, 1)).toEqual(STATUS_SETTLING_FAILURE);
     expect(mockState(f.rcWallet).burnCount).toEqual(2);
 
-    // admin-only
-    expect(retryPendingActions(f.rc, alice.address, 1)).toHaveFailedTx<RetryPendingActions>({
+    // P1-2: permissionless (anyone can pay gas) with enough value
+    expect(retryPendingActions(f.rc, alice.address, 1)).toHaveSuccessfulTx<RetryPendingActions>({
         from: alice.address,
         to: f.rc.address,
-        exitCode: Errors.NotAdmin,
     });
     // F-03: burns are already in flight -> retry must NOT resend them
     expect(retryPendingActions(f.rc, f.admin, 1)).toHaveSuccessfulTx<RetryPendingActions>({

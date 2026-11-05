@@ -33,7 +33,7 @@ const ACTIONS = {
   'submit-candle': { op: opcodes.SubmitCandle, mutating: true, desc: '提交单根/多根 1h K 线（测试网手动模式，body 0x52540003）' },
   'oracle-candle': { op: opcodes.OracleCandleVerified, mutating: true, unsupported: true, desc: 'OracleCandleVerified（0x52540004）；当前 RC 无 handler，仅 phase-2；本版本禁止广播' },
   'abort-technical': { op: opcodes.AbortTechnical, mutating: true, desc: '技术终止：连续暂停 14 天或观察超时 7 天，任何人可触发' },
-  'retry-pending': { op: opcodes.RetryPendingActions, mutating: true, desc: '重试 pending 的跨合约动作' },
+  'retry-pending': { op: opcodes.RetryPendingActions, mutating: true, desc: '重试 pending 的跨合约动作（RetryPendingActions 无权限校验，任何人可触发）' },
 };
 
 const FORBIDDEN = {

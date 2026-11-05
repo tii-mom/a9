@@ -52,6 +52,11 @@ fun calcMinimalTransferAmount(forwardTonAmount: int, fwdFee: int): int {
         : jettonWalletGasConsumption;
 
     return forwardTonAmount + fwdCount * fwdFee + forwardInitStateOverhead() +
+    calculateForwardFee(
+        MY_WORKCHAIN,
+        MESSAGE_SIZE_RETURN_EXCESSES_BITS,
+        MESSAGE_SIZE_RETURN_EXCESSES_CELLS,
+    ) +
     calculateGasFee(MY_WORKCHAIN, sendTransferGasConsumption) +
     calculateGasFee(MY_WORKCHAIN, receiveTransferGasConsumption) +
     calculateJettonWalletMinStorageFee();

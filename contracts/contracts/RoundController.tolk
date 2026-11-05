@@ -19,6 +19,7 @@
 import "types"
 import "constants"
 import "jetton"
+import "jetton/jetton-utils"
 
 contract RoundController {
     author: "A9 Protocol"
@@ -42,6 +43,7 @@ type RoundControllerAllowedMessage =
     | StartObservation
     | RetryPendingActions
     | SetJettonWallet
+    | SetJettonWalletCode
     | BurnAck
     | TeamReleasedAck
     | TeamBurnedAck
@@ -72,8 +74,9 @@ fun onInternalMessage(in: InMessage) {
         ResumeOracle => { handleResumeOracle(in.senderAddress, msg); }
         AbortTechnical => { handleAbortTechnical(in.senderAddress, msg); }
         StartObservation => { handleStartObservation(in.senderAddress, msg); }
-        RetryPendingActions => { handleRetryPendingActions(in.senderAddress, msg); }
+        RetryPendingActions => { handleRetryPendingActions(in.senderAddress, msg, in.valueCoins); }
         SetJettonWallet => { handleSetJettonWallet(in.senderAddress, msg); }
+        SetJettonWalletCode => { handleSetJettonWalletCode(in.senderAddress, msg); }
         BurnAck => { handleBurnAck(in.senderAddress, msg); }
         TeamReleasedAck => { handleTeamReleasedAck(in.senderAddress, msg); }
         TeamBurnedAck => { handleTeamBurnedAck(in.senderAddress, msg); }
@@ -666,7 +669,10 @@ fun handlePauseOracle(sender: address, _msg: PauseOracle) {
     val now: uint64 = blockchain.now() as uint64;
     val rd = ensureRoundExists(s, s.currentRoundId);
     assert (rd.status == STATUS_OBSERVING) throw Errors.BadRoundStatus;
+    // P2-1: an oracle must not be able to reset the abort timer repeatedly.
+    assert (rd.pauseCount == 0) throw Errors.BadRoundStatus;
     var updated = rd;
+    updated.pauseCount = rd.pauseCount + 1;
     updated.status = STATUS_ORACLE_PAUSED;
     s.pausedAt = now;
     s.rounds.set(s.currentRoundId, updated);
@@ -917,6 +923,18 @@ fun refundStake(s: Storage, owner: address, amount: coins, queryId: uint64) {
 // Claims
 // ===========================================================================
 
+fun handleSetJettonWalletCode(sender: address, msg: SetJettonWalletCode) {
+    var s = lazy Storage.load();
+    requireAdmin(s, sender);
+    assert (s.currentRoundId == 0) throw Errors.BadRoundStatus;
+    var cfg = s.config.load();
+    var v = cfg.vaults.load();
+    v.jettonWalletCode = msg.code;
+    cfg.vaults = v.toCell();
+    s.config = cfg.toCell();
+    s.save();
+}
+
 fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal) {
     var s = lazy Storage.load();
     val rd = ensureRoundExists(s, msg.roundId);
@@ -1110,9 +1128,23 @@ fun handleBurnAck(sender: address, msg: BurnAck) {
 
 fun handleReturnExcesses(sender: address, msg: ReturnExcessesBack) {
     val s = lazy Storage.load();
-    if (sender == vaults(s).stakingJettonWallet) {
+    val v = vaults(s);
+    if (sender == v.stakingJettonWallet) {
+        // compatibility path: mock / self-transfer scenarios
         settlePendingClaim(msg.queryId);
         return;
+    }
+    // P0: the real TEP-74 excess return is sent by the RECIPIENT's Jetton Wallet.
+    // Derive the expected wallet from the pending claim owner.
+    val ex = s.extras.load();
+    val pending = ex.pending.get(msg.queryId);
+    if (pending.isFound) {
+        val p = pending.loadValue();
+        val expected = calcAddressOfJettonWallet(p.owner, addresses(s).jettonMaster, v.jettonWalletCode);
+        if (sender == expected) {
+            settlePendingClaim(msg.queryId);
+            return;
+        }
     }
     assert (sender == addresses(s).jettonMaster) throw Errors.NotJettonMaster;
     val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
@@ -1150,9 +1182,10 @@ fun handleTeamBurnedAck(sender: address, msg: TeamBurnedAck) {
 // Retry + one-time deployment wiring
 // ===========================================================================
 
-fun handleRetryPendingActions(sender: address, msg: RetryPendingActions) {
+fun handleRetryPendingActions(_sender: address, msg: RetryPendingActions, valueCoins: coins) {
+    // P1-2: anyone may pay gas to unstick a SETTLING_* round if admin is gone.
+    assert (valueCoins >= ton("0.3")) throw Errors.BadConfig;
     var s = lazy Storage.load();
-    requireAdmin(s, sender);
     assert (msg.roundId == s.currentRoundId) throw Errors.BadRoundId;
     var rd = ensureRoundExists(s, msg.roundId);
     val v = vaults(s);

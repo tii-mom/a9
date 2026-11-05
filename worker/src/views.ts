@@ -298,18 +298,27 @@ export function buildLeaderboard(state: ReconcileResult, roundId: number): Leade
   const round = state.rounds.find((item) => item.round_id === roundId);
   const rewarded = round ? round.result !== 'FAILURE' : true;
   const rewardBudget = rewarded && round ? toBigInt(round.reward_budget_raw) : 0n;
+  // P1-C：预计奖励按 V8 权重（own weight + 邀请加成）/ 总权重，而不是本金比例
+  const weights = v8.computeRoundWeights(
+    state.params,
+    state.stakeRows.filter((row) => row.round_id === roundId),
+  );
 
   return [...aggregate.byAddress.entries()]
     .sort((a, b) => (a[1].amountRaw === b[1].amountRaw ? a[0].localeCompare(b[0]) : a[1].amountRaw > b[1].amountRaw ? -1 : 1))
     .slice(0, 50)
-    .map(([address, entry], index) => ({
-      rank: index + 1,
-      address,
-      amountRaw: entry.amountRaw.toString(),
-      shareBps: Number((entry.amountRaw * 10000n) / aggregate.totalRaw),
-      rewardEstimateRaw: mulDivFloor(rewardBudget, entry.amountRaw, aggregate.totalRaw).toString(),
-      acceptedAt: entry.acceptedAt,
-    }));
+    .map(([address, entry], index) => {
+      const weight = weights.byAddress.get(address)?.weight ?? 0n;
+      const estimate = weights.totalWeight > 0n ? (rewardBudget * weight) / weights.totalWeight : 0n;
+      return {
+        rank: index + 1,
+        address,
+        amountRaw: entry.amountRaw.toString(),
+        shareBps: Number((entry.amountRaw * 10000n) / aggregate.totalRaw),
+        rewardEstimateRaw: estimate.toString(),
+        acceptedAt: entry.acceptedAt,
+      };
+    });
 }
 
 export async function buildMe(env: Env, state: ReconcileResult, address: string): Promise<MeResponse> {
@@ -319,6 +328,11 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
   const rewardRows = await store.listRoundRewardsForAddress(env, address);
   const roundsById = new Map(state.rounds.map((row) => [row.round_id, row]));
   const rewardStateByRound = new Map(rewardRows.map((row) => [row.round_id, row.state]));
+  const lastRoundRow = roundsById.get(params.roundCount);
+  const unlockStarted =
+    !!lastRoundRow &&
+    (lastRoundRow.state === 'SUCCEEDED' || lastRoundRow.state === 'FAILED_PERMANENT' || lastRoundRow.state === 'TECHNICAL_ABORTED') &&
+    state.unlockPool.start_at > 0;
 
   const perRound = new Map<
     number,
@@ -373,10 +387,13 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
     if (!round) continue;
     if (round.state === 'SUCCEEDED') {
       const rewardRow = rewardRows.find((row) => row.round_id === roundId);
-      const reward = rewardRow ? toBigInt(rewardRow.reward_raw) : legacyRewardEstimate(state, round, entry.amount);
+      // P1-C：V8 权重公式（权重含 streak 与邀请加成）；解锁开始后 PENDING 奖励转入解锁池，不再算「可领取」
+      const reward = rewardRow
+        ? toBigInt(rewardRow.reward_raw)
+        : v8WeightRewardEstimate(state, round.round_id, address);
       rewardTotal += reward;
       const principalRaw = entry.principalClaimed ? 0n : entry.amount;
-      const rewardRaw = entry.rewardClaimed ? 0n : reward;
+      const rewardRaw = entry.rewardClaimed || unlockStarted ? 0n : reward;
       if (principalRaw > 0n || rewardRaw > 0n) {
         claimable.push({
           roundId,
@@ -391,8 +408,6 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
   let stakedTotal = 0n;
   for (const entry of perRound.values()) stakedTotal += entry.amount;
 
-  const lastRound = roundsById.get(params.roundCount);
-  const unlockStarted = !!lastRound && isTerminal(lastRound.state) && state.unlockPool.start_at > 0;
   const rewards = v8.buildRoundRewardsView(params, state.rounds, roundsById, rewardRows, state.stakeRows, unlockStarted);
   const stakeStreak = v8.streakSummaryFromStakes(
     state.stakeRows.filter((row) => row.address === address),
@@ -421,11 +436,16 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
   };
 }
 
-/** 旧数据（无 round_rewards）的奖励估算：按质押比例兜底。 */
-function legacyRewardEstimate(state: ReconcileResult, round: store.RoundRow, amount: bigint): bigint {
-  const aggregate = state.stakeAgg.get(round.round_id);
-  const roundTotal = aggregate ? aggregate.totalRaw : toBigInt(round.total_accepted_stake_raw);
-  return mulDivFloor(toBigInt(round.reward_budget_raw), amount, roundTotal);
+/** 旧数据（无 round_rewards）的奖励估算：按 V8 权重（own weight + 邀请加成）/ 总权重。 */
+function v8WeightRewardEstimate(state: ReconcileResult, roundId: number, address: string): bigint {
+  const round = state.rounds.find((row) => row.round_id === roundId);
+  if (!round) return 0n;
+  const stakes = state.stakeRows.filter((row) => row.round_id === roundId);
+  if (!stakes.length) return 0n;
+  const weights = v8.computeRoundWeights(state.params, stakes);
+  const weight = weights.byAddress.get(address)?.weight ?? 0n;
+  if (weights.totalWeight === 0n || weight === 0n) return 0n;
+  return (toBigInt(round.reward_budget_raw) * weight) / weights.totalWeight;
 }
 
 /** GET /api/referral/:address：邀请关系 + 加成明细。 */

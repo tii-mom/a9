@@ -18,6 +18,7 @@ const teamVault = resolveAddress(registry, params, 'teamVault', 'team-vault.addr
 const controller = resolveAddress(registry, params, 'roundController', 'round-controller.addr');
 const rcWallet = resolveContractAddress(registry, 'roundControllerJettonWallet');
 const tvWallet = resolveContractAddress(registry, 'teamVaultJettonWallet');
+const teamWalletWallet = resolveContractAddress(registry, 'teamWalletJettonWallet');
 const signer = signerWallet(params);
 const registeredBinding = registry.bindings.teamVaultAcceptsOnly;
 const markBoundOnly = flag(args, 'mark-bound-only');
@@ -29,6 +30,8 @@ kv('当前绑定记录', registeredBinding || '（未绑定）');
 kv('调用者', 'TeamVault.admin（部署者/硬件钱包），只能调用一次');
 kv('RC Jetton Wallet', rcWallet || '（未登记：先执行 65_set_jetton_wallets.mjs）');
 kv('TV Jetton Wallet', tvWallet || '（未登记：先执行 65_set_jetton_wallets.mjs）');
+kv('teamWallet Jetton Wallet', teamWalletWallet || '（未登记：先执行 65_set_jetton_wallets.mjs）');
+detail('P0 修复：InitController 需要 teamWalletJettonWallet（ReturnExcessesBack 校验接收方 canonical 钱包）；65 脚本已查询并登记。');
 detail('顺序（contracts/README §7.2）：SetJettonWallet(RC) → SetJettonWallet(TV) → InitController；setter 必须早于 InitController。');
 detail('若 contracts/scripts/deploy-emulation.tolk 已代为执行 InitController：用 --mark-bound-only 只登记绑定，不要重复发送。');
 
@@ -50,11 +53,11 @@ if (!teamVault || !controller) {
   warn('TeamVault / RoundController 未登记：dry-run 仅打印绑定计划（不可逆操作，部署后双人核对再执行）');
   process.exit(finish({ 模式: 'DRY-RUN（未部署）' }));
 }
-if (execute && (!rcWallet || !tvWallet)) {
-  fail('SetJettonWallet 尚未完成（RC/TV Jetton Wallet 未登记）：先执行 65_set_jetton_wallets.mjs；setter 必须早于 InitController');
+if (execute && (!rcWallet || !tvWallet || !teamWalletWallet)) {
+  fail('SetJettonWallet / teamWallet canonical 钱包尚未完成登记：先执行 65_set_jetton_wallets.mjs；setter 必须早于 InitController');
   process.exit(finish());
 }
-if (!rcWallet || !tvWallet) warn('Jetton Wallet 未登记（dry-run 继续；EXECUTE 前必须先完成 65）');
+if (!rcWallet || !tvWallet || !teamWalletWallet) warn('Jetton Wallet / teamWalletJettonWallet 未登记（dry-run 继续；EXECUTE 前必须先完成 65）');
 if (registeredBinding && !addressEquals(registeredBinding, controller)) {
   fail('登记表显示 TeamVault 已绑定到其他地址：' + registeredBinding + '（链上不可逆，立刻停止并核查）');
   process.exit(finish());
@@ -83,6 +86,7 @@ const rendered = substitute(commandTemplate(params, 'bindRoles'), {
   signerWallet: signer,
   teamVault,
   roundController: controller,
+  teamWalletJettonWallet: teamWalletWallet || '<teamWalletJettonWallet>',
 });
 section('执行计划');
 detail('命令：' + rendered);

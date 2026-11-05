@@ -10,9 +10,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # 冒烟/本地 D1 用固定 admin token（仅 CI 环境，非生产 secret）
+  CI_ADMIN_TOKEN: ci-admin-token
+
 jobs:
   verify:
-    name: typecheck + build
+    name: typecheck + build (web + worker)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +40,109 @@ jobs:
           path: web/dist
           retention-days: 7
 
+  contracts:
+    name: contracts (acton test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Acton
+        run: |
+          if ! command -v acton >/dev/null 2>&1; then
+            curl -fsSL https://raw.githubusercontent.com/ton-blockchain/acton/main/install.sh | sh
+          fi
+          export PATH="$HOME/.acton/bin:$PATH"
+          acton --version
+      - name: acton test
+        working-directory: contracts
+        run: |
+          export PATH="$HOME/.acton/bin:$PATH"
+          acton test
+
+  ops-selftest:
+    name: ops selftest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: node ops/scripts/selftest.mjs
+        run: node ops/scripts/selftest.mjs
+
+  worker-smoke:
+    name: worker typecheck + D1 migrate + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Worker typecheck
+        working-directory: worker
+        run: ./node_modules/.bin/tsc --noEmit
+      - name: Prepare local D1 (fast demo seed)
+        working-directory: worker
+        run: |
+          echo "ADMIN_TOKEN=$CI_ADMIN_TOKEN" > .dev.vars
+          DEMO_CANDLE_SECONDS=2 EPOCH=$(( $(date +%s) * 1000 + 20000 )) node scripts/generate-seed.mjs
+          rm -rf .wrangler/state
+          ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --local
+      - name: Start wrangler dev
+        working-directory: worker
+        run: |
+          (./node_modules/.bin/wrangler dev --port 8787 --var DEMO_CANDLE_SECONDS:2 --var DEMO_PREVIEW_SECONDS:2 > /tmp/wrangler.log 2>&1 &)
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health || true)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          curl -s http://127.0.0.1:8787/api/health | head -c 200
+      - name: Smoke
+        working-directory: worker
+        env:
+          SMOKE_BASE: http://127.0.0.1:8787
+          SMOKE_TIMEOUT: "240"
+        run: node scripts/smoke.mjs
+      - name: Dump wrangler log on failure
+        if: failure()
+        run: tail -120 /tmp/wrangler.log || true
+
+  e2e:
+    name: e2e (optional: E2E_BASE_URL secret)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: E2E against deployed URL (skips if secret missing)
+        working-directory: qa
+        env:
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          if [ -z "$E2E_BASE_URL" ]; then
+            echo "E2E_BASE_URL 未配置，跳过 e2e（生产部署后可在 workflow_dispatch 中手动跑）"
+            exit 0
+          fi
+          pnpm exec playwright install --with-deps chromium
+          node e2e.mjs "$E2E_BASE_URL"
+
   deploy:
     name: deploy (production)
-    needs: verify
+    needs: [verify, contracts, ops-selftest, worker-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:

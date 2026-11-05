@@ -90,6 +90,7 @@ fun deployTeamVault(admin: address, teamWallet: address, jettonMaster: address):
             jettonMaster,
             teamRoundRaw: TEAM_ROUND_RAW,
         }.toCell(),
+        extra: TeamVaultExtra { teamWalletJettonWallet: admin }.toCell(),
         rounds: [],
         pendingBurnIds: [],
         totalReleasedRaw: 0,
@@ -245,7 +246,7 @@ fun deployRoundController(
     val cfg = ProtocolConfig {
         addresses: ProtocolAddresses { admin, oracle, jettonMaster }.toCell(),
         // placeholder; wired once via SetJettonWallet after this contract is deployed
-        vaults: ProtocolVaults { stakingJettonWallet: admin, teamVault }.toCell(),
+        vaults: ProtocolVaults { stakingJettonWallet: admin, teamVault, jettonWalletCode: beginCell().endCell() }.toCell(),
         econ: econ.toCell(),
         timing: timing.toCell(),
     };
@@ -586,7 +587,7 @@ fun burnStatus(rc: RoundControllerHandle, roundId: uint8): RoundBurnStatus {
 fun retryPendingActions(rc: RoundControllerHandle, from: address, roundId: uint8): SendResultList {
     return net.send(from, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: ton("0.5"),
         dest: rc.address,
         body: RetryPendingActions { queryId: 0, roundId },
     }));
@@ -756,4 +757,24 @@ fun bounceTeamRelease(vault: TeamVaultHandle, wallet: address, roundId: uint8) {
         .endCell();
     val msg = createMessage({ bounce: false, value: ton("0.1"), dest: vault.address, body }).bounced();
     testing.processSingleTraceStep(wallet, msg);
+}
+
+
+fun setTeamWalletJettonWallet(vault: TeamVaultHandle, admin: address, wallet: address): SendResultList {
+    return net.send(admin, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: vault.address,
+        body: SetTeamWalletJettonWallet { wallet },
+    }));
+}
+
+
+fun setRcWalletCode(rc: RoundControllerHandle, from: address, code: cell): SendResultList {
+    return net.send(from, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: rc.address,
+        body: SetJettonWalletCode { code },
+    }));
 }

@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens } from './lib/config.mjs';
-import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
+import { bootstrap, finish, printNextSteps, resolveContractAddress, resolveWalletAddress } from './lib/step.mjs';
 import { findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { CHECK_STATUS, check, verifyAllocationInvariant, verifyFundingPlan, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
@@ -59,6 +59,16 @@ if (!offline) {
     });
   }
 
+  const tryGetMethod = async (address, methods) => {
+    for (const method of methods) {
+      try {
+        const result = await runGetMethod(params, address, method);
+        return { method, stack: result.stack || [] };
+      } catch (error) { /* try next */ }
+    }
+    return null;
+  };
+
   if (jettonMaster && controller) {
     await netCheck('jetton.wallet.rc', async () => {
       const wallet = await findJettonWallet(params, jettonMaster, controller);
@@ -67,6 +77,13 @@ if (!offline) {
     await netCheck('jetton.wallet.tv', async () => {
       const wallet = await findJettonWallet(params, jettonMaster, teamVault);
       add(check('jetton.wallet.tv', wallet && tvWallet && wallet.address === tvWallet ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, wallet ? wallet.address : '未解析'));
+    });
+    await netCheck('jetton.wallet.teamWallet', async () => {
+      const teamWallet = resolveWalletAddress(registry, 'teamWallet');
+      if (!teamWallet) { add(check('jetton.wallet.teamWallet', CHECK_STATUS.WARN, 'teamWallet 未登记')); return; }
+      const wallet = await findJettonWallet(params, jettonMaster, teamWallet);
+      const recorded = resolveContractAddress(registry, 'teamWalletJettonWallet');
+      add(check('jetton.wallet.teamWallet', wallet && recorded && wallet.address === recorded ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, wallet ? wallet.address + ' vs registry ' + (recorded || '未登记') : '未解析'));
     });
   }
   for (const [key, address, minTon] of [['roundController', controller, 20], ['teamVault', teamVault, 10]]) {
@@ -98,6 +115,15 @@ if (!offline) {
   }
 
   if (controller) {
+    await netCheck('rc.jetton_wallet_code', async () => {
+      const result = await tryGetMethod(controller, ['get_jetton_wallet_code']);
+      if (!result) { add(check('rc.jetton_wallet_code', CHECK_STATUS.WARN, 'ABI_PENDING：get_jetton_wallet_code getter 待 contract-dev 确认，手动用 Acton rpc 核对')); return; }
+      const nonZero = result.stack.some((item) => {
+        const value = stackItemToBigInt(item);
+        return value !== null && value !== 0n;
+      }) || result.stack.some((item) => item && item.type === 'cell' || item && item.type === 'slice');
+      add(check('rc.jetton_wallet_code', nonZero ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, 'code cell ' + (nonZero ? '已设置' : '为空/未设置')));
+    });
     await netCheck('rc.get_protocol_config', async () => {
       const response = await runGetMethod(params, controller, 'get_protocol_config');
       const stack = response.stack || [];
@@ -139,6 +165,19 @@ if (!offline) {
   }
 
   if (teamVault) {
+    await netCheck('teamVault.pending_query_ids', async () => {
+      const result = await tryGetMethod(teamVault, ['get_pending_query_ids', 'get_pending_actions', 'get_pending_state']);
+      if (!result) { add(check('teamVault.pending_query_ids', CHECK_STATUS.WARN, 'ABI_PENDING：pendingQueryId getter 待 contract-dev 确认，手动用 Acton rpc 核对')); return; }
+      const nonZero = result.stack.map((item) => stackItemToBigInt(item)).filter((value) => value !== null && value !== 0n).length;
+      add(check('teamVault.pending_query_ids', nonZero === 0 ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, nonZero === 0 ? '全为 0' : nonZero + ' 个 pending queryId 非 0'));
+    });
+    await netCheck('teamVault.teamWalletJettonWallet', async () => {
+      const result = await tryGetMethod(teamVault, ['get_team_wallet_jetton_wallet']);
+      if (!result) { add(check('teamVault.teamWalletJettonWallet', CHECK_STATUS.WARN, 'ABI_PENDING：getter 待 contract-dev 确认；已用 jetton.wallet.teamWallet 校验 canonical 一致性')); return; }
+      const recorded = resolveContractAddress(registry, 'teamWalletJettonWallet');
+      const found = result.stack.some((item) => item && item.value && String(item.value).length > 0);
+      add(check('teamVault.teamWalletJettonWallet', found && recorded ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, 'registry=' + (recorded || '未登记') + ' getter=' + result.method));
+    });
     await netCheck('teamVault.state', async () => {
       const response = await runGetMethod(params, teamVault, 'get_team_vault_state');
       const stack = response.stack || [];

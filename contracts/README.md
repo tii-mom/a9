@@ -10,10 +10,10 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **121 passed / 10 files**（65 + V8 22 + P0 9 + TeamVault 1 + 审计 F-01~F-06 10 + 审计 F-07~F-09 7 + 架构 M-1/S-3 7 个用例）。
+- **测试**：acton test → **130 passed / 12 files**（65 + V8 22 + P0 9 + TeamVault 1 + 审计 F-01~F-06 10 + 审计 F-07~F-09 7 + 架构 M-1/S-3 7 + P0 v2/P1/P2 9 个用例，含 3 个真 Jetton 合约集成测试）。
 - **合约代码哈希**（clean rebuild，Tolk code cell）：
-    - RoundController：0x9BE0035A77FE3231D09D69F9A1F49DECBBE52769EFA631FE6DABC91D1738AEB9（1,881 行，架构评审修复后）
-    - TeamVault：0x7EF3B06F4F2B47B1B1DD03C0CBBA4427482D2AC6372671A43BD8B1CCBE5967C6
+    - RoundController：0x1C4EC8D3D2D46466F8A83FF95B9466672574AC94F9DCC3B5C3147840A29ED42E（1,914 行，P0 v2 修复后）
+    - TeamVault：0x20E5C676878C61872BF352F1F7F43BC4B5C3E024E155E6B3E0AE53D1531432A5
     - TeamVault：0xDDFEE8CA14B5104B7C73FBBC075953FDD729286E5CB67F90DB08DB5E502B09DD
     - JettonMaster：0xAA7BC0B3429880FCE965C6FF5FC8E7A0A4F63445F1BA2602EBF37A079DBE740C
     - JettonWallet：0x068E64CF94ABC5B514A65CC32A6B8415E8E963FAD9C016E0BC815AB68C447D53
@@ -52,7 +52,7 @@
     cd contracts
     acton build              # 产出 build/*.json 与 build/abi/*.json
     acton check              # 0 warning
-    acton test               # 121 passed
+    acton test               # 130 passed
     acton build --info       # 打印 code hash
 
 ### 1.3 官方安装方式（新机器）
@@ -205,6 +205,8 @@ V6.1 自研面 **只有 2 个合约**（docs/11 §4）：
 | 0x52540011 | StartObservation | 任何人 | RC | queryId:u64, roundId:u8 |
 | 0x52540015 | RetryPendingActions | admin | RC | queryId:u64, roundId:u8 |
 | 0x52540016 | SetJettonWallet | admin（一次性） | RC / TV | wallet:address |
+| 0x5254001B | SetJettonWalletCode | admin（一次性，R1 前） | RC | code:cell |
+| 0x5254001C | SetTeamWalletJettonWallet | admin | TV | wallet:address |
 | 0x52540017 | ClaimRewardEarly | 用户 | RC | queryId:u64, roundId:u8（PENDING → EARLY，付 50%） |
 | 0x52540018 | RollReward | 用户 | RC | queryId:u64, roundId:u8（PENDING → ROLLED，全额进下一轮） |
 | 0x52540019 | SetReferrer | 用户 | RC | referrer:address（一次性、不可改） |
@@ -336,6 +338,7 @@ RC 收到 transfer_notification#7362d09c（sender:MsgAddressInt，官方 TEP-74 
     TeamVault.Storage {
       config: admin, controller: address?, configVersion
       params: Cell<{jettonWallet, teamWallet, jettonMaster, teamRoundRaw}>  // ref：地址环依赖 + 体积
+      extra: Cell<{teamWalletJettonWallet}>                   // P0 v2：teamWallet 钱包地址（release 确认）
       pendingBurnIds: map<u8,u256>                            // P0-2 closure：待 master 确认的 burnId
       rounds: map<u8, TeamRoundState{released, burned, amountRaw, queryId}>
       totalReleasedRaw/totalBurnedRaw: u128, releasedCount/burnedCount: u8
@@ -645,13 +648,13 @@ dry-run（fund_ton <to> 20）：
 ## 8. 测试
 
     cd contracts
-    acton test                    # 121 passed in 10 files
+    acton test                    # 130 passed in 12 files
     acton test tests/jetton.test.tolk
     acton test tests/settlement.test.tolk
     acton test -f 'technical abort'   # 按名字过滤
     acton check                   # lint：0 warning
 
-### 8.1 覆盖矩阵（121 个用例）
+### 8.1 覆盖矩阵（130 个用例）
 
 | 需求 | 用例（文件） |
 | --- | --- |
@@ -683,6 +686,8 @@ dry-run（fund_ton <to> 20）：
 | 审计 F-01~F-06 | unlock 双 bounce 不膨胀 locked（相对扣减 + per-owner pending 互斥）；retry 用规范 burn queryId 且不重发在途 burn；bounce 清 dispatched；0.1 TON burn 回传；零额度 roll 保持 PENDING；邀请人后加仓/后滚存 O(1) 补 bonus |
 | 审计 F-07~F-09 | Roll/早领后 get_reward_state 仍返回全额 amountRaw 且 rollable 仅 PENDING；ClaimAll 早领补 RewardEarly 事件；空地址 SetReferrer/SetJettonWallet（RC/TV）被拒且不写状态 |
 | 架构 M-1/S-3 | 自然到期关窗无权限、提前关窗仍需权限；PREVIEW/STAKING_OPEN 超时可由任何人 abort 并领回本金；TV release pending→ReturnExcesses 确认/ack，bounce 清 pending 可重试、成功后重复调用幂等 |
+| P0 v2 真合约集成 | 真 JettonMaster/JettonWallet：成功轮 release ack→SUCCEEDED、ClaimPrincipal/ClaimRewardEarly pending 清零；失败轮三笔销毁确认→FAILED_PERMANENT；10 轮后 ClaimUnlocked 真 ReturnExcesses 结算 |
+| P0 v2 / P1 / P2 单测 | 非 owner 钱包的 ReturnExcesses 不能清 pending；retry 无权限且 <0.3 TON 拒绝；每轮仅 1 次 pause；pending release 与 burn 冲突；transfer value 0.1 TON |
 
 ### 8.3 V8 gas 实测（Acton emulation，gas units；按主网 gas price 400 nanotons/unit 估算）
 
@@ -759,6 +764,16 @@ P0 安全修复（task-22，外部审查）——修复前后行为差异：
 34. **S-3（P1）TeamVault ReleaseTeamQuota 无 bounce 回滚**：修复前 TV 在发出 transfer 的同一笔交易里置 released=true 并发 ack，转账 bounce 后 1.2 亿永久锁死。修复后 ReleaseTeamQuota 改为 pending 语义（rounds 记录 queryId/amount，先不 ack/不累计），等待 TV Jetton Wallet 的 ReturnExcessesBack 再置 released、累计并发 TeamReleasedAck；onBouncedMessage 增加 OP_JETTON_TRANSFER 分支，bounce 时清 pending、不 ack、可重试；成功后重复 ReleaseTeamQuota 仍幂等只重发 ack。测试：S-3 release confirms through ReturnExcesses and acks、S-3 release bounce clears pending and can be retried、S-3 release duplicate after success is idempotent。
 
 > ABI 未变：opcode/body/get 签名均不变；AbortTechnical 的 reason 是既有 uint8 字段，新增枚举值 3；S-3 仅内部状态机。合约自此冻结，交 delta 复审后上测试网。
+
+P0 v2 / P1 / P2（task-27，delta 复审）——用真 Jetton 合约补集成测试后修复：
+
+35. **P0（必现）ReturnExcessesBack 发送方校验错误**：真实 TEP-74 的 excess return 由**接收方的 Jetton Wallet** 发出（两跳），旧代码却校验 RC/TV 自己的钱包 → 用户首次领取后 pendingQueryId 永不清零、TV release 永远收不到确认（RC 卡 SETTLING_SUCCESS）。修复：RC 新增一次性 admin SetJettonWalletCode(0x5254001B) 存 JettonWallet code；handleReturnExcesses 按 queryId 取出 pending.owner，用 calcAddressOfJettonWallet(owner, jettonMaster, code) 推导期望 sender 并 settle；保留原钱包兼容分支。TV 新增 SetTeamWalletJettonWallet(0x5254001C) 存 teamWallet 钱包地址，release 确认校验该地址（兼容旧钱包分支）。deploy-emulation 已加入两笔一次性配置。**新增 3 个真 Jetton 合约集成测试**（成功轮 release ack + principal/early 领取、失败轮三笔销毁、10 轮 ClaimUnlocked），全部通过，证明真实两跳 ReturnExcessesBack 被正确接受。
+36. **P1-1 转账 value/确认丢失**：sendJettonTransfer/sendTrackedJettonTransfer value 0.05→0.1；JettonWallet 的 ReturnExcessesBack 去掉 SEND_MODE_IGNORE_ERRORS，改 BOUNCE_ON_ACTION_FAIL；calcMinimalTransferAmount 计入回传转发费。测试：P1-1 release transfer carries 0.1 TON。
+37. **P1-2 RetryPendingActions 管理员单点**：放开为无权限（任何人可付 gas 推进 SETTLING_*），入口要求 in.valueCoins >= 0.3 TON。测试：P1-2 retry is permissionless with enough value / retry below 0.3 TON is rejected。
+38. **P2-1 PauseOracle 无限重置超时**：RoundData 增加 pauseCount，每轮最多 pause 1 次。测试：P2-1 second pause in the same round is rejected。
+39. **P2-2 TV pending release 与 burn 竞态**：BurnTeamQuota 遇到 pending release（kind=RELEASE_QUERY_TEAM）抛 TeamRoundConflict。测试：P2-2 burn during pending release conflicts。
+
+> ABI 新增：RC 0x5254001B SetJettonWalletCode、TV 0x5254001C SetTeamWalletJettonWallet；存储新增 ProtocolVaults.jettonWalletCode、TeamVault.extra、RoundData.pauseCount。合约冻结，交 delta 复审后上测试网。
 21. **P0-3 领取无回滚**：修复前先置 claimed+save 再 NoBounce 转账，失败即永久丢失；修复后领取转账 bounceable、send_excesses 回 RC，pending claim 以全局唯一 queryId 记录；bounce 时回滚 principal/reward/claimAll/unlock 的标记与 locked 金额，成功时由 ReturnExcessesBack 清除 pending。**影响：领取失败可安全重试；每条领取多一次 pending map 读写（gas 见 §8.3）。refund 转账仍为非托管路径（失败时金额仍在 RC 钱包，不涉及已置位领取标记），本轮未改。**
 
 ---
@@ -780,7 +795,7 @@ P0 安全修复（task-22，外部审查）——修复前后行为差异：
     acton --version                  # 1.1.0
     acton build                      # 0 error
     acton check                      # 0 warning
-    acton test                       # 121 passed in 10 files
+    acton test                       # 130 passed in 12 files
     acton build --info               # 对照 §0 的 code hash
     acton script scripts/deploy-emulation.tolk   # 打印部署顺序与地址
     cat deploy/params.testnet.json   # V6.1 参数模板

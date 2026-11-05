@@ -33,6 +33,8 @@ import * as state from './state';
 import * as store from './store';
 import * as views from './views';
 import * as v8 from './v8';
+import { enforceRateLimit, issueAuthNonce, requireWriteAuth } from './tonproof';
+import { notImplemented } from './http';
 import { ownWeightFor, streakForRound } from './protocol';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 import type { ReconcileResult } from './state';
@@ -59,15 +61,35 @@ async function handleMe(env: Env, st: ReconcileResult, url: URL): Promise<Respon
   return okResponse(await views.buildMe(env, st, address));
 }
 
+/** P1-C：按 V8 权重（own weight + 邀请加成）/ 总权重 估算单地址奖励（旧数据兜底）。 */
+function v8WeightReward(st: ReconcileResult, roundId: number, address: string): bigint {
+  const round = st.rounds.find((row) => row.round_id === roundId);
+  if (!round) return 0n;
+  const stakes = st.stakeRows.filter((row) => row.round_id === roundId);
+  if (!stakes.length) return 0n;
+  const weights = v8.computeRoundWeights(st.params, stakes);
+  const weight = weights.byAddress.get(address)?.weight ?? 0n;
+  if (weights.totalWeight === 0n || weight === 0n) return 0n;
+  return (toBigInt(round.reward_budget_raw) * weight) / weights.totalWeight;
+}
+
 async function handleStake(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
+  await enforceRateLimit(env, request, '/api/stake', st.now);
   const body = await readJsonBody(request);
+  // P1-D：chain 模式禁止演示写入（请直接与合约交互）
+  if (st.params.dataSource === 'chain') {
+    throw notImplemented('链上模式请直接与合约交互：/api/stake 仅用于演示数据源');
+  }
   const address = parseAddress(body.address);
   const roundId = parseRoundId(body.roundId);
   const amount = parseRawAmount(body.amountRaw);
   const riskVersion = requireInt(body, 'riskDisclosureVersion');
   const accept = requireBool(body, 'acceptFullPrincipalBurn');
-  const source = optionalString(body, 'nonce');
+  // P1-B：前端发 depositNonce，旧客户端发 nonce；前者优先，避免幂等去重失效
+  const source = optionalString(body, 'depositNonce') ?? optionalString(body, 'nonce');
   const nonce = source ?? 'auto-' + Date.now() + '-' + crypto.randomUUID();
+  // P1-A：TON Proof 验签 + 一次性 nonce（demo 可用 DEMO_ALLOW_UNSIGNED_WRITES=true 显式放行）
+  await requireWriteAuth(env, request, body, address, st.now);
 
   const { params, now } = st;
   if (riskVersion !== params.riskDisclosureVersion) {
@@ -159,8 +181,14 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
 }
 
 async function handleClaim(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
+  await enforceRateLimit(env, request, '/api/claim', st.now);
   const body = await readJsonBody(request);
+  if (st.params.dataSource === 'chain') {
+    throw notImplemented('链上模式请直接与合约交互：/api/claim 仅用于演示数据源');
+  }
   const address = parseAddress(body.address);
+  // P1-A：领取同样需要 ton_proof（防替他人领取）
+  await requireWriteAuth(env, request, body, address, st.now);
   const kind = requireString(body, 'kind');
   if (kind !== 'principal' && kind !== 'reward' && kind !== 'unlock') {
     throw badRequest('kind 必须是 principal / reward / unlock');
@@ -239,9 +267,10 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
         state: rewardRow.state,
       });
     }
+    // P1-C：无 rewardRow 的旧数据也按 V8 权重公式兜底（不再用本金比例）
     const reward = rewardRow
       ? toBigInt(rewardRow.reward_raw)
-      : mulDivFloor(toBigInt(round.reward_budget_raw), amount, toBigInt(round.total_accepted_stake_raw));
+      : v8WeightReward(st, round.round_id, address);
     const paidBps = BigInt(10_000 - st.params.earlyClaimPenaltyBps);
     claimAmount = (reward * paidBps) / 10_000n;
     const lockedAmount = reward - claimAmount;
@@ -299,6 +328,7 @@ async function handleAdmin(
   st: ReconcileResult,
   parts: string[],
 ): Promise<Response> {
+  await enforceRateLimit(env, request, '/api/admin', Date.now());
   const { actor } = requireAdmin(request, env);
 
   if (parts.length === 2 && parts[1] === 'overview') {
@@ -386,6 +416,12 @@ async function route(
       default:
         throw notFound('接口不存在');
     }
+  }
+
+  if (parts[0] === 'auth' && parts.length === 2 && parts[1] === 'nonce') {
+    assertMethod(method, 'GET');
+    const address = parseAddress(url.searchParams.get('address'));
+    return okResponse(await issueAuthNonce(env, address, st.now));
   }
 
   if (parts[0] === 'referral' && parts.length === 2) {
@@ -476,6 +512,11 @@ export default {
           const auto = await state.autoplay(env);
           const st = await state.reconcile(env);
           await state.refreshDemoMarket(env, st);
+          const now = Date.now();
+          await Promise.all([
+            store.pruneRateLimit(env, now - 10 * 60 * 1000),
+            store.pruneAuthNonces(env, now - 60 * 60 * 1000),
+          ]);
           bustCache();
           console.log(JSON.stringify({ lvl: 'info', job: 'cron', changed: st.changed, autoplay: auto, now: st.now }));
         } catch (error) {

@@ -316,6 +316,27 @@ export interface HealthResponse {
   uptimeSeconds: number;
 }
 
+/** TON Connect ton_proof：写接口（stake/claim）签名校验用 */
+export interface TonProof {
+  /** unix 秒 */
+  timestamp: number;
+  domain: { lengthBytes: number; value: string };
+  /** 服务端下发的一次性 nonce（GET /api/auth/nonce） */
+  payload: string;
+  /** ed25519 签名（base64） */
+  signature: string;
+  /** 公钥（hex）；严格版应从 state_init 解析（TODO chain 模式） */
+  publicKey: string;
+  stateInit?: string;
+}
+
+/** GET /api/auth/nonce 返回：5 分钟有效、一次性使用 */
+export interface AuthNonceResponse {
+  address: string;
+  nonce: string;
+  expiresAt: number;
+}
+
 export type ApiOk<T> = { ok: true; data: T; ts: number };
 export type ApiErr = { ok: false; error: { code: string; message: string } };
 export type ApiResponse<T> = ApiOk<T> | ApiErr;
@@ -331,6 +352,7 @@ export const ENDPOINTS = {
   trades: '/api/trades',
   book: '/api/book',
   me: (address: string) => `/api/me?address=${encodeURIComponent(address)}`,
+  authNonce: (address: string) => `/api/auth/nonce?address=${encodeURIComponent(address)}`,
   referral: (address: string) => `/api/referral/${encodeURIComponent(address)}`,
   stake: '/api/stake',
   claim: '/api/claim',

@@ -1016,3 +1016,106 @@ export async function logEvent(
 export async function listEvents(env: Env, limit = 50): Promise<EventRow[]> {
   return all<EventRow>(env, 'SELECT * FROM admin_events ORDER BY ts DESC, id DESC LIMIT ?', limit);
 }
+
+/* ------------------------------------------------------------------ *
+ * 安全：一次性 nonce / 地址↔公钥绑定 / 最简限流（migration 0007）
+ * ------------------------------------------------------------------ */
+
+export interface AuthNonceRow {
+  nonce: string;
+  address: string;
+  created_at: number;
+  expires_at: number;
+  used_at: number | null;
+}
+
+export async function insertAuthNonce(
+  env: Env,
+  input: { nonce: string; address: string; createdAt: number; expiresAt: number },
+): Promise<void> {
+  await run(
+    env,
+    'INSERT OR REPLACE INTO auth_nonces (nonce, address, created_at, expires_at, used_at) VALUES (?, ?, ?, ?, NULL)',
+    input.nonce,
+    input.address,
+    input.createdAt,
+    input.expiresAt,
+  );
+}
+
+/** 原子消费一次性 nonce：仅当存在、未用、未过期且 address 匹配时成功。 */
+export async function consumeAuthNonce(
+  env: Env,
+  input: { nonce: string; address: string; now: number },
+): Promise<boolean> {
+  const changes = await run(
+    env,
+    'UPDATE auth_nonces SET used_at = ? WHERE nonce = ? AND address = ? AND used_at IS NULL AND expires_at > ?',
+    input.now,
+    input.nonce,
+    input.address,
+    input.now,
+  );
+  return changes > 0;
+}
+
+export async function pruneAuthNonces(env: Env, before: number): Promise<void> {
+  await run(env, 'DELETE FROM auth_nonces WHERE expires_at < ?', before);
+}
+
+export interface WalletBindingRow {
+  address: string;
+  public_key: string;
+  bound_at: number;
+}
+
+export async function getWalletBinding(env: Env, address: string): Promise<WalletBindingRow | null> {
+  return first<WalletBindingRow>(env, 'SELECT * FROM wallet_bindings WHERE address = ?', address);
+}
+
+/** 首次验签通过后绑定；同一公钥只能绑定一个地址（UNIQUE 冲突返回 false）。 */
+export async function insertWalletBinding(
+  env: Env,
+  input: { address: string; publicKey: string; now: number },
+): Promise<boolean> {
+  const changes = await run(
+    env,
+    'INSERT OR IGNORE INTO wallet_bindings (address, public_key, bound_at) VALUES (?, ?, ?)',
+    input.address,
+    input.publicKey,
+    input.now,
+  );
+  return changes > 0;
+}
+
+export interface RateLimitResult {
+  limited: boolean;
+  count: number;
+}
+
+/**
+ * 最简限流：key = ip|path|minuteBucket。D1 原子 upsert + RETURNING count。
+ * 仅用于 /api/admin/*、/api/stake、/api/claim。
+ */
+export async function hitRateLimit(
+  env: Env,
+  input: { key: string; now: number; limit: number; windowMs?: number },
+): Promise<RateLimitResult> {
+  const windowMs = input.windowMs && input.windowMs > 0 ? input.windowMs : 60_000;
+  const bucket = Math.floor(input.now / windowMs) * windowMs;
+  const row = await env.DB.prepare(
+    `INSERT INTO rate_limit (key, window_start, count) VALUES (?, ?, 1)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN rate_limit.window_start = excluded.window_start THEN rate_limit.count + 1 ELSE 1 END,
+       window_start = CASE WHEN rate_limit.window_start = excluded.window_start THEN rate_limit.window_start ELSE excluded.window_start END
+     RETURNING count`,
+  )
+    .bind(input.key + '|' + bucket, bucket)
+    .first<{ count: number }>();
+  const count = row?.count ?? 1;
+  return { limited: count > input.limit, count };
+}
+
+export async function pruneRateLimit(env: Env, before: number): Promise<void> {
+  await run(env, 'DELETE FROM rate_limit WHERE window_start < ?', before);
+}

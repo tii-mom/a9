@@ -24,6 +24,7 @@ contract TeamVault {
 
 type TeamVaultAllowedMessage =
     | SetJettonWallet
+    | SetTeamWalletJettonWallet
     | InitController
     | ReleaseTeamQuota
     | BurnTeamQuota
@@ -43,6 +44,15 @@ fun onInternalMessage(in: InMessage) {
             var params = st.params.load();
             params.jettonWallet = msg.wallet;
             st.params = params.toCell();
+            st.save();
+        }
+        SetTeamWalletJettonWallet => {
+            var st = lazy TeamVaultStorage.load();
+            assert (in.senderAddress == st.config.admin) throw Errors.NotAdmin;
+            assert (msg.wallet != createAddressNone()) throw Errors.BadConfig;
+            var extra = st.extra.load();
+            extra.teamWalletJettonWallet = msg.wallet;
+            st.extra = extra.toCell();
             st.save();
         }
         InitController => {
@@ -113,6 +123,12 @@ fun onInternalMessage(in: InMessage) {
                     val burnIdRes = st.pendingBurnIds.get(roundId);
                     assert (burnIdRes.isFound) throw Errors.BadBurnId;
                     sendTeamBurnedAck(st, roundId, state.amountRaw, burnIdRes.loadValue(), msg.queryId);
+                    return;
+                }
+                val pendingKind: uint8 = ((state.queryId >> 8) & 0xff) as uint8;
+                if (pendingKind == RELEASE_QUERY_TEAM) {
+                    // P2-2: a release is in flight -> conflict, do not race it.
+                    throw Errors.TeamRoundConflict;
                 }
                 // Pending burn: do not burn twice, wait for master confirmation.
                 return;
@@ -145,8 +161,9 @@ fun onInternalMessage(in: InMessage) {
             val params = st.params.load();
             val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
             val kind: uint8 = ((msg.queryId >> 8) & 0xff) as uint8;
-            if (in.senderAddress == params.jettonWallet) {
-                // S-3: release transfer completed -> confirm and ack RC.
+            val extra = st.extra.load();
+            if (in.senderAddress == extra.teamWalletJettonWallet || in.senderAddress == params.jettonWallet) {
+                // S-3/P0: release transfer completed -> confirm and ack RC.
                 if (kind != RELEASE_QUERY_TEAM) {
                     return;
                 }

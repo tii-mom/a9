@@ -63,7 +63,7 @@ fun sendJettonTransfer(
     val out = createMessage({
         // P0-3: bounceable so failures are observable and state can be rolled back.
         bounce: BounceMode.Only256BitsOfBody,
-        value: ton("0.05"),
+        value: ton("0.1"),
         dest: jettonWallet,
         body,
     });
@@ -82,7 +82,7 @@ fun sendTrackedJettonTransfer(
     val body = buildJettonTransferBody(queryId, amount, recipient, responseDestination);
     val out = createMessage({
         bounce: BounceMode.Only256BitsOfBody,
-        value: ton("0.05"),
+        value: ton("0.1"),
         dest: jettonWallet,
         body,
     });

@@ -91,7 +91,8 @@ fun onInternalMessage(in: InMessage) {
                     body: ReturnExcessesBack { queryId: msg.queryId },
                 });
                 // SAFETY: It is safe because of reserveToncoinsOnBalance() called earlier
-                excessesMsg.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_IGNORE_ERRORS);
+                // F-04/P1-1: never silently drop the completion signal; bounce on action failure.
+                excessesMsg.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
             }
         }
 

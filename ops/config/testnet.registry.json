@@ -5,8 +5,8 @@
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
-  "createdAt": "2026-11-05T08:09:19.892Z",
-  "updatedAt": "2026-11-05T08:09:19.893Z",
+  "createdAt": "2026-11-05T14:13:41.434Z",
+  "updatedAt": "2026-11-05T14:13:41.434Z",
   "contracts": {
     "jettonMaster": {
       "address": null,
@@ -49,6 +49,14 @@
       "note": null
     },
     "roundControllerJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamWalletJettonWallet": {
       "address": null,
       "raw": null,
       "deployTxHash": null,
@@ -124,6 +132,6 @@
     "digest": null
   },
   "notes": [
-    "初始登记表：尚未部署。部署时由 10/20/30/65/70/50/60 脚本写入地址，60 脚本定稿并生成地址簿。"
+    "初始登记表：尚未部署。部署时由 10/15/20/30/65/70/50/60 脚本写入地址，60 脚本定稿并生成地址簿。"
   ]
 }

@@ -109,7 +109,7 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 cd contracts
 acton build --clear-cache    # 期望 0 error
 acton check                  # 期望 0 warning
-acton test                   # 期望 121 passed
+acton test                   # 期望 130 passed
 acton script scripts/deploy-emulation.tolk   # 期望 OK
 ```
 
@@ -146,11 +146,11 @@ acton script scripts/deploy-emulation.tolk   # 期望 OK
 | 合约 | 行数 | Code hash |
 | --- | --- | --- |
 | RoundController | 1,881 | 0x9BE0035A77FE3231D09D69F9A1F49DECBBE52769EFA631FE6DABC91D1738AEB9 |
-| TeamVault | 314 | 0x7EF3B06F4F2B47B1B1DD03C0CBBA4427482D2AC6372671A43BD8B1CCBE5967C6 |
-| JettonMaster | 245 | 0x657C029A1BAB71815BC0AB3CF0E1958BFEFCFFAF644B307394E7A696550886E2 |
-| JettonWallet | 179 | 0x3E3D595A8BB95AB108340B7CB50E99135D5FBA9E1118F7B0F1B4CF0EB5066A96 |
+| TeamVault | 331 | 0x20E5C676878C61872BF352F1F7F43BC4B5C3E024E155E6B3E0AE53D1531432A5 |
+| JettonMaster | 245 | 0xDB3C43B4F1AF474416C2A27502479230B8A316A7A57F7D018452B12B25EB778B |
+| JettonWallet | 179 | 0x5840B389222182AA1D2C0C1CB2A275DB03C90D4197D5F15540EB128E615DA4CF |
 
-验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **121 passed** / `acton script scripts/deploy-emulation.tolk` OK。
+验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **130 passed** / `acton script scripts/deploy-emulation.tolk` OK。
 
 若审计方的 hash 与上表不一致，说明代码已被改动，请先与项目方确认版本。
 
@@ -215,3 +215,19 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 未修（按评审建议）：S-1 补 5 个 external-out 事件（索引器改用解析入站交易）、S-2 多签地址（部署配置层面）、N-1~N-5 全部不动。
 
 主网前仍待补：**M-2 OracleAdapter**（3/5 多源验签，向 RC 转发 OpenRound/CloseStaking/SubmitCandle，RC 零修改）。
+
+---
+
+## 12. 第四轮修复记录（v8.4，P0 真实链路缺陷）
+
+第三轮 delta 复审发现一个 100% 必现的 P0：真实 TEP-74 下 `ReturnExcessesBack` 由**接收方钱包**发出，而 RC/TV 校验的是自己的钱包地址，导致所有领取与团队释放确认必然失败。根因是测试用 MockJettonWallet（单跳）掩盖了真实两跳行为。
+
+| 编号 | 严重度 | 问题 | 修复 |
+| --- | --- | --- | --- |
+| P0-1 | 主网阻断 | ReturnExcessesBack 发送方校验错误 → 用户 pendingQueryId 永不清零、首轮成功即卡 SETTLING_SUCCESS | RC 新增 `SetJettonWalletCode(0x5254001B)` 存钱包 code，按 pending.owner 推导接收方钱包校验；TV 新增 `SetTeamWalletJettonWallet(0x5254001C)` |
+| P1-1 | 高 | transfer 只带 0.05 TON + JettonWallet excesses 用 IGNORE_ERRORS | 0.05→0.1；改 BOUNCE_ON_ACTION_FAIL；calcMinimalTransferAmount 计入回传费 |
+| P1-2 | 高 | RetryPendingActions 仅 admin → M-1 在 SETTLING_* 阶段闭不了环 | 放开为无权限 + valueCoins ≥ 0.3 |
+| P2-1 | 中 | Pause/Resume 无次数上限，可无限重置超时 | RoundData.pauseCount，每轮最多 1 次 |
+| P2-2 | 中 | TV BurnTeamQuota 未检查 pending release | 抛 TeamRoundConflict |
+
+**关键交付：真实 JettonMaster + JettonWallet 集成测试（3 条）已建立**，覆盖成功轮释放确认、失败轮三笔销毁确认、R10 后 ClaimUnlocked 真实返回。测试总数 130。

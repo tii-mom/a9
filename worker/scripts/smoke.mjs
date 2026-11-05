@@ -183,7 +183,7 @@ async function baseline() {
 
   await test('GET /api/version', async () => {
     const data = await apiOk('/api/version');
-    eq(data.schemaVersion, 1, 'schemaVersion');
+    assert(typeof data.schemaVersion === 'number' && data.schemaVersion >= 7, 'schemaVersion 应为 >=7，实际 ' + data.schemaVersion);
     eq(data.dataSource, 'demo', 'dataSource');
     assert(typeof data.now === 'number', 'now 缺失');
     return 'version=' + data.version + ' sha=' + (data.gitSha || '-');

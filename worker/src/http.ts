@@ -5,7 +5,14 @@
 import type { ApiResponse } from '@shared/types';
 import type { Env } from './env';
 
-export type ErrorCode = 'BAD_REQUEST' | 'NOT_FOUND' | 'UNAUTHORIZED' | 'RATE_LIMITED' | 'CONFLICT' | 'INTERNAL';
+export type ErrorCode =
+  | 'BAD_REQUEST'
+  | 'NOT_FOUND'
+  | 'UNAUTHORIZED'
+  | 'RATE_LIMITED'
+  | 'CONFLICT'
+  | 'NOT_IMPLEMENTED'
+  | 'INTERNAL';
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   BAD_REQUEST: 400,
@@ -13,6 +20,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   RATE_LIMITED: 429,
+  NOT_IMPLEMENTED: 501,
   INTERNAL: 500,
 };
 
@@ -44,6 +52,14 @@ export function unauthorized(message = '未授权'): ApiError {
   return new ApiError('UNAUTHORIZED', message);
 }
 
+export function notImplemented(message: string): ApiError {
+  return new ApiError('NOT_IMPLEMENTED', message);
+}
+
+export function rateLimited(message = '请求过于频繁，请稍后重试'): ApiError {
+  return new ApiError('RATE_LIMITED', message);
+}
+
 /* ------------------------------------------------------------------ *
  * CORS / 安全响应头
  * ------------------------------------------------------------------ */
@@ -67,9 +83,27 @@ function isApiPath(request: Request): boolean {
 }
 
 /**
+ * 保守版 CSP：脚本/样式只允许本站（Vite 产物无内联 script，但 React 会写内联 style 属性 → style-src 保留 'unsafe-inline'）；
+ * 连接白名单含 TON Connect 桥接与常见钱包 UI 域（D-04 预言机/桥域名最终确定后可再收紧）。
+ * TODO(chain-frontend): 若接入其它钱包 SDK/桥域，请同步在此追加，并保持 connect-src/frame-src 最小化。
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://a9.lat https://www.a9.lat https://tonapi.io https://*.tonapi.io https://bridge.tonapi.io wss://bridge.tonapi.io https://tonconnectbridge.mytonwallet.org wss://tonconnectbridge.mytonwallet.org https://app.tonkeeper.com https://web.tonkeeper.com https://tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io",
+  "frame-src 'self' https://app.tonkeeper.com https://web.tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "upgrade-insecure-requests",
+].join('; ');
+
+/**
  * 所有响应（含 ASSETS 静态资源）统一追加安全头 + CORS。
- * TODO(deploy): TON Connect 桥接域名（bridge.ton.org / 各钱包自定义桥）未最终确定，
- * 暂不下发严格 CSP，待前端 manifest 与桥域名冻结后再加 Content-Security-Policy。
  */
 export function finalizeResponse(res: Response, env: Env, request: Request): Response {
   const headers = new Headers(res.headers);
@@ -78,13 +112,15 @@ export function finalizeResponse(res: Response, env: Env, request: Request): Res
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
 
   const origin = allowedOrigin(env, request);
   if (origin) {
     headers.set('Access-Control-Allow-Origin', origin);
     if (origin !== '*') headers.append('Vary', 'Origin');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Ton-Proof');
     headers.set('Access-Control-Max-Age', '86400');
   }
 

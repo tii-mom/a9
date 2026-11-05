@@ -35,6 +35,12 @@ export interface Env {
   EDGE_CACHE_SECONDS?: string;
   /** TON Connect manifest 地址（默认 /tonconnect-manifest.json） */
   TONCONNECT_MANIFEST_URL?: string;
+  /** demo 模式是否允许无签名写接口（必须显式 'true'；默认拒绝） */
+  DEMO_ALLOW_UNSIGNED_WRITES?: string;
+  /** ton_proof 允许的 domain（逗号分隔，大小写不敏感） */
+  TON_PROOF_DOMAINS?: string;
+  /** 限流阈值：每个 IP+路径 每分钟请求数（默认 30） */
+  RATE_LIMIT_PER_MINUTE?: string;
 }
 
 /**
@@ -53,7 +59,7 @@ export function uptimeSeconds(now = Date.now()): number {
 }
 
 /** D1 schema 版本，与 migrations 文件名一致，健康检查里暴露用于上线核对。 */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /** Worker 默认语义化版本。 */
 export const DEFAULT_VERSION = '1.0.0';

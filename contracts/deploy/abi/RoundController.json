@@ -111,6 +111,10 @@
     },
     {
       "kind": "StructRef",
+      "struct_name": "SetJettonWalletCode"
+    },
+    {
+      "kind": "StructRef",
       "struct_name": "BurnAck"
     },
     {
@@ -142,25 +146,25 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 33
+      "inner_ty_idx": 34
     },
     {
       "kind": "union",
       "variants": [
         {
-          "variant_ty_idx": 34,
+          "variant_ty_idx": 35,
           "prefix_num": 0,
           "prefix_len": 1,
           "is_prefix_implicit": null,
-          "stack_type_id": 151,
+          "stack_type_id": 152,
           "stack_width": 1
         },
         {
-          "variant_ty_idx": 35,
+          "variant_ty_idx": 36,
           "prefix_num": 1,
           "prefix_len": 1,
           "is_prefix_implicit": null,
-          "stack_type_id": 152,
+          "stack_type_id": 153,
           "stack_width": 1
         }
       ],
@@ -204,7 +208,7 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 46
+      "inner_ty_idx": 47
     },
     {
       "kind": "StructRef",
@@ -212,7 +216,7 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 48
+      "inner_ty_idx": 49
     },
     {
       "kind": "StructRef",
@@ -224,7 +228,7 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 50
+      "inner_ty_idx": 51
     },
     {
       "kind": "StructRef",
@@ -232,11 +236,11 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 53
+      "inner_ty_idx": 54
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 45
+      "inner_ty_idx": 46
     },
     {
       "kind": "StructRef",
@@ -254,7 +258,7 @@
     {
       "kind": "mapKV",
       "key_ty_idx": 7,
-      "value_ty_idx": 58
+      "value_ty_idx": 59
     },
     {
       "kind": "StructRef",
@@ -263,7 +267,7 @@
     {
       "kind": "mapKV",
       "key_ty_idx": 7,
-      "value_ty_idx": 60
+      "value_ty_idx": 61
     },
     {
       "kind": "StructRef",
@@ -272,11 +276,11 @@
     {
       "kind": "mapKV",
       "key_ty_idx": 11,
-      "value_ty_idx": 62
+      "value_ty_idx": 63
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 56
+      "inner_ty_idx": 57
     },
     {
       "kind": "StructRef",
@@ -293,12 +297,12 @@
     },
     {
       "kind": "cellOf",
-      "inner_ty_idx": 66
+      "inner_ty_idx": 67
     },
     {
       "kind": "mapKV",
       "key_ty_idx": 16,
-      "value_ty_idx": 65
+      "value_ty_idx": 66
     },
     {
       "kind": "StructRef",
@@ -307,12 +311,12 @@
     {
       "kind": "mapKV",
       "key_ty_idx": 7,
-      "value_ty_idx": 70
+      "value_ty_idx": 71
     },
     {
       "kind": "mapKV",
       "key_ty_idx": 16,
-      "value_ty_idx": 71
+      "value_ty_idx": 72
     },
     {
       "kind": "StructRef",
@@ -392,7 +396,7 @@
     {
       "kind": "struct",
       "name": "ProtocolAddresses",
-      "ty_idx": 46,
+      "ty_idx": 47,
       "fields": [
         {
           "name": "admin",
@@ -411,7 +415,7 @@
     {
       "kind": "struct",
       "name": "ProtocolVaults",
-      "ty_idx": 48,
+      "ty_idx": 49,
       "fields": [
         {
           "name": "stakingJettonWallet",
@@ -420,13 +424,17 @@
         {
           "name": "teamVault",
           "ty_idx": 7
+        },
+        {
+          "name": "jettonWalletCode",
+          "ty_idx": 3
         }
       ]
     },
     {
       "kind": "struct",
       "name": "ProtocolEcon",
-      "ty_idx": 50,
+      "ty_idx": 51,
       "fields": [
         {
           "name": "p0UsdE8",
@@ -450,7 +458,7 @@
         },
         {
           "name": "maxStakePerAddressBps",
-          "ty_idx": 51
+          "ty_idx": 52
         },
         {
           "name": "maxTotalStakeRaw",
@@ -461,7 +469,7 @@
     {
       "kind": "struct",
       "name": "ProtocolTiming",
-      "ty_idx": 53,
+      "ty_idx": 54,
       "fields": [
         {
           "name": "previewSeconds",
@@ -497,7 +505,7 @@
         },
         {
           "name": "riskDisclosureVersion",
-          "ty_idx": 51
+          "ty_idx": 52
         },
         {
           "name": "configVersion",
@@ -508,30 +516,30 @@
     {
       "kind": "struct",
       "name": "ProtocolConfig",
-      "ty_idx": 45,
+      "ty_idx": 46,
       "fields": [
         {
           "name": "addresses",
-          "ty_idx": 47
+          "ty_idx": 48
         },
         {
           "name": "vaults",
-          "ty_idx": 49
+          "ty_idx": 50
         },
         {
           "name": "econ",
-          "ty_idx": 52
+          "ty_idx": 53
         },
         {
           "name": "timing",
-          "ty_idx": 54
+          "ty_idx": 55
         }
       ]
     },
     {
       "kind": "struct",
       "name": "ProtocolConfigView",
-      "ty_idx": 75,
+      "ty_idx": 76,
       "fields": [
         {
           "name": "admin",
@@ -575,7 +583,7 @@
         },
         {
           "name": "maxStakePerAddressBps",
-          "ty_idx": 51
+          "ty_idx": 52
         },
         {
           "name": "maxTotalStakeRaw",
@@ -615,7 +623,7 @@
         },
         {
           "name": "riskDisclosureVersion",
-          "ty_idx": 51
+          "ty_idx": 52
         },
         {
           "name": "configVersion",
@@ -626,7 +634,7 @@
     {
       "kind": "struct",
       "name": "RoundExtra",
-      "ty_idx": 66,
+      "ty_idx": 67,
       "fields": [
         {
           "name": "failureBurnId",
@@ -642,18 +650,18 @@
         },
         {
           "name": "bonus",
-          "ty_idx": 67
+          "ty_idx": 68
         },
         {
           "name": "referred",
-          "ty_idx": 67
+          "ty_idx": 68
         }
       ]
     },
     {
       "kind": "struct",
       "name": "StakePosition",
-      "ty_idx": 70,
+      "ty_idx": 71,
       "fields": [
         {
           "name": "amountRaw",
@@ -684,7 +692,7 @@
     {
       "kind": "struct",
       "name": "RoundData",
-      "ty_idx": 65,
+      "ty_idx": 66,
       "fields": [
         {
           "name": "status",
@@ -767,15 +775,19 @@
           "ty_idx": 5
         },
         {
+          "name": "pauseCount",
+          "ty_idx": 16
+        },
+        {
           "name": "extra",
-          "ty_idx": 68
+          "ty_idx": 69
         }
       ]
     },
     {
       "kind": "struct",
       "name": "RoundView",
-      "ty_idx": 76,
+      "ty_idx": 77,
       "fields": [
         {
           "name": "roundId",
@@ -870,7 +882,7 @@
     {
       "kind": "struct",
       "name": "StreakInfo",
-      "ty_idx": 58,
+      "ty_idx": 59,
       "fields": [
         {
           "name": "lastRound",
@@ -885,7 +897,7 @@
     {
       "kind": "struct",
       "name": "LockedState",
-      "ty_idx": 60,
+      "ty_idx": 61,
       "fields": [
         {
           "name": "lockedRaw",
@@ -904,7 +916,7 @@
     {
       "kind": "struct",
       "name": "PendingClaim",
-      "ty_idx": 62,
+      "ty_idx": 63,
       "fields": [
         {
           "name": "owner",
@@ -920,11 +932,11 @@
         },
         {
           "name": "principalMask",
-          "ty_idx": 51
+          "ty_idx": 52
         },
         {
           "name": "rewardMask",
-          "ty_idx": 51
+          "ty_idx": 52
         },
         {
           "name": "amountRaw",
@@ -943,23 +955,23 @@
     {
       "kind": "struct",
       "name": "StorageExtras",
-      "ty_idx": 56,
+      "ty_idx": 57,
       "fields": [
         {
           "name": "referrer",
-          "ty_idx": 57
+          "ty_idx": 58
         },
         {
           "name": "streaks",
-          "ty_idx": 59
+          "ty_idx": 60
         },
         {
           "name": "locked",
-          "ty_idx": 61
+          "ty_idx": 62
         },
         {
           "name": "pending",
-          "ty_idx": 63
+          "ty_idx": 64
         },
         {
           "name": "claimCounter",
@@ -974,15 +986,15 @@
     {
       "kind": "struct",
       "name": "Storage",
-      "ty_idx": 44,
+      "ty_idx": 45,
       "fields": [
         {
           "name": "config",
-          "ty_idx": 55
+          "ty_idx": 56
         },
         {
           "name": "extras",
-          "ty_idx": 64
+          "ty_idx": 65
         },
         {
           "name": "currentRoundId",
@@ -1002,11 +1014,11 @@
         },
         {
           "name": "rounds",
-          "ty_idx": 69
+          "ty_idx": 70
         },
         {
           "name": "stakes",
-          "ty_idx": 72
+          "ty_idx": 73
         }
       ]
     },
@@ -1147,7 +1159,7 @@
     {
       "kind": "struct",
       "name": "BurnAck",
-      "ty_idx": 28,
+      "ty_idx": 29,
       "prefix": {
         "prefix_num": 1381236745,
         "prefix_len": 32
@@ -1208,7 +1220,7 @@
     {
       "kind": "struct",
       "name": "ReleaseTeamQuota",
-      "ty_idx": 73,
+      "ty_idx": 74,
       "prefix": {
         "prefix_num": 1381236748,
         "prefix_len": 32
@@ -1227,7 +1239,7 @@
     {
       "kind": "struct",
       "name": "BurnTeamQuota",
-      "ty_idx": 74,
+      "ty_idx": 75,
       "prefix": {
         "prefix_num": 1381236749,
         "prefix_len": 32
@@ -1303,7 +1315,7 @@
     {
       "kind": "struct",
       "name": "TeamReleasedAck",
-      "ty_idx": 29,
+      "ty_idx": 30,
       "prefix": {
         "prefix_num": 1381236755,
         "prefix_len": 32
@@ -1326,7 +1338,7 @@
     {
       "kind": "struct",
       "name": "TeamBurnedAck",
-      "ty_idx": 30,
+      "ty_idx": 31,
       "prefix": {
         "prefix_num": 1381236756,
         "prefix_len": 32
@@ -1386,8 +1398,23 @@
     },
     {
       "kind": "struct",
+      "name": "SetJettonWalletCode",
+      "ty_idx": 28,
+      "prefix": {
+        "prefix_num": 1381236763,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "code",
+          "ty_idx": 3
+        }
+      ]
+    },
+    {
+      "kind": "struct",
       "name": "ClaimRewardEarly",
-      "ty_idx": 39,
+      "ty_idx": 40,
       "prefix": {
         "prefix_num": 1381236759,
         "prefix_len": 32
@@ -1406,7 +1433,7 @@
     {
       "kind": "struct",
       "name": "RollReward",
-      "ty_idx": 40,
+      "ty_idx": 41,
       "prefix": {
         "prefix_num": 1381236760,
         "prefix_len": 32
@@ -1425,7 +1452,7 @@
     {
       "kind": "struct",
       "name": "SetReferrer",
-      "ty_idx": 41,
+      "ty_idx": 42,
       "prefix": {
         "prefix_num": 1381236761,
         "prefix_len": 32
@@ -1440,7 +1467,7 @@
     {
       "kind": "struct",
       "name": "ClaimUnlocked",
-      "ty_idx": 42,
+      "ty_idx": 43,
       "prefix": {
         "prefix_num": 1381236762,
         "prefix_len": 32
@@ -1455,13 +1482,13 @@
     {
       "kind": "alias",
       "name": "ForwardPayloadRemainder",
-      "ty_idx": 32,
-      "target_ty_idx": 33
+      "ty_idx": 33,
+      "target_ty_idx": 34
     },
     {
       "kind": "struct",
       "name": "PayloadInline",
-      "ty_idx": 34,
+      "ty_idx": 35,
       "prefix": {
         "prefix_num": 0,
         "prefix_len": 1
@@ -1469,14 +1496,14 @@
       "fields": [
         {
           "name": "value",
-          "ty_idx": 33
+          "ty_idx": 34
         }
       ]
     },
     {
       "kind": "struct",
       "name": "PayloadInRef",
-      "ty_idx": 35,
+      "ty_idx": 36,
       "prefix": {
         "prefix_num": 1,
         "prefix_len": 1
@@ -1484,14 +1511,14 @@
       "fields": [
         {
           "name": "value",
-          "ty_idx": 36
+          "ty_idx": 37
         }
       ]
     },
     {
       "kind": "struct",
       "name": "TransferNotification",
-      "ty_idx": 31,
+      "ty_idx": 32,
       "prefix": {
         "prefix_num": 1935855772,
         "prefix_len": 32
@@ -1511,15 +1538,15 @@
         },
         {
           "name": "forwardPayload",
-          "ty_idx": 32,
-          "client_ty_idx": 37
+          "ty_idx": 33,
+          "client_ty_idx": 38
         }
       ]
     },
     {
       "kind": "struct",
       "name": "TopUpTons",
-      "ty_idx": 38,
+      "ty_idx": 39,
       "prefix": {
         "prefix_num": 3547469196,
         "prefix_len": 32
@@ -1529,7 +1556,7 @@
     {
       "kind": "struct",
       "name": "ReturnExcessesBack",
-      "ty_idx": 43,
+      "ty_idx": 44,
       "prefix": {
         "prefix_num": 3576854235,
         "prefix_len": 32
@@ -1544,7 +1571,7 @@
     {
       "kind": "struct",
       "name": "Claimable",
-      "ty_idx": 77,
+      "ty_idx": 78,
       "fields": [
         {
           "name": "principalRaw",
@@ -1556,14 +1583,14 @@
         },
         {
           "name": "roundsMask",
-          "ty_idx": 51
+          "ty_idx": 52
         }
       ]
     },
     {
       "kind": "struct",
       "name": "RoundBurnStatus",
-      "ty_idx": 78,
+      "ty_idx": 79,
       "fields": [
         {
           "name": "rewardBurnConfirmed",
@@ -1586,7 +1613,7 @@
     {
       "kind": "struct",
       "name": "RewardStateInfo",
-      "ty_idx": 79,
+      "ty_idx": 80,
       "fields": [
         {
           "name": "amountRaw",
@@ -1609,7 +1636,7 @@
     {
       "kind": "struct",
       "name": "UnlockInfo",
-      "ty_idx": 80,
+      "ty_idx": 81,
       "fields": [
         {
           "name": "unlockStart",
@@ -1632,11 +1659,11 @@
     {
       "kind": "struct",
       "name": "ReferralInfo",
-      "ty_idx": 81,
+      "ty_idx": 82,
       "fields": [
         {
           "name": "referrer",
-          "ty_idx": 82
+          "ty_idx": 83
         },
         {
           "name": "referredStakeThisRound",
@@ -1651,7 +1678,7 @@
     {
       "kind": "struct",
       "name": "TargetPriceSet",
-      "ty_idx": 83,
+      "ty_idx": 84,
       "prefix": {
         "prefix_num": 1381236993,
         "prefix_len": 32
@@ -1678,7 +1705,7 @@
     {
       "kind": "struct",
       "name": "RoundSettled",
-      "ty_idx": 84,
+      "ty_idx": 85,
       "prefix": {
         "prefix_num": 1381236994,
         "prefix_len": 32
@@ -1713,7 +1740,7 @@
     {
       "kind": "struct",
       "name": "DepositAccepted",
-      "ty_idx": 87,
+      "ty_idx": 88,
       "prefix": {
         "prefix_num": 1381236995,
         "prefix_len": 32
@@ -1740,7 +1767,7 @@
     {
       "kind": "struct",
       "name": "TechnicalAborted",
-      "ty_idx": 86,
+      "ty_idx": 87,
       "prefix": {
         "prefix_num": 1381236996,
         "prefix_len": 32
@@ -1763,7 +1790,7 @@
     {
       "kind": "struct",
       "name": "RewardRolled",
-      "ty_idx": 88,
+      "ty_idx": 89,
       "prefix": {
         "prefix_num": 1381236997,
         "prefix_len": 32
@@ -1790,7 +1817,7 @@
     {
       "kind": "struct",
       "name": "RewardEarly",
-      "ty_idx": 85,
+      "ty_idx": 86,
       "prefix": {
         "prefix_num": 1381236998,
         "prefix_len": 32
@@ -1817,7 +1844,7 @@
     {
       "kind": "struct",
       "name": "ReferrerSet",
-      "ty_idx": 89,
+      "ty_idx": 90,
       "prefix": {
         "prefix_num": 1381236999,
         "prefix_len": 32
@@ -1836,7 +1863,7 @@
     {
       "kind": "struct",
       "name": "UnlockClaimed",
-      "ty_idx": 90,
+      "ty_idx": 91,
       "prefix": {
         "prefix_num": 1381237000,
         "prefix_len": 32
@@ -1906,7 +1933,7 @@
       "body_ty_idx": 31
     },
     {
-      "body_ty_idx": 38
+      "body_ty_idx": 32
     },
     {
       "body_ty_idx": 39
@@ -1922,6 +1949,9 @@
     },
     {
       "body_ty_idx": 43
+    },
+    {
+      "body_ty_idx": 44
     }
   ],
   "incoming_external": [],
@@ -1930,16 +1960,13 @@
       "body_ty_idx": 3
     },
     {
-      "body_ty_idx": 73
+      "body_ty_idx": 74
     },
     {
-      "body_ty_idx": 74
+      "body_ty_idx": 75
     }
   ],
   "emitted_events": [
-    {
-      "body_ty_idx": 83
-    },
     {
       "body_ty_idx": 84
     },
@@ -1960,17 +1987,20 @@
     },
     {
       "body_ty_idx": 90
+    },
+    {
+      "body_ty_idx": 91
     }
   ],
   "storage": {
-    "storage_ty_idx": 44
+    "storage_ty_idx": 45
   },
   "get_methods": [
     {
       "tvm_method_id": 101317,
       "name": "get_protocol_config",
       "parameters": [],
-      "return_ty_idx": 75
+      "return_ty_idx": 76
     },
     {
       "tvm_method_id": 92146,
@@ -1993,7 +2023,7 @@
           "ty_idx": 16
         }
       ],
-      "return_ty_idx": 76
+      "return_ty_idx": 77
     },
     {
       "tvm_method_id": 81440,
@@ -2030,7 +2060,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 70
+      "return_ty_idx": 71
     },
     {
       "tvm_method_id": 130459,
@@ -2067,7 +2097,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 77
+      "return_ty_idx": 78
     },
     {
       "tvm_method_id": 89989,
@@ -2078,7 +2108,7 @@
           "ty_idx": 16
         }
       ],
-      "return_ty_idx": 78
+      "return_ty_idx": 79
     },
     {
       "tvm_method_id": 86299,
@@ -2119,7 +2149,7 @@
           "ty_idx": 16
         }
       ],
-      "return_ty_idx": 79
+      "return_ty_idx": 80
     },
     {
       "tvm_method_id": 109247,
@@ -2130,7 +2160,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 80
+      "return_ty_idx": 81
     },
     {
       "tvm_method_id": 109548,
@@ -2141,7 +2171,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 81
+      "return_ty_idx": 82
     },
     {
       "tvm_method_id": 74423,
@@ -2152,7 +2182,7 @@
           "ty_idx": 7
         }
       ],
-      "return_ty_idx": 58
+      "return_ty_idx": 59
     },
     {
       "tvm_method_id": 109492,

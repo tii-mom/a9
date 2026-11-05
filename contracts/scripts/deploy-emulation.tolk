@@ -99,6 +99,7 @@ fun main() {
             jettonMaster: masterAddress,
             teamRoundRaw: PARAM_TEAM_ROUND,
         }.toCell(),
+        extra: TeamVaultExtra { teamWalletJettonWallet: admin.address }.toCell(),
         rounds: [],
         pendingBurnIds: [],
         totalReleasedRaw: 0,
@@ -149,6 +150,7 @@ fun main() {
             // placeholder: wired right below with the real wallet address
             stakingJettonWallet: admin.address,
             teamVault: tvAddress,
+            jettonWalletCode: build("JettonWallet"),
         }.toCell(),
         econ: econ.toCell(),
         timing: timing.toCell(),
@@ -189,10 +191,24 @@ fun main() {
     net.send(admin.address, createMessage({
         bounce: true,
         value: ton("0.2"),
+        dest: rcAddress,
+        body: SetJettonWalletCode { code: build("JettonWallet") },
+    })).waitForTrace();
+    net.send(admin.address, createMessage({
+        bounce: true,
+        value: ton("0.2"),
         dest: tvAddress,
         body: SetJettonWallet { wallet: tvJettonWallet },
     })).waitForTrace();
-    println("SetJettonWallet wired on RoundController and TeamVault");
+    val teamWalletJettonWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [teamWallet.address]);
+    net.send(admin.address, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: tvAddress,
+        body: SetTeamWalletJettonWallet { wallet: teamWalletJettonWallet },
+    })).waitForTrace();
+    println("SetJettonWallet + SetJettonWalletCode wired on RoundController");
+    println("SetJettonWallet + SetTeamWalletJettonWallet wired on TeamVault");
 
     // --- 6. TeamVault controller (one-time) ---------------------------------
     net.send(admin.address, createMessage({
