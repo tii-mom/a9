@@ -583,6 +583,6 @@ get fun `test C-2 candle index 255 is rejected before uint8 wrap`() {
         sigCount: 3, sigs: buildSigs(keys, eqArray3(), hash),
     };
     expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
-        .toHaveFailedTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address, exitCode: Errors.CandleIndexOutOfRange });
+        .toHaveFailedTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address, exitCode: Errors.BadCandleOrder });
     expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
 }

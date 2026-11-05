@@ -333,7 +333,7 @@ fun onInternalMessage(in: InMessage) {
                 throw Errors.NotEnoughSignatures;
             }
             // C-2 defensive bound: index+1 must not wrap uint8 (255 -> 0).
-            assert (msg.candleIndex < 32) throw Errors.CandleIndexOutOfRange;
+            assert (msg.candleIndex < 32) throw Errors.BadCandleOrder;
             // C-2: store index+1 so "no record" (0) is distinct from accepted index 0.
             val lastRes = st.lastCandle.get(msg.roundId);
             val lastPlus: uint8 = lastRes.isFound ? lastRes.loadValue() : 0;
