@@ -6,7 +6,7 @@
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-05T15:21:14.646Z",
+  "updatedAt": "2026-11-05T15:22:11.710Z",
   "contracts": {
     "jettonMaster": {
       "address": "kQDTfnjo8ESfl5SBvVeOZwil_CFDT8t3-zcUoyNHuzqIfCtq",
@@ -41,7 +41,7 @@
       "deployTxHash": null,
       "codeHash": null,
       "deployedAt": "2026-11-05T15:11:19.494Z",
-      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "note": "query-only 登记",
       "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "roundController": {
@@ -59,16 +59,16 @@
       "deployTxHash": null,
       "codeHash": null,
       "deployedAt": "2026-11-05T15:11:19.494Z",
-      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "note": "query-only 登记",
       "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "teamWalletJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQB0VCEsSCOTvNjrxnmytrU_sve-nUWtw7hlzi7xmlrKRG8w",
+      "raw": "0:7454212c482393bcd8ebc679b2b6b53fb2f7be9d45adc3b865ce2ef19a5aca44",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": "部署消息未落地（uninitialized）；等待 resume 脚本补部署",
+      "deployedAt": "2026-11-05T15:22:06.690Z",
+      "note": "query-only 登记（TV wiring 由整体部署完成）",
       "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "oracleAdapter": {
