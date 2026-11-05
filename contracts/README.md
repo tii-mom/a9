@@ -1,6 +1,6 @@
 # A9 Protocol — 自研合约（RoundController + TeamVault）
 
-**版本**：V8.0 实现基线（2026-11-05；权重制 + 奖励三态 + K 线滚动哈希，时间线沿用 V6.2 72h）
+**版本**：V8.6 冻结基线（2026-11-06；权重制 + 奖励三态 + K 线滚动哈希；tag `v8.6-audit-fixed` @ `c24809a`；时间线 V7：24h/24 根 1h/16 阈值 + 12h+36h+24h）
 **范围**：A9 协议自研 TON 合约（RoundController + TeamVault）+ A9 Jetton Master/Wallet（Tolk 复刻 TEP-74/89，含 mint-once 改造）及其测试/部署模板。
 **权威口径**：docs/00_DECISIONS_V2.md（当前版本，时间线 V6.2）> docs/04_CONTRACT_ABI.md > 本 README。本 README 记录实现细节、ABI、部署模板与**与文档的差异/工程裁决**。
 
@@ -10,14 +10,14 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **144 passed / 14 files**（65 + V8 22 + P0 9 + TeamVault 1 + 审计 F-01~F-06 10 + 审计 F-07~F-09 7 + 架构 M-1/S-3 7 + P0 v2/P1/P2 9 + ops getter 2 + OracleAdapter 12 个用例，含 3 个真 Jetton 合约集成测试）。
-- **合约代码哈希**（clean rebuild，Tolk code cell）：
-    - RoundController：0x7120E5FE1966B9C8B3DFF092D45441B6F896EF5041D36416BC5CD5B4C6893ED1（1,924 行，ops getter 后）
-    - TeamVault：0x14BA576796DF2489A17E00F5CC4FDFE1FD9DB11A3F692DB0F4A0CB5FA8F4EA41
-    - OracleAdapter：0x6600DE52C43B54845130B1E2EB17B9D287E8EF5E02ED894D680CBFA974A6F1CE（387 行，主网 M-2）
-    - TeamVault：0xDDFEE8CA14B5104B7C73FBBC075953FDD729286E5CB67F90DB08DB5E502B09DD
-    - JettonMaster：0xAA7BC0B3429880FCE965C6FF5FC8E7A0A4F63445F1BA2602EBF37A079DBE740C
-    - JettonWallet：0x068E64CF94ABC5B514A65CC32A6B8415E8E963FAD9C016E0BC815AB68C447D53
+- **测试**：acton test → **154 passed / 15 files**（含 C-1~C-4 新增用例、OracleAdapter 12 个用例与真 Jetton 两跳集成测试）；acton check 0 error 0 warning。
+- **冻结 tag/commit**：`v8.6-audit-fixed` @ `c24809a`（HEAD）。
+- **合约代码哈希（v8.6 冻结，clean rebuild，Tolk code cell）**——**以此为准**：
+    - RoundController：0xC5AD291469C3BEADBDC26A6F1733004D433F12B15B025D88B983DF098BA11500
+    - TeamVault：0xCF3E6C7C9DC045F392F35E79E20AA6EDAAF9064D538CA4E78B6D1FE1443158B4
+    - OracleAdapter：0x539F3597357943584A596DA2B40F901B4984D8C8307E63CE81A67F131EAB8CBA（**c38b05a 后修正**；旧 hash 作废）
+    - JettonMaster：0x876F21A1A516FB0449A1D0AF5DBECEB8639373F947949C5AE8E1E9DBB769D64F
+    - JettonWallet：0x394E4E8D40B5D3D97D12AA950B99EA9A53387DDAC331BAAAC8923F0E6E6849A4
 - **ABI JSON**：deploy/abi/{RoundController,TeamVault,JettonMaster,JettonWallet}.json（acton build 生成后复制；MockJettonWallet.json 仅测试用）。
 - **部署参数模板**：deploy/params.testnet.json（含 V6.1 经济参数 + V6.2 时间参数与地址占位符）；主网模板 deploy/params.mainnet.template.json（**当前 BLOCKED**，见 §10）。
 
@@ -444,6 +444,27 @@ SETTLING_FAILURE 时 RC 发出：
 >
 > 真实测试网广播时同样传该 env 并加 --net testnet；全量模式不设该 env 即保持原行为。
 
+> **测试网 10 秒级快测（task-33）**：deploy-emulation 的 ProtocolTiming 与奖励池支持 env 覆盖，默认值 = 生产值（主网必须用默认）：
+>
+> | 环境变量 | 默认（生产） | 快测建议 |
+> | --- | --- | --- |
+> | A9_TIMING_PREVIEW_SECONDS | 43200 | 10 |
+> | A9_TIMING_STAKE_SECONDS | 129600 | 120 |
+> | A9_TIMING_CANDLE_SECONDS | 3600 | 10 |
+> | A9_TIMING_CANDLE_COUNT | 24 | 24 |
+> | A9_TIMING_MIN_QUALIFIED | 16 | 16 |
+> | A9_TIMING_OBSERVATION_SECONDS | 86400 | 240 |
+> | A9_DEPLOY_ROUND_REWARD_RAW | 700000000000000000 | 快测用小额 |
+> | A9_DEPLOY_TEAM_ROUND_RAW | 120000000000000000 | 快测用小额 |
+>
+> - 全部按十进制整数严格解析，非法值立即 fail（不会静默回退）；启动打印 Timing: ... [env]/[default]。
+> - 一致性校验：observationSeconds == candleSeconds * candleCount、minQualified <= candleCount、minQualified > candleCount/2。
+> - 快测示例：
+>
+>       A9_TIMING_PREVIEW_SECONDS=10 A9_TIMING_STAKE_SECONDS=120 A9_TIMING_CANDLE_SECONDS=10 A9_TIMING_CANDLE_COUNT=24 A9_TIMING_MIN_QUALIFIED=16 A9_TIMING_OBSERVATION_SECONDS=240 A9_DEPLOY_ROUND_REWARD_RAW=1000000000000000 A9_DEPLOY_TEAM_ROUND_RAW=200000000000000 acton script scripts/deploy-emulation.tolk
+>
+> - 快测会改变 RC 的 code/data（timing 写入 storage），RC 地址会与生产默认值不同；主网/正式测试网请清空这些 env 使用默认值。
+
 ### 7.3 脚本
 
     cd contracts
@@ -813,6 +834,19 @@ P0 v2 / P1 / P2（task-27，delta 复审）——用真 Jetton 合约补集成�
 21. **P0-3 领取无回滚**：修复前先置 claimed+save 再 NoBounce 转账，失败即永久丢失；修复后领取转账 bounceable、send_excesses 回 RC，pending claim 以全局唯一 queryId 记录；bounce 时回滚 principal/reward/claimAll/unlock 的标记与 locked 金额，成功时由 ReturnExcessesBack 清除 pending。**影响：领取失败可安全重试；每条领取多一次 pending map 读写（gas 见 §8.3）。refund 转账仍为非托管路径（失败时金额仍在 RC 钱包，不涉及已置位领取标记），本轮未改。**
 
 ---
+
+
+### 9.1 v8.6 审计修复批（C-1~C-4，合约冻结）
+
+> 完整描述与测试清单见 **docs/18 §14**；本节只记录实现口径。
+
+- **C-1 滚存截止时间**：`RollReward` 进入 `STAKING_OPEN` 分支时新增 `assert(now < nextRd.stakeCloseAt) throw RollNotAvailable`，不依赖 keeper 及时关窗。测试：`C-1 roll into an expired open round is rejected`。**链上实测**：旧 v8.5 在 testnet-ops 关窗后 RollReward 返回 `accepted:true⟧B⟧（`ops/records/fasttest-runner-2026-11-05T16-17-19-990Z.jsonl` 的 `defect-roll-after-close`）；新实例必须 `accepted:false`。
+- **C-2 OracleAdapter 首根 K 线**：索引以 `index+1` 存储（0 = 无记录），index 0 合法；转发前拒绝 `index >= 32`（uint8 自增前），错误码用 Adapter 自己的 `BadCandleOrder`（`c38b05a`）。测试 3 条（index 0 / 真 RC 序列 / index 255）。
+- **C-3 转发失败回滚**：向 RC 转发前写 replay 标记；转发动作 bounce 时按 `forwardedQueryId` 精确回滚，允许重试。测试 2 条。
+- **C-4 两跳 bounce 通知**：JettonWallet 第二跳 bounce 后向 owner 发 `TransferBounced`（新增 opcode），RC/TV 回滚 pending；owner 通知因 TON 不足发不出时，钱包侧仍完成 Jetton 余额回滚（`d90c57f`）。测试 4 条。
+
+> **部署/运维**：`deploy-emulation.tolk` 支持**全新空链一条命令完整部署**（JettonMaster → mint 100 亿并永久关闭 → OracleAdapter/TeamVault/RoundController → 全套 wiring → RC 7e18 / TV 1.2e18 raw A9 注入 + 回读校验）。
+> **JettonWallet 代码变更会导致所有 jetton wallet 地址变化，必须干净重部署，不能 resume。**
 
 ## 10. 主网前阻塞项（从测试网升级必须处理）
 

@@ -9,7 +9,7 @@
 
 | 语言 | 定位 | 优点 | 风险 | 结论 |
 | --- | --- | --- | --- | --- |
-| **Tolk** | TON 官方推荐的新一代合约语言（FunC 的继任者） | 语法更接近现代语言、官方文档与 Acton 工具链主推、静态检查强 | 生态样例比 FunC 少、部分审计方经验较浅 | ✅ 自研合约（RoundController + TeamVault）首选 |
+| **Tolk** | TON 官方推荐的新一代合约语言（FunC 的继任者） | 语法更接近现代语言、官方文档与 Acton 工具链主推、静态检查强 | 生态样例比 FunC 少、部分审计方经验较浅 | ✅ 自研合约（RoundController + TeamVault + OracleAdapter）首选 |
 | **FunC** | 老牌合约语言，TON 官方参考合约（Jetton 等）都是 FunC | 参考实现可直接复用、审计经验最多 | 语法晦涩、易出错 | ✅ 官方复用合约保持 FunC 原样，不改写 |
 | **Tact** | 高层合约语言（TS 风格） | 开发快、可读性好 | 编译器生成代码面更大、审计需看生成代码 | ⚠️ 备选，不推荐用于资金核心逻辑 |
 
@@ -35,9 +35,9 @@
 | 成功按质押比例认领 / claimAll | 无 | ⚠️ 自研 | 没有官方成熟合约（RoundController，≤10 轮有界） |
 | 失败三笔销毁（奖励 + 团队 + 本金） | 无 | ⚠️ 自研 | 没有官方成熟合约（RoundController 主导） |
 | 团队额度托管 / 按轮释放销毁 | 无 | ⚠️ 自研 | 没有官方成熟合约（**TeamVault**） |
-| 预言机签名验证（可选） | 无统一标准 | ⚠️ 可选自研 | 二期 OracleAdapter，本期不部署 |
+| 预言机签名验证 | 无统一标准 | ⚠️ 自研 | **OracleAdapter 已实现并冻结（v8.6）** |
 
-**结论：需要自研的合约数量 = 2（RoundController + TeamVault）；可选 = 1（OracleAdapter，二期）。** 官方复用收敛为 Jetton Master / Wallet 一类。
+**结论（V8.6）**：需要自研/复刻的合约数量 = **5**：RoundController、TeamVault、**OracleAdapter**、JettonMaster、JettonWallet（后两者为 Tolk 复刻 TEP-74/89）；官方原样复用 = **0**。
 
 ---
 
@@ -53,10 +53,10 @@
 | 4 | **TeamVault** | 自研（Tolk） | 1 | 托管 12 亿 Jetton Wallet（owner = TeamVault）；只接受 RC 指令，按轮释放/销毁 1.2 亿，幂等互斥；预计 150~250 行 |
 | 5 | Multisig v2 | 官方有，**不采用** | **0** | 项目不设多签（V4/V5） |
 | 6 | Lockup / Vesting | 官方有，**不采用** | **0** | 团队改为 TeamVault 轮次释放/销毁（V5） |
-| 7 | OracleAdapter（可选） | 自研（Tolk，第二阶段） | 0（二期 1） | 签名验证；本期手动模式不部署 |
+| 7 | **OracleAdapter** | 自研（Tolk，v8.6 已实现） | **1** | 3/5 多源验签；向 RC 转发 OpenRound/CloseStaking/SubmitCandle；防重放（C-2/C-3 已修） |
 
-**部署实例数（V5）**：1（Jetton Master）+ 约 13（Jetton Wallet）+ 1（RoundController）+ 1（TeamVault）≈ **16 个**（再加每个用户 1 个 Jetton Wallet）。
-**自研合约 = 2 个（RoundController + TeamVault）**，可选 1 个（OracleAdapter，二期）。
+**部署实例数（V8.6）**：1（Jetton Master）+ 约 13（Jetton Wallet）+ 1（RoundController）+ 1（TeamVault）+ **1（OracleAdapter）≈ 17 个**（再加每个用户 1 个 Jetton Wallet）。
+**自研/复刻合约 = 5 个**：RoundController + TeamVault + OracleAdapter + JettonMaster + JettonWallet。
 
 ### 2.2 测试网方案（V5）
 
@@ -71,7 +71,7 @@
 | 领取 | 用户 | claimAll（可跨轮累积，≤10 轮，合并一笔，用户付 gas） |
 | 开下一轮 | RoundController | 上一轮终态后**立即**开启（间隔 0） |
 
-- 测试网阶段自研合约数 = **2（RoundController + TeamVault）**；不再使用多签。
+- 测试网阶段自研/复刻合约数 = **5（RC + TV + OracleAdapter + Jetton Master/Wallet）**；不再使用多签。
 - **启动前置（用户明确）**：等所有文档与细节敲定、参数签字（含 **D-26 目标价语义决策**）后再启动测试网，见 docs/10 §7。
 
 ---
@@ -125,8 +125,8 @@
 | 必审 | TeamVault（自研） | 12 亿托管、只认 RC 指令、释放/销毁互斥幂等 |
 | 必审 | **JettonMaster + JettonWallet（V7 起为 Tolk 复刻，不再是免审复用）** | mint-once 与 admin 置空原子性、burn_notification 扣 supply、forward_payload 透传、canonical wallet 校验、错误码 |
 | 必审 | 复用合约的集成方式 | Jetton 转账/销毁、owner 权限、payload 解析 |
-| 可选 | OracleAdapter（未来） | 签名验证 |
-| 预算 | **$15k~40k**（自研面 4 个合约：RC + TV + Jetton Master + Wallet） | 3 周~5 周 |
+| 必审 | **OracleAdapter（v8.6 已实现）** | 首根 K 线（index 0）、index 越界、转发失败回滚、签名与防重放（C-2/C-3） |
+| 预算 | **$18k~45k**（自研/复刻面 5 个合约：RC + TV + OracleAdapter + Jetton Master + Wallet） | 3 周~5 周 |
 | 交付 | 审计报告 + 修复复审 + 代码哈希 | 与部署版本一致 |
 
 > 注意：审计覆盖代码逻辑，**不覆盖单密钥托管、个人热钱包与地址不公开的运营风险**；该风险已由 V4/V5 接受，缓解见 docs/10 §9。
@@ -137,7 +137,7 @@
 
 1. **W1**：~~锁定 Jetton 官方 commit + 审计报告核对~~ → **V7 已改为 Tolk 复刻**，W1 改为「核对 Tolk 版 Jetton 与 TEP-74 参考实现的语义一致性 + 纳入审计范围」；确认「不部署多签/锁仓」的最终参数。
 2. **W2**：文档定稿 + 参数签字（含 **D-26 目标价语义**、D-25 已定的 pull claim）；Jetton 部署脚本与收款钱包地址登记（不公开）。
-3. **W3~W4**：RoundController + TeamVault（Tolk）实现 + 测试（本地 sandbox）。
+3. **W3~W4**：RoundController + TeamVault + **OracleAdapter**（Tolk）实现 + 测试（本地 sandbox）。
 4. **W5**：Testnet 启动（前置：文档定稿 + 参数签字 + D-26 已定）→ 全流程演练（报名→观察→结算→TeamVault 释放/三笔销毁→claimAll→开下一轮），覆盖无人质押与 0 人通过分支。
 5. **W6**：审计 → 修复 → 主网排期。
 

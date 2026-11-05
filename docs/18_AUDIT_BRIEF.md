@@ -1,6 +1,6 @@
 # 18 — 外部审计包（Audit Brief）
 
-**版本**：V8.1 · 2026-11-05（代码已冻结）
+**版本**：V8.6 · 2026-11-06（合约冻结；tag `v8.6-audit-fixed` @ `c24809a`）
 **状态**：代码冻结后提交审计
 **适用对象**：第三方安全审计机构 / 外部审计模型
 **仓库**：BAM（A9 Protocol）
@@ -11,20 +11,23 @@
 
 A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时内价格至少翻倍；赢了拿本轮 7 亿 A9 奖励，输了本金 100% 销毁。** 共 10 轮。
 
-本次审计对象是**自研的 4 个 Tolk 合约**（Jetton 也是我们复刻，非官方复用）。
+本次审计对象是**自研的 5 个 Tolk 合约**：RoundController、TeamVault、OracleAdapter、JettonMaster、JettonWallet（Jetton 为 Tolk 复刻，非官方原样复用）。
 
 ---
 
 ## 1. 审计范围
 
-| 合约 | 源码 | 行数 | 职责 | 部署实例 |
+| 合约 | 源码 | 行数（v8.1 记录） | 职责 | 部署实例 |
 | --- | --- | --- | --- | --- |
 | **RoundController** | `contracts/contracts/RoundController.tolk` | 1,744 | 轮次状态机、质押托管、K 线计数、结算（三笔销毁）、奖励三态、邀请权重、线性解锁、技术终止 | 1 |
 | **TeamVault** | `contracts/contracts/TeamVault.tolk` | 211 | 团队 12 亿托管，只接受 RC 指令，按轮释放/销毁，幂等互斥 | 1 |
+| **OracleAdapter** | `contracts/contracts/OracleAdapter.tolk` | — | 3/5 多源验签；向 RC 转发 OpenRound/CloseStaking/SubmitCandle；防重放 | 1 |
 | **JettonMaster** | `contracts/contracts/jetton/JettonMaster.tolk` | 245 | TEP-74 主合约，mint-once 后 admin 置空 | 1 |
 | **JettonWallet** | `contracts/contracts/jetton/JettonWallet.tolk` | 179 | TEP-74 钱包，transfer/burn/internal_transfer | ~13 + 每用户 1 |
 
 **共享代码**：`contracts/contracts/types.tolk`（数据结构）、`constants.tolk`（opcode/错误码）、`jetton.tolk`（TEP-74 报文构造）。
+
+> 行数为 v8.1 记录；v8.2~v8.6 修复后行数以源码为准（C-1~C-4 与 OracleAdapter 修复）。
 
 **不在范围**：worker（Cloudflare Worker）、web（React 前端）、ops（运维脚本）——另行审计。
 
@@ -35,12 +38,12 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 | 文件 | 用途 |
 | --- | --- |
 | `docs/17_REWARD_V2.md` | V8 奖励机制完整规格（权重公式、三态状态机、storage、opcode、测试清单） |
-| `docs/00_DECISIONS_V2.md` | 全部已确认决策（D-01~D-34），判断「是不是 bug」的基准 |
+| `docs/00_DECISIONS_V2.md` | 全部已确认决策（D-01~D-35），判断「是不是 bug」的基准 |
 | `docs/16_REWARD_EXAMPLES.md` | 奖励分配与收益示例 |
 | `contracts/README.md` | ABI 表、storage 布局、错误码、gas 实测、**§9 已知问题与修复记录** |
 | `contracts/deploy/abi/*.json` | 机器可读 ABI |
 | `contracts/deploy/params.testnet.json` | 部署参数（P0、2×、24/16、12h+36h+24h、限额、技术终止） |
-| `contracts/tests/*.test.tolk` | 114 个测试（9 个文件） |
+| `contracts/tests/*.test.tolk` | **154 个测试（15 个文件）**（v8.6 冻结基线） |
 
 ---
 
@@ -91,6 +94,8 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 
 ### 已知且**已接受**的风险（不属于「发现」，但仍可报告）
 
+> v8.6 新修复的 C-1~C-4 见 **§14**；§4 表格中的 P0-1~P0-3 为 v8.1 首轮修复，勿重复报告。
+
 | 风险 | 决策 | 说明 |
 | --- | --- | --- |
 | 单密钥 admin、无多签 | D-23 / D-21 已接受 | 管理员为 RC 单密钥 owner；营销/流动性/团队为个人热钱包，地址不公开 |
@@ -109,7 +114,7 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 cd contracts
 acton build --clear-cache    # 期望 0 error
 acton check                  # 期望 0 warning
-acton test                   # 期望 132 passed
+acton test                   # 期望 154 passed / 15 files
 acton script scripts/deploy-emulation.tolk   # 期望 OK
 ```
 
@@ -143,14 +148,27 @@ acton script scripts/deploy-emulation.tolk   # 期望 OK
 
 ## 8. 冻结版本基线（审计必须基于此）
 
-| 合约 | 行数 | Code hash |
-| --- | --- | --- |
-| RoundController | 1,924 | 0x7120E5FE1966B9C8B3DFF092D45441B6F896EF5041D36416BC5CD5B4C6893ED1 |
-| TeamVault | 336 | 0x14BA576796DF2489A17E00F5CC4FDFE1FD9DB11A3F692DB0F4A0CB5FA8F4EA41 |
-| JettonMaster | 245 | 0xDB3C43B4F1AF474416C2A27502479230B8A316A7A57F7D018452B12B25EB778B |
-| JettonWallet | 179 | 0x5840B389222182AA1D2C0C1CB2A275DB03C90D4197D5F15540EB128E615DA4CF |
+**tag**：`v8.6-audit-fixed`　**commit**：`c24809a`（HEAD）\
+**验证基线**：`acton build --clear-cache` OK / `acton check` **0 error 0 warning** / `acton test` **154 passed / 15 files** / `acton script scripts/deploy-emulation.tolk` OK（全新空链一键完整部署）。
 
-验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **132 passed** / `acton script scripts/deploy-emulation.tolk` OK。
+| 合约 | Code hash（v8.6 冻结） |
+| --- | --- |
+| RoundController | 0xC5AD291469C3BEADBDC26A6F1733004D433F12B15B025D88B983DF098BA11500 |
+| TeamVault | 0xCF3E6C7C9DC045F392F35E79E20AA6EDAAF9064D538CA4E78B6D1FE1443158B4 |
+| OracleAdapter | 0x539F3597357943584A596DA2B40F901B4984D8C8307E63CE81A67F131EAB8CBA |
+| JettonMaster | 0x876F21A1A516FB0449A1D0AF5DBECEB8639373F947949C5AE8E1E9DBB769D64F |
+| JettonWallet | 0x394E4E8D40B5D3D97D12AA950B99EA9A53387DDAC331BAAAC8923F0E6E6849A4 |
+
+> **hash 变更说明**：`c38b05a` 将 C-2 断言的错误码从共享的 `CandleIndexOutOfRange` 改为 Adapter 自己的 `BadCandleOrder`，**OracleAdapter 的 code hash 因此变化**；上一版发给审计方的 OracleAdapter hash 作废，以本表为准。
+
+**历史基线（v8.1，superseded，仅作对照）**：
+
+| 合约 | Code hash |
+| --- | --- |
+| RoundController | 0x7120E5FE1966B9C8B3DFF092D45441B6F896EF5041D36416BC5CD5B4C6893ED1 |
+| TeamVault | 0x14BA576796DF2489A17E00F5CC4FDFE1FD9DB11A3F692DB0F4A0CB5FA8F4EA41 |
+| JettonMaster | 0xDB3C43B4F1AF474416C2A27502479230B8A316A7A57F7D018452B12B25EB778B |
+| JettonWallet | 0x5840B389222182AA1D2C0C1CB2A275DB03C90D4197D5F15540EB128E615DA4CF |
 
 若审计方的 hash 与上表不一致，说明代码已被改动，请先与项目方确认版本。
 
@@ -243,4 +261,52 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 | getter 缺失 | `SetJettonWalletCode` / `SetTeamWalletJettonWallet` 只写了 storage，没有只读接口 → verify_deployment 无法确认链上配置 | 新增 `get_jetton_wallet_code_hash(): uint256`（RC）与 `get_team_wallet_jetton_wallet(): address`（TV），**纯只读、零业务逻辑改动** |
 | stepwise 部署 | `admin_op.tolk` 没有两个 wiring op → 65 stepwise 广播会 unknown op | 不补 admin_op；测试网固定走「整体 deploy-emulation（内置 wiring）→ 65 --query-only → 70 --mark-bound-only」，stepwise 在 ops 层 BLOCKED |
 
-测试：132 passed / 13 文件（含 3 条真 Jetton 合约集成测试）。
+测试：132 passed / 13 文件（含 3 条真 Jetton 合约集成测试）。**注**：v8.6 后为 154 passed / 15 文件，见 §14。
+
+
+---
+
+## 14. v8.6：审计修复批（C-1~C-4，合约冻结）
+
+**背景**：v8.5 外部 delta 复审 + Lead 独立复核提出 4 个缺陷（C-1~C-4），全部修复后打 tag `v8.6-audit-fixed`（commit `c24809a`）。验证：`acton check` 0 error 0 warning，`acton test` **154 passed / 15 files**。
+
+### C-1 滚存必须在合约内校验报名截止时间（原审查：同事审查报告第 1 项）
+
+- **缺陷**：`RollReward` 只校验下一轮状态为 PREVIEW / STAKING_OPEN，**未校验 STAKING_OPEN 轮的 `stakeCloseAt`**。若 keeper 未及时 `CloseStaking`，过期轮仍会接受奖励滚存。
+- **影响**：奖励被滚进一个已过期、不再接受质押的轮次，状态与资金归属错误；仅靠 keeper 及时关窗不可靠。
+- **修复**：进入 `STAKING_OPEN` 分支时增加合约内断言 `now < nextRd.stakeCloseAt`，否则抛 `RollNotAvailable`。
+- **测试**：`C-1 roll into an expired open round is rejected`（`contracts/tests/rewards-v8.test.tolk`）。
+- **链上实测证据**：旧合约 **v8.5** 在 testnet-ops 实测「关窗后发 RollReward」返回 `accepted:true`，记录于 `ops/records/fasttest-runner-2026-11-05T16-17-19-990Z.jsonl` 的 `defect-roll-after-close` 事件（roundId=2）；**新实例上同一测试必须 `accepted:false`**。C-1 不是代码推断，**已在链上复现**。
+
+### C-2 OracleAdapter 首根 K 线（index 0）与 index 越界（原审查：同事审查报告第 2 项）
+
+- **缺陷**：Adapter 用「上一根 index + 1」做单调校验、以 0 表示未记录 → **index 0 被误判为重复/未开始**，首根 K 线无法转发；同时 `candleIndex+1` 在 uint8 上对 255 回绕为 0。
+- **影响**：轮次永远无法记录第一根 K 线 → 观察期卡死；越界 index 可绕过去重。
+- **修复**：改为存 `index+1`（0 = 无记录），index 0 合法；转发前拒绝 `index >= 32`（在 uint8 自增前），错误码使用 Adapter 自己的 `BadCandleOrder`（`c38b05a`）。
+- **测试**：`C-2 candle index 0 is accepted then monotonic`、`C-2 real RC accepts adapter candle sequence from index 0`、`C-2 candle index 255 is rejected before uint8 wrap`（`contracts/tests/oracle-adapter.test.tolk`）。
+
+### C-3 转发失败时的重放标记回滚（原审查：同事审查报告第 3 项）
+
+- **缺陷**：Adapter 在向 RC 转发动作**之前**写入 replay 标记；若 RC 拒绝（bounce/错误），标记未回滚 → 合法重试被当成重放拒绝，动作永久卡住。
+- **影响**：OpenRound / CloseStaking / SubmitCandle 一旦被 RC 拒绝一次，就再也无法重试（可用性/轮次推进受阻）。
+- **修复**：按 `forwardedQueryId = roundId<<16 | action<<8 | candleIndex` 记录；收到转发动作的 bounce 时**精确回滚对应标记**，允许重试。
+- **测试**：`C-3 rejected CloseStaking rolls back and resubmits successfully`、`C-3 rejected candle rolls back lastCandle and resubmits`（`contracts/tests/oracle-adapter.test.tolk`）。
+
+### C-4 两跳 bounce 通知 + IGNORE_ERRORS 兜底（原审查：Lead 独立确认第 11 项）
+
+- **缺陷**：真实 TEP-74 下，转账第二跳（收款方钱包）bounce 只回到**发起方钱包**，不会通知原始 owner；RC/TV 的 pending 领取/释放确认因此永不回滚，资金状态悬挂。
+- **影响**：领取/团队释放失败后 pending 不清，用户资产与服务状态卡死（与 P0-3 同类的真实两跳缺口）。
+- **修复**：JettonWallet 检测到第二跳 bounce 后，向 owner 发送 `TransferBounced` 通知（新增 opcode）；RC/TV 收到后回滚 pending 状态（claim/release）；若 owner 通知本身因 TON 不足发不出，**钱包侧仍必须完成 Jetton 余额回滚**（`d90c57f` 的兜底），不能因通知失败丢钱。
+- **测试**：`C-4 RC accepts wallet TransferBounced and rolls back the pending claim`、`C-4 TV accepts wallet TransferBounced and clears the pending release`、`C-4 real JettonWallet notifies owner after a second-hop bounce`、`C-4 low-TON wallet keeps jetton rollback when owner notice fails`（`contracts/tests/c4.test.tolk`）。
+
+### 修复批结论
+
+| 编号 | 严重度 | 修复 | 测试 | 原审查出处 |
+| --- | --- | --- | --- | --- |
+| C-1 | P1（链上已复现） | 滚存校验 `now < stakeCloseAt` | 1 条 | 同事审查报告第 1 项 |
+| C-2 | P1 | index 0 合法 + `index>=32` 拒绝 + `BadCandleOrder` | 3 条 | 同事审查报告第 2 项 |
+| C-3 | P1 | 转发 bounce 回滚 replay 标记 | 2 条 | 同事审查报告第 3 项 |
+| C-4 | P1 | 两跳 bounce 通知 owner + 余额回滚兜底 | 4 条 | Lead 独立确认第 11 项 |
+
+> **运维要点（部署）**：`deploy-emulation.tolk` 现支持**全新空链一条命令完整部署**（JettonMaster → mint 100 亿并永久关闭 → OracleAdapter / TeamVault / RoundController → 全套 wiring → RC 7e18 / TV 1.2e18 raw A9 注入 + 回读校验）。
+> **JettonWallet 代码变更会导致所有 jetton wallet 地址变化，必须干净重部署，不能 resume。**

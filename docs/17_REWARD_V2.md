@@ -1,7 +1,7 @@
 # 17 — 奖励机制 V2（权重制）与合约改动规格
 
-**版本**：V8.0 · 2026-11-05
-**状态**：待实现（合约 V8）
+**版本**：V8.6 · 2026-11-06
+**状态**：**已实现并冻结**（tag `v8.6-audit-fixed` @ `c24809a`；154 tests / 15 files）
 **上游**：[docs/00](00_DECISIONS_V2.md)（V7 一句话机制）、[docs/01](01_TOKENOMICS.md)（分配）、[docs/16](16_REWARD_EXAMPLES.md)（收益示例）
 **目标**：在不增发、不增加新合约的前提下，把「7 亿怎么分」从「纯按金额」升级为「按贡献权重」，并解决奖励抛压自毁问题。
 
@@ -298,3 +298,30 @@ reward(u, round) = 700M × (stake[u].weight + round.bonus[u]) / round.totalWeigh
 1. 连续档位 **10%/轮封顶 10 轮（+100%）** 是否最终确认？（稀释代价见 §2.3）
 2. 早领罚没的 50% 进入「R10 后解锁池」而不是销毁 —— 确认？
 3. ~~流动性~~ **已确认**：2 亿 A9 + $232,000 USDT（§3.3）；解锁期 **12 个月线性不变**。
+
+
+---
+
+## 9. 实施与冻结状态
+
+- 本规格（V8 权重制 + 奖励三态）**已实现并冻结**：tag `v8.6-audit-fixed` @ `c24809a`（HEAD）。
+- 自研合约：RoundController、TeamVault、OracleAdapter；Jetton Master/Wallet 为 Tolk 复刻。
+- 冻结基线与 5 个 code hash 见 **docs/18 §8**（以该表为准；OracleAdapter hash 以 c24809a 版本为准）。
+- 验证：`acton check` 0 error 0 warning；`acton test` **154 passed / 15 files**；`acton build --clear-cache` OK。
+
+## 10. 测试与部署基线
+
+- 测试：154 passed / 15 files（含 C-1~C-4 新增用例与真 Jetton 两跳集成测试）。
+- 部署：`deploy-emulation.tolk` 支持**全新空链一条命令完整部署**（JettonMaster → mint 100 亿并永久关闭 → OracleAdapter/TeamVault/RoundController → 全套 wiring → RC 7e18 / TV 1.2e18 raw A9 注入 + 回读校验）。
+- **运维要点：JettonWallet 代码变更会导致所有 jetton wallet 地址变化，必须干净重部署，不能 resume。**
+
+## 11. Arch-fix log（合约冻结后补丁）
+
+### C-1 滚存必须在合约内校验报名截止时间（P1）
+
+- **缺陷**：`RollReward` 仅校验下一轮为 PREVIEW / STAKING_OPEN，**未校验 STAKING_OPEN 轮的 `stakeCloseAt`**；keeper 未及时关窗时，过期轮仍接受奖励滚存。
+- **影响**：奖励进入已过期轮次，状态/资金归属错误；不能只依赖 keeper 及时关窗。
+- **修复**：`STAKING_OPEN` 分支增加 `assert(now < nextRd.stakeCloseAt) throw RollNotAvailable`。
+- **测试**：`C-1 roll into an expired open round is rejected`（`contracts/tests/rewards-v8.test.tolk`）。
+- **链上证据**：旧 v8.5 在 testnet-ops 实测关窗后 RollReward 返回 `accepted:true`（`ops/records/fasttest-runner-2026-11-05T16-17-19-990Z.jsonl` 的 `defect-roll-after-close`），新实例必须 `accepted:false`。
+- **完整修复批 C-1~C-4**（含 C-2 OracleAdapter 首根 K 线 / C-3 转发失败回滚 / C-4 两跳 bounce）见 **docs/18 §14**。
