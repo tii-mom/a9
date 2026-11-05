@@ -28,6 +28,7 @@ type TeamVaultAllowedMessage =
     | InitController
     | ReleaseTeamQuota
     | BurnTeamQuota
+    | TransferBounced
     | ReturnExcessesBack
     | TopUpTons
 
@@ -214,6 +215,28 @@ fun onInternalMessage(in: InMessage) {
                 amountRaw: state.amountRaw,
                 burnId,
             });
+        }
+        TransferBounced => {
+            var st = lazy TeamVaultStorage.load();
+            val params = st.params.load();
+            if (in.senderAddress != params.jettonWallet) {
+                throw Errors.NotJettonWallet;
+            }
+            val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
+            val kind: uint8 = ((msg.queryId >> 8) & 0xff) as uint8;
+            if (kind != RELEASE_QUERY_TEAM) {
+                return;
+            }
+            val prev = st.rounds.get(roundId);
+            if (!prev.isFound) {
+                return;
+            }
+            val state = prev.loadValue();
+            if (state.released || state.burned || state.queryId != msg.queryId) {
+                return;
+            }
+            st.rounds.delete(roundId);
+            st.save();
         }
         TopUpTons => {
             // accept TON top-ups for gas

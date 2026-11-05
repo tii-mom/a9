@@ -29,6 +29,9 @@ const OP_SET_REFERRER: uint32 = 0x52540019;
 const OP_CLAIM_UNLOCKED: uint32 = 0x5254001A;
 // TEP-74 wallet -> owner excess return, also used as burn/claim completion signal
 const OP_RETURN_EXCESSES: uint32 = 0xd53276db;
+// C-4: Jetton Wallet -> owner notification after a two-hop transfer bounce.
+const OP_TRANSFER_BOUNCED: uint32 = 0x52540027;
+const OP_JETTON_INTERNAL_TRANSFER: uint32 = 0x178d4519;
 
 // OracleAdapter (mainnet M-2): 3/5 ed25519 signed submissions.
 const OP_SET_SIGNER_SET: uint32 = 0x52540021;

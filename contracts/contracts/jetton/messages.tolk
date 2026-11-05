@@ -54,6 +54,13 @@ struct (0xd53276db) ReturnExcessesBack {
     queryId: uint64
 }
 
+const OP_JETTON_INTERNAL_TRANSFER: uint32 = 0x178d4519;
+
+// C-4: owner notification after a second-hop transfer bounce.
+struct (0x52540027) TransferBounced {
+    queryId: uint64
+}
+
 struct (0x595f07bc) AskToBurn {
     queryId: uint64
     jettonAmount: coins

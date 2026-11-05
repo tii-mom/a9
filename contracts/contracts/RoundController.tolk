@@ -44,6 +44,7 @@ type RoundControllerAllowedMessage =
     | RetryPendingActions
     | SetJettonWallet
     | SetJettonWalletCode
+    | TransferBounced
     | BurnAck
     | TeamReleasedAck
     | TeamBurnedAck
@@ -86,6 +87,7 @@ fun onInternalMessage(in: InMessage) {
         SetReferrer => { handleSetReferrer(in.senderAddress, msg); }
         ClaimUnlocked => { handleClaimUnlocked(in.senderAddress, msg); }
         ReturnExcessesBack => { handleReturnExcesses(in.senderAddress, msg); }
+        TransferBounced => { handleTransferBounced(in.senderAddress, msg); }
         TopUpTons => {}
         else => throw Errors.UnknownMessage,
     }
@@ -922,6 +924,13 @@ fun refundStake(s: Storage, owner: address, amount: coins, queryId: uint64) {
 // ===========================================================================
 // Claims
 // ===========================================================================
+
+// C-4: Jetton Wallet detected a second-hop bounce and notifies its owner.
+fun handleTransferBounced(sender: address, msg: TransferBounced) {
+    val s = lazy Storage.load();
+    assert (sender == vaults(s).stakingJettonWallet) throw Errors.NotJettonWallet;
+    rollbackPendingClaim(msg.queryId);
+}
 
 fun handleSetJettonWalletCode(sender: address, msg: SetJettonWalletCode) {
     var s = lazy Storage.load();

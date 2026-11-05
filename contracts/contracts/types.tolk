@@ -486,6 +486,10 @@ struct (0xd53276db) ReturnExcessesBack {
     queryId: uint64
 }
 
+struct (0x52540027) TransferBounced {
+    queryId: uint64
+}
+
 // StakePayload carried inside transfer_notification.forward_payload.
 // op(32)+version(8)+roundId(8)+depositNonce(64)+riskVersion(16)+acceptBurn(8) = 136 bit.
 struct (0x5254000F) StakeDeposit {

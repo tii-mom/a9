@@ -24,6 +24,15 @@ type BounceOpToHandle = InternalTransferStep | BurnNotificationForMinter
 
 fun onBouncedMessage(in: InMessageBounced) {
     in.bouncedBody.skipBouncedPrefix();
+    val op = in.bouncedBody.preloadUint(32);
+
+    // C-4: parse the queryId from a copy before lazy field access consumes the body.
+    var querySlice = in.bouncedBody;
+    var bouncedQueryId: uint64 = 0;
+    if (op == OP_JETTON_INTERNAL_TRANSFER) {
+        querySlice.loadUint(32);
+        bouncedQueryId = querySlice.loadUint(64) as uint64;
+    }
 
     val msg = lazy BounceOpToHandle.fromSlice(in.bouncedBody);
     val restoreAmount = match (msg) {
@@ -34,6 +43,19 @@ fun onBouncedMessage(in: InMessageBounced) {
     var storage = lazy WalletStorage.load();
     storage.jettonBalance += restoreAmount;
     storage.save();
+
+    // C-4: the second hop (recipient wallet) bounced; the sender wallet only sees
+    // the bounce. Notify the owner so RC/TeamVault can roll back their pending
+    // claim/release instead of being stuck on ClaimPending forever.
+    if (op == OP_JETTON_INTERNAL_TRANSFER) {
+        val notice = createMessage({
+            bounce: BounceMode.NoBounce,
+            value: ton("0.02"),
+            dest: storage.ownerAddress,
+            body: TransferBounced { queryId: bouncedQueryId },
+        });
+        notice.send(SEND_MODE_PAY_FEES_SEPARATELY);
+    }
 }
 
 fun onInternalMessage(in: InMessage) {

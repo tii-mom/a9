@@ -32,6 +32,11 @@ display-name = "OracleAdapter"
 src = "contracts/OracleAdapter.tolk"
 depends = []
 
+[contracts.MockBounceOwner]
+display-name = "MockBounceOwner"
+src = "contracts/mocks/MockBounceOwner.tolk"
+depends = []
+
 [contracts.MockOracleReceiver]
 display-name = "MockOracleReceiver"
 src = "contracts/mocks/MockOracleReceiver.tolk"
