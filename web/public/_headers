@@ -1,0 +1,21 @@
+# Cloudflare Workers 静态资源头（构建时随 public/ 复制到 dist/）
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/fuse-icon-192.png
+  Cache-Control: public, max-age=604800
+
+/fuse-icon-512.png
+  Cache-Control: public, max-age=604800
+
+/apple-touch-icon.png
+  Cache-Control: public, max-age=604800
+
+/og-cover.png
+  Cache-Control: public, max-age=3600
+
+/tonconnect-manifest.json
+  Cache-Control: public, max-age=300
+
+/*
+  Cache-Control: public, max-age=0, must-revalidate

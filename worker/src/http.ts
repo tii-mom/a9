@@ -88,8 +88,13 @@ export function finalizeResponse(res: Response, env: Env, request: Request): Res
     headers.set('Access-Control-Max-Age', '86400');
   }
 
-  if (isApiPath(request) && !headers.has('Cache-Control')) {
-    headers.set('Cache-Control', 'no-store');
+  if (isApiPath(request)) {
+    if (!headers.has('Cache-Control')) headers.set('Cache-Control', 'no-store');
+  } else {
+    // 静态资源：带 hash 的构建产物长缓存；_headers 规则与运行时默认值会重复，这里统一覆盖为单值。
+    const path = new URL(request.url).pathname;
+    if (path.startsWith('/assets/')) headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    else if (path === '/' || path.endsWith('.html')) headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
   }
   // body 未改动，但长度/编码交给运行时重算，避免透传不一致。
   headers.delete('Content-Length');

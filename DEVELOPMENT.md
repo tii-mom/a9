@@ -60,3 +60,49 @@ cd worker && ./node_modules/.bin/wrangler domains add fuse.<your-domain>
 - 运维后台：`/admin`（Bearer token）
 - D1 备份：`./node_modules/.bin/wrangler d1 export fuse-protocol --remote --output=backup.sql`
 - 回滚：`./node_modules/.bin/wrangler rollback`
+## 线上环境（演示数据模式）
+
+| 项 | 值 |
+| --- | --- |
+| 站点 | https://fuse-protocol.348421501.workers.dev |
+| Worker | fuse-protocol（Cloudflare Workers，含静态资源） |
+| D1 | fuse-protocol / b5945609-374e-4eaa-add2-80460ebcb680（APAC） |
+| 定时任务 | `* * * * *`（推进演示轮次 / DEMO_AUTOPLAY 自动开轮） |
+| 运维后台 | `/admin`（Bearer token，见 worker secret `ADMIN_TOKEN`） |
+| 健康检查 | `/api/health`、`/api/version` |
+
+### 重新灌演示数据（部署前必做，让 R3 锚定部署时刻）
+
+```bash
+cd worker
+node scripts/generate-seed.mjs                                  # 重新生成 migrations/seed.sql
+./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql
+cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
+```
+
+### 绑定自定义域名
+
+```bash
+cd worker && ./node_modules/.bin/wrangler domains add fuse.example.com
+```
+绑定后把 `web/public/tonconnect-manifest.json` 里的 url / iconUrl 与新域名同步，并同步 `sitemap.xml`。
+
+### 密钥
+
+- `ADMIN_TOKEN`：`wrangler secret put ADMIN_TOKEN`（本地开发放 `worker/.dev.vars`，已 gitignore）。
+- 轮换：重新 `secret put` 后旧 token 立即失效；轮换后需在 `/admin` 重新登录。
+
+### 缓存与安全头
+
+- `/assets/*`：`public, max-age=31536000, immutable`（构建产物带 hash）。
+- HTML：`public, max-age=0, must-revalidate`。
+- `/api/*`：`no-store`（内部 1s 微缓存）。
+- 全局：nosniff / X-Frame-Options: DENY / Referrer-Policy / Permissions-Policy / COOP；严格 CSP 待 TON Connect 桥域名冻结后补（见 docs/10 §12）。
+
+### 验收脚本
+
+```bash
+cd qa
+node shots.mjs https://fuse-protocol.348421501.workers.dev final   # 三端全站截图 + 溢出/console 检查
+ADMIN_TOKEN=xxx node e2e.mjs https://fuse-protocol.348421501.workers.dev   # 13 项交互验收
+```
