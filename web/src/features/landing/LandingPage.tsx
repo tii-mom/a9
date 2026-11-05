@@ -19,7 +19,7 @@ import { RiskDisclosure } from './RiskDisclosure';
 export default function LandingPage() {
   const copy = useCopy();
   const data = useLandingData();
-  const { board, cfg, stats, trades, book, me, wallet, rounds, secondsRemaining, candleMs, refreshAll } = data;
+  const { board, cfg, stats, trades, book, me, wallet, rounds, secondsRemaining, nextStakeSeconds, candleMs, refreshAll } = data;
 
   const [tab, setTab] = useState<'buy' | 'stake'>('buy');
   const [claiming, setClaiming] = useState(false);
@@ -95,6 +95,7 @@ export default function LandingPage() {
             stats={stats}
             board={board}
             secondsRemaining={secondsRemaining}
+            nextStakeSeconds={nextStakeSeconds}
             me={me}
             connected={wallet.connected}
             copy={copy}

@@ -172,6 +172,16 @@ export async function buildStats(env: Env, state: ReconcileResult): Promise<Prot
     }
   }
 
+  // 下一轮质押开启倒计时：无活跃轮次时 = 最后结算时间 + 预告期
+  const activeRound = rounds.find((row) => isActive(row.state));
+  let nextStakeOpenAt: number | null = null;
+  if (!activeRound) {
+    const lastSettledAt = rounds
+      .filter((row) => isTerminal(row.state))
+      .reduce((max, row) => Math.max(max, row.updated_at), 0);
+    if (lastSettledAt > 0) nextStakeOpenAt = lastSettledAt + params.previewSeconds * 1000;
+  }
+
   const focus = focusRound(state);
   const price = focus ? priceFor(state, focus) : 0n;
   const supply = params.totalSupplyRaw > burned ? params.totalSupplyRaw - burned : 0n;
@@ -187,6 +197,7 @@ export async function buildStats(env: Env, state: ReconcileResult): Promise<Prot
     priceUsdE8: price.toString(),
     price24hAgoUsdE8: ((price * 962n) / 1000n).toString(),
     oracle: buildOracleStatus(state),
+    nextStakeOpenAt,
   };
 }
 

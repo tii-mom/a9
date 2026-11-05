@@ -67,6 +67,10 @@ export interface BoardView {
   state: RoundState | null;
   roundId: number | null;
   cfgRoundCount: number;
+  candleCount: number;
+  need: number;
+  missAllowance: number;
+  failAt: number;
   targetUsdE8: string | null;
   priceUsdE8: string | null;
   candles: Candle[];
@@ -82,6 +86,7 @@ export interface BoardView {
   secondsRemaining: number | null;
   stakeCloseAt: number | null;
   observationStart: number | null;
+  observationEnd: number | null;
   totalStakeRaw: string;
   stakerCount: number;
   rewardBudgetRaw: string;
@@ -97,7 +102,10 @@ export function deriveBoard(
   const state = detail?.state ?? focus?.state ?? null;
   const phase = phaseOf(state);
   const roundId = detail?.roundId ?? focus?.roundId ?? null;
-  const candleCount = cfg?.candleCount ?? 12;
+  const candleCount = cfg?.candleCount ?? 18;
+  const need = cfg?.minQualifiedCandles ?? 12;
+  const missAllowance = Math.max(0, candleCount - need);
+  const failAt = missAllowance + 1;
   const candles = detail?.candles ?? [];
   const hits = candles.filter((c) => c.qualified).length;
   const done = candles.length;
@@ -121,6 +129,10 @@ export function deriveBoard(
     state,
     roundId,
     cfgRoundCount: cfg?.roundCount ?? 10,
+    candleCount,
+    need,
+    missAllowance,
+    failAt,
     targetUsdE8,
     priceUsdE8,
     candles,
@@ -136,6 +148,7 @@ export function deriveBoard(
     secondsRemaining: detail?.secondsRemaining ?? null,
     stakeCloseAt: detail?.stakeCloseAt ?? focus?.stakeCloseAt ?? null,
     observationStart: detail?.observationStart ?? focus?.observationStart ?? null,
+    observationEnd: detail?.observationEnd ?? focus?.observationEnd ?? null,
     totalStakeRaw,
     stakerCount: detail?.stakerCount ?? focus?.stakerCount ?? 0,
     rewardBudgetRaw: detail?.rewardBudgetRaw ?? focus?.rewardBudgetRaw ?? cfg?.roundRewardRaw ?? '0',

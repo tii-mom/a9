@@ -1,0 +1,783 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: A9/USD$0.00917 ▲ 3.95%
+        - generic [ref=e8]: R03 目标$0.00928 未触及
+        - generic [ref=e9]:
+          - text: 点亮
+          - generic [ref=e10]: 9 / 12
+        - generic [ref=e11]:
+          - text: 失守
+          - generic [ref=e12]: 9 / 7
+        - generic [ref=e13]: 本轮质押3.86 亿 A9
+        - generic [ref=e14]: 已销毁22.68 亿 A9
+        - generic [ref=e15]: 24H 成交$95.67K
+        - generic [ref=e16]: 卖 12.98 万 @ $0.00934
+        - generic [ref=e17]: 卖 1.62 万 @ $0.00923
+        - generic [ref=e18]: 卖 3.76 万 @ $0.00930
+        - generic [ref=e19]: 卖 1.61 万 @ $0.00933
+      - generic [ref=e20]:
+        - generic [ref=e21]: A9/USD$0.00917 ▲ 3.95%
+        - generic [ref=e22]: R03 目标$0.00928 未触及
+        - generic [ref=e23]:
+          - text: 点亮
+          - generic [ref=e24]: 9 / 12
+        - generic [ref=e25]:
+          - text: 失守
+          - generic [ref=e26]: 9 / 7
+        - generic [ref=e27]: 本轮质押3.86 亿 A9
+        - generic [ref=e28]: 已销毁22.68 亿 A9
+        - generic [ref=e29]: 24H 成交$95.67K
+        - generic [ref=e30]: 卖 12.98 万 @ $0.00934
+        - generic [ref=e31]: 卖 1.62 万 @ $0.00923
+        - generic [ref=e32]: 卖 3.76 万 @ $0.00930
+        - generic [ref=e33]: 卖 1.61 万 @ $0.00933
+    - navigation "主导航" [ref=e34]:
+      - link "A9 引信协议" [ref=e35] [cursor=pointer]:
+        - /url: /
+        - text: A9
+        - generic [ref=e39]: 引信协议
+      - generic [ref=e40]:
+        - link "战况" [ref=e41] [cursor=pointer]:
+          - /url: "#war"
+        - link "成交流" [ref=e42] [cursor=pointer]:
+          - /url: "#floor"
+        - link "轮次阶梯" [ref=e43] [cursor=pointer]:
+          - /url: "#ladder"
+        - link "作战规则" [ref=e44] [cursor=pointer]:
+          - /url: "#rules"
+        - link "筹码分配" [ref=e45] [cursor=pointer]:
+          - /url: "#supply"
+        - link "风险" [ref=e46] [cursor=pointer]:
+          - /url: "#risk"
+        - link "我的战况" [ref=e47] [cursor=pointer]:
+          - /url: /me
+        - link "排行榜" [ref=e48] [cursor=pointer]:
+          - /url: /leaderboard
+      - generic [ref=e49]:
+        - generic "价格、成交、地址为演示数据" [ref=e50]: 原型 · 模拟数据
+        - button "切换涨跌颜色" [ref=e51] [cursor=pointer]: 涨跌色 绿涨红跌
+        - button "切换语言" [ref=e52] [cursor=pointer]: EN
+        - 'button "钱包: 连接钱包" [ref=e54] [cursor=pointer]':
+          - generic [ref=e55]: 连接钱包
+        - link "立即参战" [ref=e56] [cursor=pointer]:
+          - /url: /#cmd
+  - main [ref=e57]:
+    - generic [ref=e59]:
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - generic [ref=e62]: TON · 价格驱动型代币
+          - generic [ref=e63]: 10 轮目标价逐轮翻倍
+        - heading [level=1] [ref=e65]:
+          - text: 18 根 K 线点亮 12 根，
+          - emphasis [ref=e66]: 7 亿枚才会解锁。
+        - paragraph [ref=e67]: 每一轮设一个目标价，用户质押参战。72 小时内 18 根 4 小时 K 线，TWAP 触及目标价的至少 12 根，奖励开放认领、本金退还。差一根，本轮 7 亿奖励与全部质押本金一起销毁，本轮永久关闭。
+        - generic [ref=e68]:
+          - link "质押参战" [ref=e69] [cursor=pointer]:
+            - /url: "#cmd"
+          - link "买入 A9" [ref=e70] [cursor=pointer]:
+            - /url: "#cmd"
+          - link "读懂规则" [ref=e71] [cursor=pointer]:
+            - /url: "#rules"
+      - generic "TON · 价格驱动型代币" [ref=e72]:
+        - generic [ref=e73]:
+          - text: 总发行
+          - generic [ref=e74]: 100亿枚
+        - generic [ref=e75]:
+          - text: 解锁轮次
+          - generic [ref=e76]: 10轮 × 7 亿
+        - generic [ref=e77]:
+          - text: 第 n 轮目标
+          - generic [ref=e78]:
+            - text: P0×2
+            - superscript [ref=e79]: "n"
+    - generic [ref=e80]:
+      - region "当前战役" [ref=e81]:
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - text: 当前战役
+            - heading "03/ 10" [level=2] [ref=e84]
+          - generic [ref=e85]: 永久关闭 · FAILED_PERMANENT
+          - generic [ref=e87]:
+            - text: 距离下一轮质押开始
+            - generic [ref=e88]: 00:00:00
+          - generic [ref=e89]:
+            - generic [ref=e90]: 预言机在线
+            - generic [ref=e92]: 有效来源 5 / 5
+            - generic [ref=e93]: 覆盖率 99.5%
+            - generic [ref=e94]: 配置版本 v1.0.0-demo · 待确认
+        - generic [ref=e95]:
+          - generic [ref=e96]:
+            - text: 现价 A9 / USD
+            - generic [ref=e97]: $0.00917
+            - generic [ref=e98]: 未触及目标价
+          - generic [ref=e101]:
+            - text: 本轮目标价 · 阶梯 8×P0
+            - generic [ref=e102]: $0.00928
+            - generic [ref=e103]: 低于目标 -1.20%
+          - generic [ref=e104]:
+            - text: 本根暂定 TWAP
+            - generic [ref=e105]: $0.00917
+            - generic [ref=e106]: 最后一根已收盘
+        - img "本轮价格走势与目标价对比图" [ref=e108]
+        - generic "本轮价格走势与目标价对比图" [ref=e109]:
+          - generic [ref=e111]:
+            - generic [ref=e112]: "01"
+            - generic [ref=e113]: 06:00
+            - generic [ref=e117]: 点亮
+            - generic [ref=e118]: $0.00961
+          - generic [ref=e119]:
+            - generic [ref=e120]: "02"
+            - generic [ref=e121]: 10:00
+            - generic [ref=e125]: 点亮
+            - generic [ref=e126]: $0.00951
+          - generic [ref=e127]:
+            - generic [ref=e128]: "03"
+            - generic [ref=e129]: 14:00
+            - generic [ref=e133]: 点亮
+            - generic [ref=e134]: $0.00940
+          - generic [ref=e135]:
+            - generic [ref=e136]: "04"
+            - generic [ref=e137]: 18:00
+            - generic [ref=e141]: 熄灭
+            - generic [ref=e142]: $0.00876
+          - generic [ref=e143]:
+            - generic [ref=e144]: "05"
+            - generic [ref=e145]: 22:00
+            - generic [ref=e149]: 点亮
+            - generic [ref=e150]: $0.00931
+          - generic [ref=e151]:
+            - generic [ref=e152]: "06"
+            - generic [ref=e153]: 02:00
+            - generic [ref=e157]: 熄灭
+            - generic [ref=e158]: $0.00888
+          - generic [ref=e159]:
+            - generic [ref=e160]: "07"
+            - generic [ref=e161]: 06:00
+            - generic [ref=e165]: 点亮
+            - generic [ref=e166]: $0.00954
+          - generic [ref=e167]:
+            - generic [ref=e168]: "08"
+            - generic [ref=e169]: 10:00
+            - generic [ref=e173]: 点亮
+            - generic [ref=e174]: $0.00960
+          - generic [ref=e175]:
+            - generic [ref=e176]: "09"
+            - generic [ref=e177]: 14:00
+            - generic [ref=e181]: 点亮
+            - generic [ref=e182]: $0.00955
+          - generic [ref=e183]:
+            - generic [ref=e184]: "10"
+            - generic [ref=e185]: 18:00
+            - generic [ref=e189]: 熄灭
+            - generic [ref=e190]: $0.00921
+          - generic [ref=e191]:
+            - generic [ref=e192]: "11"
+            - generic [ref=e193]: 22:00
+            - generic [ref=e197]: 点亮
+            - generic [ref=e198]: $0.00932
+          - generic [ref=e199]:
+            - generic [ref=e200]: "12"
+            - generic [ref=e201]: 02:00
+            - generic [ref=e205]: 点亮
+            - generic [ref=e206]: $0.00938
+          - generic [ref=e207]:
+            - generic [ref=e208]: "13"
+            - generic [ref=e209]: 06:00
+            - generic [ref=e213]: 熄灭
+            - generic [ref=e214]: $0.00873
+          - generic [ref=e215]:
+            - generic [ref=e216]: "14"
+            - generic [ref=e217]: 10:00
+            - generic [ref=e221]: 熄灭
+            - generic [ref=e222]: $0.00909
+          - generic [ref=e223]:
+            - generic [ref=e224]: "15"
+            - generic [ref=e225]: 14:00
+            - generic [ref=e229]: 熄灭
+            - generic [ref=e230]: $0.00920
+          - generic [ref=e231]:
+            - generic [ref=e232]: "16"
+            - generic [ref=e233]: 18:00
+            - generic [ref=e237]: 熄灭
+            - generic [ref=e238]: $0.00909
+          - generic [ref=e239]:
+            - generic [ref=e240]: "17"
+            - generic [ref=e241]: 22:00
+            - generic [ref=e245]: 熄灭
+            - generic [ref=e246]: $0.00916
+          - generic [ref=e247]:
+            - generic [ref=e248]: "18"
+            - generic [ref=e249]: 02:00
+            - generic [ref=e253]: 熄灭
+            - generic [ref=e254]: $0.00917
+        - generic [ref=e255]:
+          - generic [ref=e256]:
+            - text: 已点亮 / 需要
+            - generic [ref=e257]:
+              - text: "9"
+              - generic [ref=e258]: / 12
+            - generic [ref=e272]: 还差 3 根
+          - generic [ref=e273]:
+            - text: 已失守 / 判负线
+            - generic [ref=e274]:
+              - text: "9"
+              - generic [ref=e275]: / 7
+            - generic [ref=e284]: 判负线已触发
+          - generic [ref=e285]:
+            - text: 剩余 K 线
+            - generic [ref=e286]: 0根
+            - generic [ref=e287]: 需再亮 ≥ 3 根
+        - generic [ref=e289]:
+          - text: 本轮失败：仅 9 / 18 根达标
+          - generic [ref=e290]: 18 根完整 K 线已收齐，链上结算完成。
+        - generic [ref=e291]:
+          - heading "引信熄灭，R03 永久关闭" [level=3] [ref=e292]
+          - paragraph [ref=e293]: 仅 9 根达标。已销毁 7 亿 奖励 + 3.86 亿 质押本金，合计 12.06 亿 A9，总供应量随之减少。 下一轮目标价不回滚：R04 仍是 16×P0 = $0.01856。
+          - generic [ref=e294]:
+            - link "前往我的战况" [ref=e295] [cursor=pointer]:
+              - /url: /me
+            - link "查看排行榜" [ref=e296] [cursor=pointer]:
+              - /url: /leaderboard
+      - complementary "指挥台 · COMMAND" [ref=e297]:
+        - generic [ref=e298]:
+          - generic [ref=e299]: 指挥台 · COMMAND
+          - button "连接钱包" [ref=e300] [cursor=pointer]
+        - tablist [ref=e301]:
+          - tab "① 买入 A9" [selected] [ref=e302] [cursor=pointer]
+          - tab "② 质押参战" [ref=e303] [cursor=pointer]
+        - tabpanel [ref=e305]:
+          - generic [ref=e306]:
+            - text: 支付 TON
+            - generic [ref=e307]:
+              - spinbutton "支付 TON TON" [ref=e308]: "100"
+              - generic [ref=e309]: TON
+          - generic [ref=e310]:
+            - button "50" [ref=e311] [cursor=pointer]
+            - button "100" [ref=e312] [cursor=pointer]
+            - button "500" [ref=e313] [cursor=pointer]
+            - button "MAX" [ref=e314] [cursor=pointer]
+          - generic [ref=e315]:
+            - text: 预计获得
+            - generic [ref=e316]: 32,621 A9
+            - generic [ref=e317]: ≈ $300 · 1 TON ≈ $3.00（演示汇率）
+          - generic [ref=e318]:
+            - generic [ref=e319]:
+              - term [ref=e320]: 成交均价
+              - definition [ref=e321]: $0.00917
+            - generic [ref=e322]:
+              - term [ref=e323]: 价格影响
+              - definition [ref=e324]: +0.004%
+            - generic [ref=e325]:
+              - term [ref=e326]: 手续费 0.3%
+              - definition [ref=e327]: $0.90
+            - generic [ref=e328]:
+              - term [ref=e329]: 最少收到（滑点 1%）
+              - definition [ref=e330]: 32,295 A9
+          - button "买入 A9" [ref=e331] [cursor=pointer]
+          - paragraph [ref=e332]: 买入的 A9 留在你的钱包，在报名期内可转入质押金库参战。演示环境不会产生真实交易。
+    - generic [ref=e334]:
+      - generic [ref=e335]:
+        - generic [ref=e336]: ORDER FLOW · 成交流
+        - heading "每一笔买卖都在推着价格线" [level=2] [ref=e337]
+        - paragraph [ref=e338]: 逐笔成交、买卖盘口和本轮关键数字。价格线能否守在目标价之上，决定 18 根 K 线里有几根点亮。
+      - generic [ref=e339]:
+        - generic [ref=e340]:
+          - generic [ref=e341]:
+            - generic [ref=e342]: 逐笔成交 · TIME & SALES
+            - generic [ref=e343]: 24H $95.67K
+          - generic [ref=e344]:
+            - generic [ref=e345]: 时间 UTC
+            - generic [ref=e346]: 方向
+            - generic [ref=e347]: 数量 A9
+            - generic [ref=e348]: 价格
+            - generic [ref=e349]: 金额 USD
+          - generic [ref=e350]:
+            - generic [ref=e351]:
+              - generic [ref=e352]: 06:14:47
+              - generic [ref=e353]: 卖
+              - generic [ref=e354]: 129,820
+              - generic [ref=e355]: $0.00934
+              - generic [ref=e356]: $1212.801
+            - generic [ref=e357]:
+              - generic [ref=e358]: 05:58:46
+              - generic [ref=e359]: 卖
+              - generic [ref=e360]: 16,200
+              - generic [ref=e361]: $0.00923
+              - generic [ref=e362]: $149.524
+            - generic [ref=e363]:
+              - generic [ref=e364]: 05:36:20
+              - generic [ref=e365]: 卖
+              - generic [ref=e366]: 37,563
+              - generic [ref=e367]: $0.00930
+              - generic [ref=e368]: $349.247
+            - generic [ref=e369]:
+              - generic [ref=e370]: 05:16:11
+              - generic [ref=e371]: 卖
+              - generic [ref=e372]: 16,098
+              - generic [ref=e373]: $0.00933
+              - generic [ref=e374]: $150.136
+            - generic [ref=e375]:
+              - generic [ref=e376]: 05:03:16
+              - generic [ref=e377]: 买
+              - generic [ref=e378]: 104,964
+              - generic [ref=e379]: $0.00926
+              - generic [ref=e380]: $971.534
+            - generic [ref=e381]:
+              - generic [ref=e382]: 04:51:17
+              - generic [ref=e383]: 买
+              - generic [ref=e384]: 110,138
+              - generic [ref=e385]: $0.00931
+              - generic [ref=e386]: $1025.453
+            - generic [ref=e387]:
+              - generic [ref=e388]: 04:35:12
+              - generic [ref=e389]: 买
+              - generic [ref=e390]: 105,911
+              - generic [ref=e391]: $0.00932
+              - generic [ref=e392]: $987.178
+            - generic [ref=e393]:
+              - generic [ref=e394]: 04:17:43
+              - generic [ref=e395]: 卖
+              - generic [ref=e396]: 104,459
+              - generic [ref=e397]: $0.00923
+              - generic [ref=e398]: $963.855
+            - generic [ref=e399]:
+              - generic [ref=e400]: 03:55:38
+              - generic [ref=e401]: 卖
+              - generic [ref=e402]: 59,116
+              - generic [ref=e403]: $0.00933
+              - generic [ref=e404]: $551.833
+            - generic [ref=e405]:
+              - generic [ref=e406]: 03:37:01
+              - generic [ref=e407]: 卖
+              - generic [ref=e408]: 108,104
+              - generic [ref=e409]: $0.00920
+              - generic [ref=e410]: $994.778
+            - generic [ref=e411]:
+              - generic [ref=e412]: 03:20:15
+              - generic [ref=e413]: 卖
+              - generic [ref=e414]: 78,738
+              - generic [ref=e415]: $0.00927
+              - generic [ref=e416]: $729.666
+            - generic [ref=e417]:
+              - generic [ref=e418]: 03:07:01
+              - generic [ref=e419]: 买
+              - generic [ref=e420]: 148,474
+              - generic [ref=e421]: $0.00936
+              - generic [ref=e422]: $1389.412
+            - generic [ref=e423]:
+              - generic [ref=e424]: 02:50:43
+              - generic [ref=e425]: 卖
+              - generic [ref=e426]: 8,123
+              - generic [ref=e427]: $0.00920
+              - generic [ref=e428]: $74.711
+            - generic [ref=e429]:
+              - generic [ref=e430]: 02:28:08
+              - generic [ref=e431]: 卖
+              - generic [ref=e432]: 130,862
+              - generic [ref=e433]: $0.00919
+              - generic [ref=e434]: $1202.984
+            - generic [ref=e435]:
+              - generic [ref=e436]: 02:04:54
+              - generic [ref=e437]: 买
+              - generic [ref=e438]: 8,627
+              - generic [ref=e439]: $0.00936
+              - generic [ref=e440]: $80.707
+            - generic [ref=e441]:
+              - generic [ref=e442]: 01:53:06
+              - generic [ref=e443]: 卖
+              - generic [ref=e444]: 28,475
+              - generic [ref=e445]: $0.00921
+              - generic [ref=e446]: $262.240
+        - generic [ref=e447]:
+          - generic [ref=e448]:
+            - generic [ref=e449]: 盘口深度 · ORDER BOOK
+            - generic [ref=e450]: 内盘
+          - generic [ref=e451]:
+            - generic [ref=e452]:
+              - generic [ref=e453]: $0.00932
+              - generic [ref=e454]: 246,366
+            - generic [ref=e455]:
+              - generic [ref=e456]: $0.00931
+              - generic [ref=e457]: 85,574
+            - generic [ref=e458]:
+              - generic [ref=e459]: $0.00931
+              - generic [ref=e460]: 163,015
+            - generic [ref=e461]:
+              - generic [ref=e462]: $0.00930
+              - generic [ref=e463]: 246,631
+            - generic [ref=e464]:
+              - generic [ref=e465]: $0.00930
+              - generic [ref=e466]: 213,612
+            - generic [ref=e467]:
+              - generic [ref=e468]: $0.00929
+              - generic [ref=e469]: 176,287
+            - generic [ref=e470]:
+              - generic [ref=e471]: $0.00929
+              - generic [ref=e472]: 245,752
+            - generic [ref=e473]:
+              - generic [ref=e474]: $0.00917
+              - generic [ref=e475]: 目标 $0.00928
+            - generic [ref=e476]:
+              - generic [ref=e477]: $0.00927
+              - generic [ref=e478]: 98,378
+            - generic [ref=e479]:
+              - generic [ref=e480]: $0.00927
+              - generic [ref=e481]: 207,308
+            - generic [ref=e482]:
+              - generic [ref=e483]: $0.00926
+              - generic [ref=e484]: 243,086
+            - generic [ref=e485]:
+              - generic [ref=e486]: $0.00926
+              - generic [ref=e487]: 71,228
+            - generic [ref=e488]:
+              - generic [ref=e489]: $0.00925
+              - generic [ref=e490]: 52,197
+            - generic [ref=e491]:
+              - generic [ref=e492]: $0.00925
+              - generic [ref=e493]: 276,711
+            - generic [ref=e494]:
+              - generic [ref=e495]: $0.00924
+              - generic [ref=e496]: 147,788
+        - generic [ref=e497]:
+          - generic [ref=e498]:
+            - generic [ref=e499]: 战场数据
+            - generic [ref=e500]: 实时
+          - generic [ref=e501]:
+            - generic [ref=e502]:
+              - text: 24H 成交额
+              - generic [ref=e503]: $95.67K
+            - generic [ref=e504]:
+              - text: 内盘流动性
+              - generic [ref=e505]: $1.8M
+            - generic [ref=e506]:
+              - text: 总供应量
+              - generic [ref=e507]: 77.32 亿
+            - generic [ref=e508]:
+              - text: 已销毁
+              - generic [ref=e509]: 22.68 亿
+            - generic [ref=e510]:
+              - text: 本轮质押池
+              - generic [ref=e511]: 3.86 亿
+            - generic [ref=e512]:
+              - text: 参战地址
+              - generic [ref=e513]: "12"
+            - generic [ref=e514]:
+              - text: 本轮奖励预算
+              - generic [ref=e515]: 7 亿
+            - generic [ref=e516]:
+              - text: 奖励 / 质押
+              - generic [ref=e517]: 1.81 ×
+    - generic [ref=e519]:
+      - generic [ref=e520]:
+        - generic [ref=e521]: LADDER · 轮次阶梯
+        - heading "十道关卡，每道目标价翻一倍" [level=2] [ref=e522]
+        - paragraph [ref=e523]: 第 n 轮目标价 = P0 × 2ⁿ，第 10 轮是 P0 的 1024 倍。某一轮失败后，下一轮目标价不会回滚，也不会补发。P0 = $0.00116，上线前由多源 7 日 TWAP 冻结上链。本轮目标价 = max(阶梯 P0×2ⁿ, 2 × 开窗时 24h TWAP)，开窗时锁定后不可修改。
+      - generic [ref=e524]:
+        - generic [ref=e525]:
+          - generic [ref=e526]: R01
+          - generic [ref=e527]: 已点亮 · 已解锁
+          - generic [ref=e530]: $0.00232
+          - generic [ref=e531]: ×2
+          - generic [ref=e534]: 7 亿 已开放认领
+        - generic [ref=e535]:
+          - generic [ref=e536]: R02
+          - generic [ref=e537]: 已熄灭 · 永久关闭
+          - generic [ref=e540]: $0.00464
+          - generic [ref=e541]: ×4
+          - generic [ref=e544]: 7 亿 已销毁
+        - generic [ref=e545]:
+          - generic [ref=e546]: R03
+          - generic [ref=e547]: 已熄灭 · 永久关闭
+          - generic [ref=e550]: $0.00928
+          - generic [ref=e551]: ×8
+          - generic [ref=e554]: 7 亿 已销毁
+        - generic [ref=e555]:
+          - generic [ref=e556]: R04
+          - generic [ref=e557]: 未开启
+          - generic [ref=e558]: $0.01856
+          - generic [ref=e559]: ×16
+          - generic [ref=e562]: 7 亿 未解锁
+        - generic [ref=e563]:
+          - generic [ref=e564]: R05
+          - generic [ref=e565]: 未开启
+          - generic [ref=e566]: $0.03712
+          - generic [ref=e567]: ×32
+          - generic [ref=e570]: 7 亿 未解锁
+        - generic [ref=e571]:
+          - generic [ref=e572]: R06
+          - generic [ref=e573]: 未开启
+          - generic [ref=e574]: $0.07424
+          - generic [ref=e575]: ×64
+          - generic [ref=e578]: 7 亿 未解锁
+        - generic [ref=e579]:
+          - generic [ref=e580]: R07
+          - generic [ref=e581]: 未开启
+          - generic [ref=e582]: $0.14848
+          - generic [ref=e583]: ×128
+          - generic [ref=e586]: 7 亿 未解锁
+        - generic [ref=e587]:
+          - generic [ref=e588]: R08
+          - generic [ref=e589]: 未开启
+          - generic [ref=e590]: $0.29696
+          - generic [ref=e591]: ×256
+          - generic [ref=e594]: 7 亿 未解锁
+        - generic [ref=e595]:
+          - generic [ref=e596]: R09
+          - generic [ref=e597]: 未开启
+          - generic [ref=e598]: $0.59392
+          - generic [ref=e599]: ×512
+          - generic [ref=e602]: 7 亿 未解锁
+        - generic [ref=e603]:
+          - generic [ref=e604]: R10
+          - generic [ref=e605]: 未开启
+          - generic [ref=e606]: $1.188
+          - generic [ref=e607]: ×1024
+          - generic [ref=e610]: 7 亿 未解锁
+      - paragraph [ref=e611]: 进度条为对数刻度：每向右一格，目标价翻一倍。
+    - generic [ref=e613]:
+      - generic [ref=e614]:
+        - generic [ref=e615]: BRIEFING · 作战规则
+        - heading "一轮战役，四个阶段" [level=2] [ref=e616]
+        - paragraph [ref=e617]: 规则写进合约，管理员不能修改已开始轮次的目标价、K 线阈值和预言机配置。
+      - generic [ref=e618]:
+        - generic [ref=e619]:
+          - generic [ref=e620]: "01"
+          - heading "报名质押" [level=3] [ref=e621]
+          - paragraph [ref=e622]: 报名窗口内，把 A9 转入质押金库，并在交易里写入风险确认。窗口关闭后不能追加、转移或提前取回。
+          - generic [ref=e623]: 建议窗口 7 天 · 参数上线前确认
+        - generic [ref=e624]:
+          - generic [ref=e625]: "02"
+          - heading "72 小时观察" [level=3] [ref=e626]
+          - paragraph [ref=e627]: 从下一个 UTC 4 小时整点起，连续 18 根完整 K 线。每根取多源 TWAP，不用最高价，不用瞬时价。
+          - generic [ref=e628]: 4h × 18 = 72h · 不使用部分 K 线
+        - generic [ref=e629]:
+          - generic [ref=e630]: "03"
+          - heading "判定" [level=3] [ref=e631]
+          - paragraph [ref=e632]: TWAP 大于等于目标价的 K 线至少 12 根即通过，不要求连续。恰好等于目标价也算达标。
+          - generic [ref=e633]: 达标数 ≥ 12 通过 · ≤ 11 失败
+        - generic [ref=e634]:
+          - generic [ref=e635]: "04"
+          - heading "结算" [level=3] [ref=e636]
+          - paragraph [ref=e637]: 通过：本金退还，7 亿奖励按质押占比认领。失败：7 亿奖励与本轮全部质押本金实际销毁，供应量随之减少。
+          - generic [ref=e638]: 用户主动认领 · 每笔幂等
+      - paragraph [ref=e639]: 目标价公式：本轮目标 = max(阶梯 P0×2ⁿ, 2 × 开窗时 24h TWAP)，开窗时锁定，管理员不可修改。
+      - generic [ref=e640]:
+        - generic [ref=e641]: WAR GAME · 沙盘推演
+        - heading "点击 K 线，自己试一次判定" [level=3] [ref=e642]
+        - paragraph [ref=e643]: 默认刚好 12 根达标。取消任意一根，看看会发生什么。
+      - generic [ref=e644]:
+        - generic [ref=e645]:
+          - generic [ref=e646]:
+            - generic [ref=e647]: 18 根 4 小时 K 线 · 点击切换
+            - generic [ref=e648]: 12 / 18 达标
+          - generic [ref=e649]:
+            - button "第 1 根K线，达标" [pressed] [ref=e650] [cursor=pointer]:
+              - generic [ref=e651]: "01"
+              - generic [ref=e654]: 点亮
+            - button "第 2 根K线，达标" [pressed] [ref=e655] [cursor=pointer]:
+              - generic [ref=e656]: "02"
+              - generic [ref=e659]: 点亮
+            - button "第 3 根K线，未达标" [ref=e660] [cursor=pointer]:
+              - generic [ref=e661]: "03"
+              - generic [ref=e664]: 熄灭
+            - button "第 4 根K线，达标" [pressed] [ref=e665] [cursor=pointer]:
+              - generic [ref=e666]: "04"
+              - generic [ref=e669]: 点亮
+            - button "第 5 根K线，达标" [pressed] [ref=e670] [cursor=pointer]:
+              - generic [ref=e671]: "05"
+              - generic [ref=e674]: 点亮
+            - button "第 6 根K线，未达标" [ref=e675] [cursor=pointer]:
+              - generic [ref=e676]: "06"
+              - generic [ref=e679]: 熄灭
+            - button "第 7 根K线，达标" [pressed] [ref=e680] [cursor=pointer]:
+              - generic [ref=e681]: "07"
+              - generic [ref=e684]: 点亮
+            - button "第 8 根K线，达标" [pressed] [ref=e685] [cursor=pointer]:
+              - generic [ref=e686]: "08"
+              - generic [ref=e689]: 点亮
+            - button "第 9 根K线，达标" [pressed] [ref=e690] [cursor=pointer]:
+              - generic [ref=e691]: "09"
+              - generic [ref=e694]: 点亮
+            - button "第 10 根K线，未达标" [ref=e695] [cursor=pointer]:
+              - generic [ref=e696]: "10"
+              - generic [ref=e699]: 熄灭
+            - button "第 11 根K线，达标" [pressed] [ref=e700] [cursor=pointer]:
+              - generic [ref=e701]: "11"
+              - generic [ref=e704]: 点亮
+            - button "第 12 根K线，未达标" [ref=e705] [cursor=pointer]:
+              - generic [ref=e706]: "12"
+              - generic [ref=e709]: 熄灭
+            - button "第 13 根K线，达标" [pressed] [ref=e710] [cursor=pointer]:
+              - generic [ref=e711]: "13"
+              - generic [ref=e714]: 点亮
+            - button "第 14 根K线，未达标" [ref=e715] [cursor=pointer]:
+              - generic [ref=e716]: "14"
+              - generic [ref=e719]: 熄灭
+            - button "第 15 根K线，达标" [pressed] [ref=e720] [cursor=pointer]:
+              - generic [ref=e721]: "15"
+              - generic [ref=e724]: 点亮
+            - button "第 16 根K线，达标" [pressed] [ref=e725] [cursor=pointer]:
+              - generic [ref=e726]: "16"
+              - generic [ref=e729]: 点亮
+            - button "第 17 根K线，未达标" [ref=e730] [cursor=pointer]:
+              - generic [ref=e731]: "17"
+              - generic [ref=e734]: 熄灭
+            - button "第 18 根K线，达标" [pressed] [ref=e735] [cursor=pointer]:
+              - generic [ref=e736]: "18"
+              - generic [ref=e739]: 点亮
+          - generic [ref=e740]:
+            - button "全部点亮(18)" [ref=e741] [cursor=pointer]
+            - button "刚好 12 根" [ref=e742] [cursor=pointer]
+            - button "只差 1 根" [ref=e743] [cursor=pointer]
+            - button "全部熄灭" [ref=e744] [cursor=pointer]
+          - generic [ref=e749]:
+            - generic [ref=e750]: "0"
+            - generic [ref=e751]: 通过线 12
+            - generic [ref=e752]: "18"
+        - generic [ref=e753]:
+          - generic [ref=e754]: 判定结果
+          - heading "通过 · 引信点燃" [level=3] [ref=e755]
+          - paragraph [ref=e756]: 12 根达标，达到 12 根的通过线。7 亿 A9 奖励开放认领，质押本金可全额取回。
+          - generic [ref=e757]:
+            - generic [ref=e758]:
+              - term [ref=e759]: 取回本金
+              - definition [ref=e760]: 100,000 A9
+            - generic [ref=e761]:
+              - term [ref=e762]: 预计奖励（按当前质押池占比）
+              - definition [ref=e763]: 181,206 A9
+            - generic [ref=e764]:
+              - term [ref=e765]: 合计
+              - definition [ref=e766]: 281,206 A9
+      - generic [ref=e767]:
+        - text: 假设我质押（A9）
+        - generic [ref=e768]:
+          - spinbutton "假设我质押（A9） A9" [ref=e769]: "100000"
+          - generic [ref=e770]: A9
+      - generic [ref=e771]:
+        - generic [ref=e772]:
+          - heading "失败永久关闭" [level=4] [ref=e773]
+          - paragraph [ref=e774]: 不重开、不重试、不补发，管理员也无法恢复。第 2 轮失败，第 3 轮目标仍是 8×P0。
+        - generic [ref=e775]:
+          - heading "故障不算败" [level=4] [ref=e776]
+          - paragraph [ref=e777]: "预言机缺数据、签名无效、来源不足时，考核暂停，不销毁任何本金。恢复后重新收满完整 {count} 根。"
+        - generic [ref=e778]:
+          - heading "价格由预言机裁决" [level=4] [ref=e779]
+          - paragraph [ref=e780]: 多源签名数据加 4 小时 TWAP，任何人都可以提交有效数据。单一后台、单个池子都不能决定结果。
+        - generic [ref=e781]:
+          - heading "销毁是真销毁" [level=4] [ref=e782]
+          - paragraph [ref=e783]: 失败时执行 Jetton burn，并核对 Jetton Master 的总供应量确实减少，不是把余额标成不可用。
+    - generic [ref=e785]:
+      - generic [ref=e786]:
+        - generic [ref=e787]: SUPPLY · 筹码分配
+        - heading "100 亿枚，70% 留给战场" [level=2] [ref=e788]
+        - paragraph [ref=e789]: 十个 7% 的方块对应十轮奖励预算，颜色跟随每一轮的实际结果。失败的方块被销毁，不会转移到其他轮次。
+      - img "100亿枚代币分配示意" [ref=e790]:
+        - generic [ref=e791]:
+          - generic [ref=e792]: R1
+          - generic [ref=e793]: 7%
+        - generic [ref=e794]:
+          - generic [ref=e795]: R2
+          - generic [ref=e796]: 7%
+        - generic [ref=e797]:
+          - generic [ref=e798]: R3
+          - generic [ref=e799]: 7%
+        - generic [ref=e800]:
+          - generic [ref=e801]: R4
+          - generic [ref=e802]: 7%
+        - generic [ref=e803]:
+          - generic [ref=e804]: R5
+          - generic [ref=e805]: 7%
+        - generic [ref=e806]:
+          - generic [ref=e807]: R6
+          - generic [ref=e808]: 7%
+        - generic [ref=e809]:
+          - generic [ref=e810]: R7
+          - generic [ref=e811]: 7%
+        - generic [ref=e812]:
+          - generic [ref=e813]: R8
+          - generic [ref=e814]: 7%
+        - generic [ref=e815]:
+          - generic [ref=e816]: R9
+          - generic [ref=e817]: 7%
+        - generic [ref=e818]:
+          - generic [ref=e819]: R10
+          - generic [ref=e820]: 7%
+        - generic [ref=e821]:
+          - generic [ref=e822]: 内盘/流动性
+          - generic [ref=e823]: 13%
+        - generic [ref=e824]:
+          - generic [ref=e825]: 团队
+          - generic [ref=e826]: 12%
+        - generic [ref=e827]:
+          - generic [ref=e828]: 营销
+          - generic [ref=e829]: 5%
+      - table [ref=e831]:
+        - rowgroup [ref=e832]:
+          - row [ref=e833]:
+            - columnheader "分配" [ref=e834]
+            - columnheader "占比" [ref=e835]
+            - columnheader "数量（枚）" [ref=e836]
+        - rowgroup [ref=e837]:
+          - row [ref=e838]:
+            - cell "十轮目标解锁奖励（每轮 7 亿）" [ref=e839]
+            - cell "70%" [ref=e840]
+            - cell "7,000,000,000" [ref=e841]
+          - row [ref=e842]:
+            - cell "内盘及流动性（内盘销售 8% + 流动性 5%）" [ref=e843]
+            - cell "13%" [ref=e844]
+            - cell "1,300,000,000" [ref=e845]
+          - row [ref=e846]:
+            - cell "团队" [ref=e847]
+            - cell "12%" [ref=e848]
+            - cell "1,200,000,000" [ref=e849]
+          - row [ref=e850]:
+            - cell "营销推广" [ref=e851]
+            - cell "5%" [ref=e852]
+            - cell "500,000,000" [ref=e853]
+          - row [ref=e854]:
+            - cell "合计" [ref=e855]
+            - cell "100%" [ref=e856]
+            - cell "10,000,000,000" [ref=e857]
+    - generic [ref=e861]:
+      - generic [ref=e862]:
+        - generic [ref=e863]: WARNING · 参战前必读
+        - generic [ref=e864]: 风险披露 v1
+      - list [ref=e865]:
+        - listitem [ref=e866]:
+          - generic [ref=e869]: 本轮失败，全部质押本金 100% 销毁。 同时销毁该轮 7 亿奖励额度。你的质押没有任何保本机制。
+        - listitem [ref=e870]:
+          - generic [ref=e873]: 目标价逐轮翻倍。 第 10 轮目标是初始参考价的 1024 倍。协议不保证价格上涨，也不保证奖励实现。
+        - listitem [ref=e874]:
+          - generic [ref=e877]: TWAP 与多源预言机只能提高操纵成本。 它们不能保证价格无法被操纵，也不能防止抛售。
+        - listitem [ref=e878]:
+          - generic [ref=e881]: 技术故障和市场失败是两回事。 预言机故障只会暂停考核，不会销毁本金。但智能合约仍可能存在未被发现的漏洞，审计报告将在主网开放前公布。
+        - listitem [ref=e882]:
+          - generic [ref=e885]: 多钱包拆分无法被完全阻止。 每地址上限只能缓解，不能证明真人唯一。
+        - listitem [ref=e886]:
+          - generic [ref=e889]: 合规风险由你自行判断。 该机制可能触及不同司法辖区对金融产品、博彩、促销和消费者保护的规定，参与前请咨询专业意见。本页不构成投资建议。
+  - contentinfo [ref=e890]:
+    - generic [ref=e891]:
+      - generic [ref=e892]:
+        - generic [ref=e893]: A9
+        - paragraph [ref=e897]: 本页为官网演示环境。价格、成交、地址、钱包余额均为演示数据，不代表任何真实市场。
+        - paragraph [ref=e898]: 协议具有极高风险，不构成投资建议，也不保证价格上涨或奖励实现。
+        - generic [ref=e899]:
+          - link "我的战况" [ref=e900] [cursor=pointer]:
+            - /url: /me
+          - link "排行榜" [ref=e901] [cursor=pointer]:
+            - /url: /leaderboard
+          - link "运维后台" [ref=e902] [cursor=pointer]:
+            - /url: /admin
+      - generic [ref=e903]:
+        - heading "链上信息" [level=5] [ref=e904]
+        - paragraph [ref=e905]: Jetton Master · 主网部署后公布
+        - paragraph [ref=e906]: RoundController · 主网部署后公布
+        - paragraph [ref=e907]: 代码哈希 · 部署后公布
+      - generic [ref=e908]:
+        - heading "透明度" [level=5] [ref=e909]
+        - paragraph [ref=e910]: 第三方审计报告 · 待发布
+        - paragraph [ref=e911]: 预言机配置哈希 · 冻结后公布
+        - paragraph [ref=e912]: 多签地址与阈值 · 待公布
+  - status

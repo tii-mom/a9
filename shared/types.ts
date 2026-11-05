@@ -155,6 +155,8 @@ export interface ProtocolStats {
   priceUsdE8: string;
   price24hAgoUsdE8: string;
   oracle: OracleStatus;
+  /** 下一轮质押预计开启时间（unix ms）；无活跃轮次时为结算时间 + 预告期，否则为 null */
+  nextStakeOpenAt: number | null;
 }
 
 export interface StakePosition {

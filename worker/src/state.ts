@@ -19,6 +19,7 @@ import {
   STAKE_GAP_SECONDS,
   TEAM_ROUND_RAW,
   DEFAULT_TARGET_MODE,
+  DEFAULT_DEMO_PREVIEW_SECONDS,
   type TargetMode,
   TOTAL_SUPPLY_RAW,
   RISK_DISCLOSURE_VERSION,
@@ -125,6 +126,10 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
       30,
       86_400,
     ),
+    previewSeconds:
+      dataSource === 'demo'
+        ? clampInt(Number(env.DEMO_PREVIEW_SECONDS ?? kv.get('demo_preview_seconds') ?? DEFAULT_DEMO_PREVIEW_SECONDS), 5, 86_400)
+        : numberFrom(kv, 'stake_gap_seconds', STAKE_GAP_SECONDS),
     now,
   };
 }
@@ -475,6 +480,13 @@ export async function autoplay(env: Env, now = Date.now()): Promise<{ acted: boo
 
   const lastId = opened.reduce((max, round) => Math.max(max, round.round_id), 0);
   if (lastId < params.roundCount) {
+    // 结算后先经过预告期（demo 可加速）再开下一轮，前端据此显示倒计时
+    const lastSettledAt = opened
+      .filter((round) => isTerminal(round.state))
+      .reduce((max, round) => Math.max(max, round.updated_at), 0);
+    if (lastSettledAt > 0 && now - lastSettledAt < params.previewSeconds * 1000) {
+      return { acted: false, action: null };
+    }
     const nextId = await openRoundAt(env, params, lastId + 1, now, 'cron');
     if (!nextId) return { acted: false, action: null };
     await store.logEvent(env, 'info', 'cron', 'DEMO_AUTOPLAY_OPEN', `R${nextId} 由演示自维持自动开启（上一轮 R${lastId} 已终态）`);

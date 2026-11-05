@@ -1,6 +1,6 @@
 # 04 --- 智能合约架构、存储与消息接口
 
-> **口径声明（V5.6）**：内盘可售上限 8 亿 A9（硬上限、不可超卖；实际销量由项目方按市场决定、可分批；未售/撤回转团队内盘管理钱包，仅加池/OTC/公告后使用）；合约不承担销售逻辑，只登记内盘上限与团队内盘管理钱包；分配 70% 奖励 + 8% 内盘（8 亿 A9，全售可募 $928,000）+ 5% 流动性（5 亿 A9，全额进池需 $580,000）+ 12% 团队 + 5% 营销；冷启动 1 亿 A9 + $116,000；RewardVault 70 亿 / 每轮 7 亿；观察 12 根 / 48h / 8 根（已确认不变）；**不允许取消质押（仅 TECHNICAL_ABORTED 退本金）**；D-28/29/30 待确认；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V6）**：**观察 72h = 18 根 4h / 阈值 12（容错 6 根）**；**目标价开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**、锁定后不可改；**95% 闸门与 7 天提档已取消**；**24h PREVIEW 预告期已确认**（结算→预告→自动开窗）；保留触价提前关窗；单轮 7 天 / 10 轮 70 天；前端三个倒计时；内盘可售上限 8 亿 A9（硬上限、不可超卖；实际销量由项目方按市场决定、可分批；未售/撤回转团队内盘管理钱包）；合约不承担销售逻辑；分配 70% 奖励 + 8% 内盘（8 亿 A9，全售可募 $928,000）+ 5% 流动性（5 亿 A9，全额进池需 $580,000）+ 12% 团队 + 5% 营销；冷启动 1 亿 A9 + $116,000；RewardVault 70 亿 / 每轮 7 亿；**不允许取消质押（仅 TECHNICAL_ABORTED 退本金）**；D-28/29/30 待确认；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 推荐架构
 
@@ -64,7 +64,7 @@ Wallet。协议不得假设用户代币余额集中在 Master 合约。
 ### 2.2 RoundController
 
 职责： - 保存 P0、目标价公式和轮次状态。 - 开启/关闭轮次。 -
-记录观察窗口时间和12根K线结果。 - 统计达标数量。 - 进入成功/失败结算。 -
+记录观察窗口时间和18根K线结果。 - 统计达标数量。 - 进入成功/失败结算。 -
 验证后续轮次只能按顺序开启。 - 接收 RewardVault、StakingVault 和 Jetton
 Master 的结算确认。 - **向 TeamVault 下发团队额度指令**：成功时 `ReleaseTeamQuota`
 （转 1.2 亿到团队收款钱包）；失败时 `BurnTeamQuota`（销毁 1.2 亿，kind = `team`）。 -
@@ -72,11 +72,12 @@ Master 的结算确认。 - **向 TeamVault 下发团队额度指令**：成功�
 **单密钥 owner 权限最小化**：owner 仅能开轮、关报名、暂停/恢复预言机、必要时触发结算；
 不能转移用户质押本金，不能修改已开轮的目标价 / 阈值 / oracle config hash。 -
 **不可升级**（D-24）：无升级代理；不设多签。 -
-**目标价写入（V5.4 已确认）**：合约**不预存 10 轮价格**；P0 与倍数是不
-可变常量、只存档位计数与每轮 `targetPriceUsdE8`。第 N 轮结算时写入
-第 N+1 轮 `targetPrice = P0 × 2^(下一档位)`，写入后不可改，并发出
-`TargetPriceSet(roundId, targetPriceUsdE8, tier)` 事件供索引/前端；若采用
-D-26 的「开窗闸门 + 超时提档」，提档目标价在**开轮交易**写入（仍在质押开始前、写入后不可改）。
+**目标价锁定（V6 已确认）**：合约**不预存 10 轮价格**；P0 与倍数是不
+可变常量、只存档位计数与每轮 `targetPriceUsdE8`。**开窗交易中**按
+`target = max(P0 × 2^tier, 2 × 开窗时 24h TWAP)` 计算并**锁定**本轮目标价，
+锁定后不可改，发出 `TargetPriceSet(roundId, targetPriceUsdE8, tier, twap24h)`
+事件供索引/前端。**95% 闸门、每 4h 检查、最长 7 天等待、超时提档全部取消**（V6）；
+触价提前关窗保留（报名期内 1h TWAP ≥ target 即关窗）。
 
 ### 2.3 StakingVault
 
@@ -139,11 +140,12 @@ ProtocolConfig {
     tokenDecimals: uint8
     roundRewardRaw: uint128     // 700,000,000 × 10^decimals
     teamRoundRaw: uint128       // 120,000,000 × 10^decimals（每轮）
+    previewSeconds: uint32      // 86400：PREVIEW 预告期 24h（V6）
     stakeDurationSeconds: uint32 // 259200：报名窗口 72h
-    stakeGapSeconds: uint32      // 0：上一轮结算后立即开启报名
     candleSeconds: uint32       // 14400
-    candleCount: uint8          // 12
-    minQualifiedCandles: uint8  // 8
+    candleCount: uint8          // 18（V6：72h）
+    minQualifiedCandles: uint8  // 12（V6：容错 6 根）
+    observationSeconds: uint32  // 259200（18 × 4h）
     oracleConfigHash: uint256
     configVersion: uint32
 }
@@ -155,9 +157,10 @@ ProtocolState {
 
 RoundData {
     roundId: uint8
-    targetPriceUsdE8: uint128    // 由上一轮结算时写入；不可改
-    targetTier: uint8            // 写入时的档位
-    targetWrittenAt: uint64      // 写入交易时间
+    targetPriceUsdE8: uint128    // 开窗时按 max(阶梯, 2×24h TWAP) 锁定；锁定后不可改
+    targetTier: uint8            // 锁定时的档位
+    targetTwap24hUsdE8: uint128  // 锁定时参考的 24h TWAP（可审计）
+    targetWrittenAt: uint64      // 锁定交易时间（开窗交易）
     rewardBudgetRaw: uint128
     status: uint8
     stakeOpenAt: uint64
@@ -375,7 +378,7 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 ## 11. V3 变更注记（2026-11-05）
 
 - **奖励金库总量**：RewardVault 持有 **70 亿**（原 75 亿），十轮独立账本每轮 **700,000,000**（7 亿），合计 10 × 7 亿 = 70 亿。
-- **报名窗口参数**：新增 `stakeDurationSeconds = 172,800`（48h）与 `stakeGapSeconds = 172,800`（上一轮结算后 48h 开启）；`stakeOpenAt = prevSettledAt + stakeGap`，`stakeCloseAt = stakeOpenAt + stakeDuration`，报名关闭即进入观察（`observationStart = stakeCloseAt`）。（**V5 已改为 72h / gap 0**，见 §13）
+- **报名窗口参数**：新增 `stakeDurationSeconds = 259,200`（48h）与 `stakeGapSeconds = 259,200`（上一轮结算后 48h 开启）；`stakeOpenAt = prevSettledAt + stakeGap`，`stakeCloseAt = stakeOpenAt + stakeDuration`，报名关闭即进入观察（`observationStart = stakeCloseAt`）。（**V5 已改为 72h / gap 0**，见 §13）
 - **无人质押分支**：报名关闭时 `totalAcceptedStake == 0` 仍启动观察（不跳过、不延期、不判负）；失败照常销毁本轮 7 亿奖励，通过则按质押比例分配（0 人质押且通过时奖励销毁，D-18b 已定，见 §12）。
 - **奖励领取**：成功后**一次性发放、无归属期**（D-16/D-17 已定）；`ClaimReward` 仍是 pull claim，需幂等。
 - **价格参数（V5.3 时点）**：`p0UsdE8 = 100,000`（P0 = $0.001），`target(roundId) = P0 × 2^roundId`，R10 = $1.024；`roundRewardRaw = 700,000,000 × 10^decimals`。（**V5.4 已改为 P0 = 116,000**，见 §15）
@@ -396,7 +399,7 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 ## 13. V5 变更注记（2026-11-05）
 
 - **团队额度改为 TeamVault 合约托管**：新增 `TeamVault`（自研）与 `teamVault` 地址；12 亿存于 TeamVault 的 Jetton Wallet（owner = TeamVault）。RoundController 通过 `ReleaseTeamQuota` / `BurnTeamQuota` 指令控制，TeamVault **只接受 RoundController**、同轮释放/销毁互斥且幂等。团队收款钱包为个人热钱包、地址不公开。
-- **报名窗口 72h**：`stakeDurationSeconds = 259,200`；`stakeGapSeconds = 0`（上一轮结算后立即开启）；观察窗口仍 48h / 12 根 4h。
+- **报名窗口 72h**：`stakeDurationSeconds = 259,200`；`stakeGapSeconds = 0`（上一轮结算后立即开启）；观察窗口仍 72h / 18 根 4h。
 - **奖励领取确定 pull claim（D-25）**：新增 `ClaimAll`（0x5254000E）与 `get_claimable_all(owner)`；单次最多遍历 10 轮、逐轮幂等、合并为一笔转账、gas 由用户承担。方案 A 不采用。
 - **D-24 已确认不可升级**：RoundController 无升级代理；管理员仅保留开轮/关报名/暂停恢复/触发结算的最小权限。
 - **收款钱包**：团队/营销/流动性均为个人热钱包，地址不对外披露（部署前填入 config，至少向审计/交易所披露）；相应风险登记见 docs/10 §9。
@@ -406,7 +409,7 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 
 ## 14. V5.3 变更注记（2026-11-05）
 
-- **已确认（定稿）**：① 观察窗口保持 **12 根 / 48h / 8 根**（不做 18/72/12）；② **不允许取消质押**——没有 `CancelStake`/withdraw 消息，唯一退款路径是 `TECHNICAL_ABORTED`（退还全部本金）。
+- **已确认（定稿）**：① 观察窗口保持 **18 根 / 72h / 12 根**（不做 18/72/12）；② **不允许取消质押**——没有 `CancelStake`/withdraw 消息，唯一退款路径是 `TECHNICAL_ABORTED`（退还全部本金）。
 - **新增待确认建议（Lead 建议，未定案）**：
   - **D-28 失败同档重试**：`targetPrice` 改按 tier 语义（`tier = 1 + 已成功轮数`），失败沿用同档、成功才升档；需新增 `RoundData.tier` 与前端阶梯改「档位」视图。
   - **D-29 R1 启动规则**：Lead 推荐 R1 目标 = 1.3~1.5 × 上市基准 TWAP，之后每轮 ×2（当前仍 R1 = 2×P0）。
@@ -418,9 +421,19 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 ## 15. V5.4 变更注记（2026-11-05）
 
 - **P0 与比价**：**1 GRAM = 1000 A9** 固定比价 → P0 = **$0.00116**（USD_E8 = 116,000），FDV $11.6M，R1 $0.00232 → R10 $1.18784。**P0 与倍数（2×）均为不可变常量**。
-- **目标价写入时机**：合约**不预存 10 个价格**，只存 P0、倍数、档位计数、每轮 `targetPriceUsdE8`；**第 N 轮结算时写入第 N+1 轮目标价**，写入后不可改并发出 `TargetPriceSet`；R1 目标在部署/首轮开启时写入；闸门超时提档在开轮交易写入（质押开始前）。前端/文档阶梯由 `P0 × 2^n` 离线计算，任何人可用 P0 与倍数校验。
+- **目标价写入时机（已被 V6 取代）**：合约不预存 10 个价格，只存 P0、倍数、档位计数、每轮 `targetPriceUsdE8`；V6 起改为**开窗时锁定 `max(阶梯, 2×24h TWAP)`**（见 §17）。
 - **冷启动池（已确认）**：1 亿 A9 + **$116,000** USDT @ $0.00116（与内盘价一致）；内盘募得 GRAM 部分换 USDT 进池、部分留营销。运营细则（分阶段双边加池、未售内盘转公开团队钱包）见 docs/01 §10 / docs/00 §7.13。
 - **D-31**：2× 最终确认，不再改动；docs/13 蒙特卡洛「2× 通过率≈0」结论保留为风险记录。
 - **D-32 已定案（V5.5）**：内盘销售 **8%（8 亿 A9）** + 流动性 **5%（5 亿 A9）**；合计 13% 不变，奖励/团队/营销不变；冷启动池 1 亿 A9 + $116,000（占流动性 20%）。
 - **内盘销售与撤回（V5.6 已确认）**：可售上限 8 亿 A9 为硬上限、不可超卖；实际销量由项目方决定、可分批；未售/撤回转「团队内盘管理钱包」（公开可查），仅用于加池/OTC/后续轮次公告后使用，不得二级直砸；合约不承担销售逻辑，只登记 `internalSaleCapRaw` 与 `teamInternalWallet`。
+
+---
+
+## 17. V6 变更注记（2026-11-05）
+
+- **观察窗口**：`candleCount = 18`、`observationSeconds = 259,200`（72h）、`minQualifiedCandles = 12`（容错 6 根）；替代 12/48h/8。
+- **目标价**：**开窗交易中锁定** `target = max(P0 × 2^tier, 2 × 开窗时 24h TWAP)`，锁定后不可改；`RoundData` 增加 `targetTwap24hUsdE8`，`TargetPriceSet` 事件携带 TWAP。
+- **取消**：95% 开窗闸门、每 4h 检查、最长 7 天等待、超时提档。
+- **保留**：触价提前关窗（报名期内 1h TWAP ≥ target 立即关窗）。
+- **时间线**：新增 `previewSeconds = 86,400`（24h PREVIEW）→ 自动开窗 → 报名 72h → 观察 72h；单轮 7 天 / 10 轮 70 天；前端三个倒计时。
 

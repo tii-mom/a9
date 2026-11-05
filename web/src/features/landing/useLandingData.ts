@@ -17,6 +17,7 @@ export interface LandingData {
   book: OrderBook | null;
   me: MeResponse | null;
   secondsRemaining: number | null;
+  nextStakeSeconds: number | null;
   candleMs: number;
   loading: boolean;
   error: Error | null;
@@ -64,21 +65,30 @@ export function useLandingData(): LandingData {
   }, [detailQ.data]);
 
   const secondsRemaining = useMemo(() => {
+    // Staking window → "time until staking ends" (absolute close timestamp).
     if (board.phase === 'stake' && board.stakeCloseAt) {
       return Math.max(0, (board.stakeCloseAt - now) / 1000);
     }
-    // Observation countdown follows the nominal 4h × 12 schedule (as in the prototype),
-    // so the accelerated demo still reads against the 48:00 window.
+    // Observation window → "time until verdict" (API observationEnd, fallback to secondsRemaining).
     if (board.phase === 'observe') {
-      const nominal = configQ.data?.candleSeconds ?? 14400;
-      const count = configQ.data?.candleCount ?? 12;
-      const left = Math.max(0, count - board.done - (board.live ? board.liveProgress : 0));
-      return left * nominal;
+      if (board.observationEnd) return Math.max(0, (board.observationEnd - now) / 1000);
+      if (board.secondsRemaining !== null) {
+        const elapsed = detailAt > 0 ? (now - detailAt) / 1000 : 0;
+        return Math.max(0, board.secondsRemaining - elapsed);
+      }
+      return null;
     }
     if (board.secondsRemaining === null) return null;
     const elapsed = detailAt > 0 ? (now - detailAt) / 1000 : 0;
     return Math.max(0, board.secondsRemaining - elapsed);
-  }, [board.phase, board.stakeCloseAt, board.secondsRemaining, board.done, board.live, board.liveProgress, configQ.data, now, detailAt]);
+  }, [board.phase, board.stakeCloseAt, board.observationEnd, board.secondsRemaining, now, detailAt]);
+
+  /** Pre-announcement window → "time until next staking opens" (stats.nextStakeOpenAt). */
+  const nextStakeSeconds = useMemo(() => {
+    const next = statsQ.data?.nextStakeOpenAt ?? null;
+    if (next === null) return null;
+    return Math.max(0, (next - now) / 1000);
+  }, [statsQ.data?.nextStakeOpenAt, now]);
 
   /** Nominal spacing of the 4h candle grid, used for the printed hour labels (not the demo speed). */
   const candleMs = useMemo(() => {
@@ -115,6 +125,7 @@ export function useLandingData(): LandingData {
     book: bookQ.data,
     me: meQ.data,
     secondsRemaining,
+    nextStakeSeconds,
     candleMs,
     loading,
     error: error instanceof Error ? error : null,

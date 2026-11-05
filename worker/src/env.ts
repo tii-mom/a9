@@ -18,6 +18,7 @@ export interface Env {
   DEMO_AUTOPLAY?: string;
   /** 演示质押窗口时长（秒，默认 900） */
   DEMO_STAKE_SECONDS?: string;
+  DEMO_PREVIEW_SECONDS?: string;
   /** CORS 允许来源，'*' 或逗号分隔白名单 */
   ALLOWED_ORIGINS?: string;
   /** 管理端 Bearer Token（wrangler secret 注入） */

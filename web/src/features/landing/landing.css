@@ -1,4 +1,5 @@
-/* Landing-only layout tweaks layered on top of the shared fuse.css (no shared-file edits). */
+/* Landing-only layout tweaks layered on top of the shared fuse.css (no shared-file edits).
+   Loaded before fuse.css in the bundle graph, so every override uses a higher-specificity selector. */
 
 /* Keep anchor jumps / CTA scrolling clear of the sticky header (tape 32px + nav 52px). */
 #war,
@@ -27,5 +28,29 @@
 @media (max-width: 700px) {
   .board .b-head .pill {
     white-space: normal;
+  }
+}
+
+/* The spec grew from 12 to 18 candles: 9×2 on desktop, 6×3 on small screens. */
+.board .cells {
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+.sand .sand-cells {
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+/* Row separators for the 18-cell grid (.fuse is the first child, cells start at nth-child(2)). */
+.board .cells .cell:nth-child(9n + 2) {
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  .board .cells,
+  .sand .sand-cells {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .board .cells .cell:nth-child(9n + 2) {
+    border-top: 0;
+  }
+  .board .cells .cell:nth-child(6n + 2) {
+    border-top: 1px solid var(--line);
   }
 }

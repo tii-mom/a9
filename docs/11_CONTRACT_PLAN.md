@@ -1,6 +1,6 @@
 # 11 — 合约技术方案：语言、清单与官方复用策略
 
-**版本**：V5.4 · 2026-11-05
+**版本**：V6.0 · 2026-11-05
 **关联**：[docs/00_DECISIONS_V2.md](00_DECISIONS_V2.md)（V5 口径）、[docs/04_CONTRACT_ABI.md](04_CONTRACT_ABI.md)（接口）、[docs/06_DEPLOYMENT.md](06_DEPLOYMENT.md)（部署）
 
 ---
@@ -42,7 +42,7 @@
 | --- | --- | --- | --- | --- |
 | 1 | Jetton Master | 官方复用（ton-blockchain/jetton-contract） | 1 | TEP-74，铸造 100 亿、关闭 mint |
 | 2 | Jetton Wallet | 官方复用（同上） | N ≈ 13 | 每个持币地址 1 个；协议侧约 13 个（奖励金库、质押金库、TeamVault、团队/营销/流动性收款、运营等）+ 用户钱包 |
-| 3 | **RoundController** | 自研（Tolk） | 1 | 轮次状态机 + 12 根 K 线计数 + 成功结算 + 失败结算 + 指向 TeamVault 的释放/销毁 + claimAll；预计 500~700 行 |
+| 3 | **RoundController** | 自研（Tolk） | 1 | 轮次状态机 + 18 根 K 线计数 + 成功结算 + 失败结算 + 指向 TeamVault 的释放/销毁 + claimAll；预计 500~700 行 |
 | 4 | **TeamVault** | 自研（Tolk） | 1 | 托管 12 亿 Jetton Wallet（owner = TeamVault）；只接受 RC 指令，按轮释放/销毁 1.2 亿，幂等互斥；预计 150~250 行 |
 | 5 | Multisig v2 | 官方有，**不采用** | **0** | 项目不设多签（V4/V5） |
 | 6 | Lockup / Vesting | 官方有，**不采用** | **0** | 团队改为 TeamVault 轮次释放/销毁（V5） |
@@ -59,8 +59,8 @@
 | --- | --- | --- |
 | 开轮/关报名 | RoundController（单密钥 owner 触发） | 记录开轮时间、报名截止（报名窗口 72h，结算后立即开启） |
 | 质押 | 用户 | 标准 Jetton transfer 到本轮质押钱包（forward payload 写 roundId/nonce/riskVersion） |
-| 提交 K 线 | 任意白名单地址（测试网手动模式） | 提交 12 根 K 线数据（链下公开可复核） |
-| 判定/结算 | RoundController | 8/12 判定；成功：指令 TeamVault 释放 1.2 亿 + 开放 claimAll；失败：发起三笔 burn（含 TeamVault 销毁团队额度） |
+| 提交 K 线 | 任意白名单地址（测试网手动模式） | 提交 18 根 K 线数据（链下公开可复核） |
+| 判定/结算 | RoundController | 12/18 判定；成功：指令 TeamVault 释放 1.2 亿 + 开放 claimAll；失败：发起三笔 burn（含 TeamVault 销毁团队额度） |
 | 领取 | 用户 | claimAll（可跨轮累积，≤10 轮，合并一笔，用户付 gas） |
 | 开下一轮 | RoundController | 上一轮终态后**立即**开启（间隔 0） |
 
@@ -85,8 +85,8 @@
 
 ### 4.1 RoundController（约 500~700 行）
 
-1. 轮次状态机：UNOPENED → STAKING_OPEN（**72h**）→ STAKING_CLOSED → OBSERVING（48h / 12 根）→ SETTLING_SUCCESS / SETTLING_FAILURE → SUCCEEDED / FAILED_PERMANENT（含 ORACLE_PAUSED 分支）。
-2. K 线记录与计数：仅接受 12 个固定 index、严格时间区间、去重；达标数 >= 8 通过。
+1. 轮次状态机：UNOPENED → STAKING_OPEN（**72h**）→ STAKING_CLOSED → OBSERVING（72h / 18 根）→ SETTLING_SUCCESS / SETTLING_FAILURE → SUCCEEDED / FAILED_PERMANENT（含 ORACLE_PAUSED 分支）。
+2. K 线记录与计数：仅接受 12 个固定 index、严格时间区间、去重；达标数 >= 12 通过。
 3. 成功结算：按质押比例开放领取 + 领回本金；指令 **TeamVault 释放 1.2 亿**到团队收款钱包。
 4. 失败结算：发出**三笔** burn（奖励 7 亿 + 指令 TeamVault 销毁团队 1.2 亿 + 全部本金），确认后置终态；0 人质押且通过时销毁 7 亿奖励。
 5. **claimAll**：按（round, owner, type）幂等标记；单次最多遍历 10 轮；合并为一笔 Jetton 转账；gas 由用户承担。

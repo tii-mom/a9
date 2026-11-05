@@ -6,7 +6,7 @@
  *  - 可复现：所有地址/数量/成交由固定种子推导，时间以 EPOCH（默认 now）为锚点。
  *  - 幂等：先 DELETE 再 INSERT OR REPLACE，可反复执行（本地/远端都安全）。
  *  - 与 worker/src/sources/demo.ts 的判定规则一致：R1 10/12 成功、R2 6/12 失败（销毁 941.5M）、
- *    R3 观察中（已收盘 6 根，按 DEMO_CANDLE_SECONDS 继续推进）、R4..R10 UNOPENED。
+ *    R3 观察中（已收盘 9 根，按 DEMO_CANDLE_SECONDS 继续推进）、R4..R10 UNOPENED。
  *  - K 线不写进 seed：由 Worker 的 reconcile 依据 observation_start 确定性回填（单一事实来源）。
  *
  * 用法：
@@ -28,8 +28,8 @@ const TOKEN_DECIMALS = 9;
 const P0_USD_E8 = 116_000n; // $0.00116（1 GRAM = 1000 A9，GRAM = $1.16）
 const USD_SCALE = 100_000_000n;
 const ROUND_COUNT = 10;
-const CANDLE_COUNT = 12;
-const MIN_QUALIFIED_CANDLES = 8;
+const CANDLE_COUNT = 18;
+const MIN_QUALIFIED_CANDLES = 12;
 const CANDLE_SECONDS = 14_400;
 const OBSERVATION_SECONDS = CANDLE_SECONDS * CANDLE_COUNT;
 const ROUND_REWARD_TOKENS = 700_000_000n; // 70% / 10 轮
@@ -110,7 +110,7 @@ const ROUND_STAKES_TOKENS = {
 };
 
 // R3：已收盘 6 根（4 达标 / 2 未达标），第 7 根为 live；之后按 C 继续推进
-const R3_SEEDED_CANDLES = 6;
+const R3_SEEDED_CANDLES = 9;
 const R3_OBSERVATION_START = EPOCH - R3_SEEDED_CANDLES * C;
 const R3_STAKE_CLOSE = R3_OBSERVATION_START;
 const R3_STAKE_OPEN = R3_STAKE_CLOSE - 3 * DAY;
@@ -141,7 +141,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     observationStart = n(R1_STAKE_CLOSE);
     observationEnd = n(R1_STAKE_CLOSE + CANDLE_COUNT * C);
     candlesSeen = CANDLE_COUNT;
-    qualified = 10;
+    qualified = 15;
     totalStake = ROUND_STAKES_TOKENS[1] * TOKEN_SCALE;
     stakers = ADDRESSES.length;
     result = "'SUCCESS'";
@@ -153,7 +153,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     observationStart = n(R2_STAKE_CLOSE);
     observationEnd = n(R2_STAKE_CLOSE + CANDLE_COUNT * C);
     candlesSeen = CANDLE_COUNT;
-    qualified = 6;
+    qualified = 9;
     totalStake = ROUND_STAKES_TOKENS[2] * TOKEN_SCALE;
     stakers = ADDRESSES.length;
     result = "'FAILURE'";
@@ -166,7 +166,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     observationStart = n(R3_OBSERVATION_START);
     observationEnd = n(R3_OBSERVATION_START + CANDLE_COUNT * C);
     candlesSeen = R3_SEEDED_CANDLES;
-    qualified = 4;
+    qualified = 6;
     totalStake = ROUND_STAKES_TOKENS[3] * TOKEN_SCALE;
     stakers = ADDRESSES.length;
     updatedAt = EPOCH;
@@ -421,6 +421,7 @@ const configRows = [
   ['demo_epoch_ms', String(EPOCH)],
   ['demo_candle_seconds', String(DEMO_CANDLE_SECONDS)],
   ['demo_stake_seconds', '900'],
+  ['demo_preview_seconds', '90'],
   ['demo_autoplay', '1'],
   ['ton_usd_e8', '300000000'],
   ['tonconnect_manifest_url', '/tonconnect-manifest.json'],
@@ -595,9 +596,9 @@ console.log('  rounds               :', roundRows.length, '(R1 SUCCEEDED / R2 FA
 console.log('  stakes               :', stakeRows.length, '（12 地址 × R1/R2/R3）');
 console.log('  claims               :', claimRows.length);
 console.log('  burn_ledger          :', burnRows.length, '(R2 reward 700,000,000 + team 120,000,000 + principal 241,500,000 = 1,061,500,000 A9)');
-console.log('  candles              :', candleSeedRows.length, '(R1 12 / R2 12 / R3 6)');
+console.log('  candles              :', candleSeedRows.length, '(R1 18 / R2 18 / R3 9)');
 console.log('  trades               :', tradeRows.length, '/ book_levels:', bookRows.length, '/ admin_events:', eventRows.length);
-console.log('  R3 已收盘 K 线       :', R3_SEEDED_CANDLES, '（4 达标 / 2 未达标，第 7 根为 live）');
+console.log('  R3 已收盘 K 线       :', R3_SEEDED_CANDLES, '（6 达标 / 3 未达标，第 10 根为 live）');
 console.log('  R3 target            :', R3_TARGET.toString(), 'USD_E8（= 8 × P0）');
 console.log('  invariants           :', ok ? 'OK' : 'FAILED');
 if (!ok) process.exitCode = 1;

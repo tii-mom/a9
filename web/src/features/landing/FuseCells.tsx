@@ -26,13 +26,14 @@ export function FuseCells({ board, copy, candleMs }: Props) {
     return () => window.clearTimeout(timer);
   }, [flashIndex]);
 
+  const count = board.candleCount;
   const observing = board.phase !== 'stake' && board.phase !== 'unopened';
-  const progress = observing ? Math.min(12, board.done + (board.live ? Math.min(1, board.liveProgress) : 0)) / 12 * 100 : 0;
+  const progress = observing ? (Math.min(count, board.done + (board.live ? Math.min(1, board.liveProgress) : 0)) / count) * 100 : 0;
 
   return (
     <div className="cells" aria-label={copy.board.chartAria}>
       <div className={'fuse' + (observing ? '' : ' off')} style={{ width: progress + '%' }} />
-      {Array.from({ length: 12 }).map((_, i) => {
+      {Array.from({ length: count }).map((_, i) => {
         const candle = board.candles[i];
         const isLive = board.phase === 'observe' && i === board.done;
         let cls = 'cell ';

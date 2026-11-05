@@ -29,14 +29,17 @@ export const TOTAL_SUPPLY_RAW = 10_000_000_000n * TOKEN_SCALE;
 
 /** 真实规格：4 小时一根，共 12 根，至少 8 根达标 */
 export const CANDLE_SECONDS = 14_400;
-export const CANDLE_COUNT = 12;
-export const MIN_QUALIFIED_CANDLES = 8;
+export const CANDLE_COUNT = 18;
+export const MIN_QUALIFIED_CANDLES = 12;
 export const OBSERVATION_SECONDS = CANDLE_SECONDS * CANDLE_COUNT;
 /** 真实规格：报名窗口 72 小时（V5 口径：上一轮结算后即开启，窗口 72h） */
 export const STAKE_DURATION_SECONDS = 72 * 3600;
 /** 轮次间隔：上一轮结算完成后开启下一轮报名的缓冲（V5 暂定 0，价格闸门方案待定） */
-export const STAKE_GAP_SECONDS = 0;
+export const STAKE_GAP_SECONDS = 24 * 3600; // 结算后 24h 预告期，再开启下一轮质押
 export const RISK_DISCLOSURE_VERSION = 1;
+
+/** 演示预告期：默认 90s（仅 demo，用于展示倒计时） */
+export const DEFAULT_DEMO_PREVIEW_SECONDS = 90;
 
 /** 演示加速：默认 90s / 根（wrangler.toml 可覆盖） */
 export const DEFAULT_DEMO_CANDLE_SECONDS = 90;
@@ -113,5 +116,7 @@ export interface Params {
   autoplay: boolean;
   /** DEMO_STAKE_SECONDS：演示模式质押窗口时长（秒） */
   demoStakeSeconds: number;
+  /** 结算后到下一轮开启的预告期（秒）：demo 用 DEMO_PREVIEW_SECONDS，chain 用 24h */
+  previewSeconds: number;
   now: number;
 }

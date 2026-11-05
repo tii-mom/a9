@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type { ProtocolConfig } from '@shared/types';
-
 import type { BoardView } from './derive';
 import { IcoNo, IcoOk } from './icons';
 import { useLang } from '../../lib/lang';
@@ -13,32 +12,43 @@ interface Props {
   copy: LandingCopy;
 }
 
-const SIM_DEFAULT = [1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0].map(Boolean);
-const SIM_SEVEN = [1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0].map(Boolean);
+/** 18 candles with exactly 12 qualified (the default demo verdict). */
+const SIM_DEFAULT = [1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1].map(Boolean);
+/** One candle short of the pass line. */
+const SIM_SHORT = SIM_DEFAULT.map((value, index) => (index === 4 ? false : value));
+
+type Preset = 'all' | 'need' | 'short' | 'none';
 
 export function RulesSandbox({ cfg, board, copy }: Props) {
   const { lang } = useLang();
+  const candleCount = cfg?.candleCount ?? 18;
+  const need = cfg?.minQualifiedCandles ?? 12;
   const [sim, setSim] = useState<boolean[]>(SIM_DEFAULT);
   const [stakeText, setStakeText] = useState('100000');
   const decimals = cfg?.token.decimals ?? 9;
 
-  const count = sim.filter(Boolean).length;
-  const win = count >= 8;
+  const cells = Array.from({ length: candleCount }, (_, index) => sim[index] ?? false);
+  const count = cells.filter(Boolean).length;
+  const win = count >= need;
   const stake = Math.max(0, Number(stakeText) || 0);
   const totalStake = tokenNum(board.totalStakeRaw, decimals);
   const rewardBudget = tokenNum(board.rewardBudgetRaw, decimals);
   const reward = (rewardBudget * stake) / (totalStake + stake || 1);
   const rewardText = formatCompactNumber(rewardBudget, lang);
 
-  const applyPreset = (preset: number) => {
-    if (preset === 12) setSim(SIM_DEFAULT.map(() => true));
-    else if (preset === 8) setSim(SIM_DEFAULT.slice());
-    else if (preset === 7) setSim(SIM_SEVEN.slice());
-    else setSim(SIM_DEFAULT.map(() => false));
+  const applyPreset = (preset: Preset) => {
+    if (preset === 'all') setSim(Array.from({ length: candleCount }, () => true));
+    else if (preset === 'need') setSim(SIM_DEFAULT.slice(0, candleCount));
+    else if (preset === 'short') setSim(SIM_SHORT.slice(0, candleCount));
+    else setSim(Array.from({ length: candleCount }, () => false));
   };
 
   const toggle = (index: number) => {
-    setSim((prev) => prev.map((value, i) => (i === index ? !value : value)));
+    setSim((prev) => {
+      const next = Array.from({ length: candleCount }, (_, i) => prev[i] ?? false);
+      next[index] = !next[index];
+      return next;
+    });
   };
 
   return (
@@ -59,6 +69,7 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
             </div>
           ))}
         </div>
+        <p className="note">{copy.rules.formulaNote}</p>
 
         <div className="sec-h" style={{ marginTop: 44 }}>
           <span className="lbl">{copy.rules.sandLbl}</span>
@@ -69,10 +80,10 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
           <div className="panel">
             <div className="ph">
               <span className="lbl">{copy.rules.sandCellsTitle}</span>
-              <span className="lbl">{fill(copy.rules.sandCount, { n: count })}</span>
+              <span className="lbl">{fill(copy.rules.sandCount, { n: count, total: candleCount })}</span>
             </div>
             <div className="sand-cells">
-              {sim.map((on, index) => (
+              {cells.map((on, index) => (
                 <button
                   type="button"
                   className={'sc' + (on ? ' on' : '')}
@@ -88,28 +99,28 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
               ))}
             </div>
             <div className="presets">
-              <button className="btn sm" data-p="12" type="button" onClick={() => applyPreset(12)}>
+              <button className="btn sm" type="button" onClick={() => applyPreset('all')}>
                 {copy.rules.presets.all}
               </button>
-              <button className="btn sm" data-p="8" type="button" onClick={() => applyPreset(8)}>
+              <button className="btn sm" type="button" onClick={() => applyPreset('need')}>
                 {copy.rules.presets.eight}
               </button>
-              <button className="btn sm" data-p="7" type="button" onClick={() => applyPreset(7)}>
+              <button className="btn sm" type="button" onClick={() => applyPreset('short')}>
                 {copy.rules.presets.seven}
               </button>
-              <button className="btn sm" data-p="0" type="button" onClick={() => applyPreset(0)}>
+              <button className="btn sm" type="button" onClick={() => applyPreset('none')}>
                 {copy.rules.presets.none}
               </button>
             </div>
             <div className="gauge">
               <div className="bar">
-                <i className={win ? '' : 'lo'} style={{ width: (count / 12) * 100 + '%' }} />
-                <u />
+                <i className={win ? '' : 'lo'} style={{ width: (count / candleCount) * 100 + '%' }} />
+                <u style={{ left: (need / candleCount) * 100 + '%' }} />
               </div>
               <div className="lab">
                 <span>{copy.rules.gaugeZero}</span>
                 <span>{copy.rules.gaugePass}</span>
-                <span>12</span>
+                <span>{candleCount}</span>
               </div>
             </div>
           </div>
@@ -118,10 +129,10 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
             <h3>{win ? copy.rules.outWinTitle : copy.rules.outLoseTitle}</h3>
             <p>
               {win
-                ? fill(copy.rules.outWinBody, { n: count, reward: rewardText })
+                ? fill(copy.rules.outWinBody, { n: count, need, reward: rewardText })
                 : fill(copy.rules.outLoseBody, {
                     n: count,
-                    extra: count === 7 ? copy.rules.outLoseExtra : '',
+                    extra: count === need - 1 ? copy.rules.outLoseExtra : '',
                     reward: rewardText,
                   })}
             </p>

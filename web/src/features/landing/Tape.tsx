@@ -55,12 +55,12 @@ export function Tape({ cfg, stats, board, trades, copy }: Props) {
         )}
       </Item>
       <Item label={copy.tape.lit}>
-        <span className={board.hits >= 8 ? 'ok' : ''}>
-          {board.hits} / 8
+        <span className={board.hits >= board.need ? 'ok' : ''}>
+          {board.hits} / {board.need}
         </span>
       </Item>
       <Item label={copy.tape.miss}>
-        <span className={board.miss >= 4 ? 'bad' : ''}>{board.miss} / 5</span>
+        <span className={board.miss >= board.missAllowance ? 'bad' : ''}>{board.miss} / {board.failAt}</span>
       </Item>
       <Item label={copy.tape.stake}>{formatCompactToken(board.totalStakeRaw, decimals, lang) + ' A9'}</Item>
       <Item label={copy.tape.burned}>{formatCompactToken(stats?.burnedRaw ?? '0', decimals, lang) + ' A9'}</Item>

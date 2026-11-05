@@ -2,18 +2,19 @@ import { Link } from 'react-router-dom';
 import type { MeResponse, ProtocolConfig, ProtocolStats } from '@shared/types';
 import { formatPct, formatUsdE8, pad2 } from '../../lib/format';
 import { useLang } from '../../lib/lang';
-import { clockText, observeClock, priceMultiplierOf, targetFromConfig, type BoardView, type Phase } from './derive';
+import { priceMultiplierOf, targetFromConfig, type BoardView, type Phase } from './derive';
 import { FuseCells } from './FuseCells';
 import { IcoNo, IcoOk } from './icons';
 import { fill, type LandingCopy } from './landing.i18n';
 import { PriceChart } from './PriceChart';
-import { formatCompactToken, intFmt, tokenNum, usdNum } from './utils';
+import { formatCompactToken, formatCountdown, intFmt, tokenNum, usdNum } from './utils';
 
 interface Props {
   cfg: ProtocolConfig | null;
   stats: ProtocolStats | null;
   board: BoardView;
   secondsRemaining: number | null;
+  nextStakeSeconds: number | null;
   me: MeResponse | null;
   connected: boolean;
   copy: LandingCopy;
@@ -46,7 +47,19 @@ function phaseText(board: BoardView, copy: LandingCopy): string {
   return copy.board.phaseObserve;
 }
 
-export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected, copy, candleMs, claiming, onClaim }: Props) {
+export function BattleBoard({
+  cfg,
+  stats,
+  board,
+  secondsRemaining,
+  nextStakeSeconds,
+  me,
+  connected,
+  copy,
+  candleMs,
+  claiming,
+  onClaim,
+}: Props) {
   const { lang } = useLang();
   const decimals = cfg?.token.decimals ?? 9;
   const price = usdNum(board.priceUsdE8);
@@ -59,6 +72,10 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
   const hits = board.hits;
   const miss = board.miss;
   const phase = board.phase;
+  const need = board.need;
+  const failAt = board.failAt;
+  const missAllowance = board.missAllowance;
+  const candleCount = board.candleCount;
   const rewardHuman = tokenNum(board.rewardBudgetRaw, decimals);
   const stakeHuman = tokenNum(board.totalStakeRaw, decimals);
   const myPosition = me && board.roundId !== null ? me.stakes.find((s) => s.roundId === board.roundId) ?? null : null;
@@ -77,51 +94,56 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
         ? 'frozen'
         : 'pending';
 
-  const clockLabel =
-    phase === 'stake'
-      ? copy.board.stakeDeadline
+  // Three countdowns: pre-announcement → staking → observation.
+  const showNextStake = (phase === 'done' || phase === 'unopened') && nextStakeSeconds !== null;
+  const clockLabel = showNextStake
+    ? copy.board.nextStakeStarts
+    : phase === 'stake'
+      ? copy.board.stakeEnds
       : phase === 'observe' || phase === 'paused'
-        ? copy.board.observeLeft + (cfg?.dataSource === 'demo' ? copy.board.demoAccel : '')
+        ? copy.board.verdictIn + (cfg?.dataSource === 'demo' ? copy.board.demoAccel : '')
         : copy.board.roundLabel;
-  const clockValue =
-    phase === 'stake'
-      ? clockText(secondsRemaining)
-      : phase === 'observe' || phase === 'paused'
-        ? observeClock(secondsRemaining)
-        : board.result === 'win'
-          ? copy.board.settled
-          : board.result === 'lose'
-            ? copy.board.closed
-            : '—';
+  const clockValue = showNextStake
+    ? formatCountdown(nextStakeSeconds, lang)
+    : phase === 'stake' || phase === 'observe' || phase === 'paused'
+      ? formatCountdown(secondsRemaining, lang)
+      : board.result === 'win'
+        ? copy.board.settled
+        : board.result === 'lose'
+          ? copy.board.closed
+          : '—';
 
   // verdict
   let verdictKey = 'open';
   let verdictTitle = copy.board.verdictOpen;
   let verdictSub = fill(copy.board.verdictOpenSub, {
     remain: board.remain,
-    need: Math.max(0, 8 - hits),
-    margin: Math.max(0, 5 - miss),
+    need: Math.max(0, need - hits),
+    margin: Math.max(0, failAt - miss),
   });
+  const hitsLeft = Math.max(0, need - hits);
   if (phase === 'stake') {
     verdictKey = 'stake';
     verdictTitle = fill(copy.board.verdictStake, { target: target === null ? '—' : formatUsdE8(board.targetUsdE8) });
-    verdictSub = fill(copy.board.verdictStakeSub, { pct: gap === null ? '—' : ((target !== null && price !== null ? Math.abs(target / price - 1) : 0) * 100).toFixed(1) + '%' });
+    verdictSub = fill(copy.board.verdictStakeSub, {
+      pct: gap === null ? '—' : ((target !== null && price !== null ? Math.abs(target / price - 1) : 0) * 100).toFixed(1) + '%',
+    });
   } else if (board.result === 'win') {
     verdictKey = 'win';
-    verdictTitle = fill(copy.board.verdictWin, { hits });
-    verdictSub = copy.board.verdictDoneSub;
+    verdictTitle = fill(copy.board.verdictWin, { hits, total: candleCount });
+    verdictSub = fill(copy.board.verdictDoneSub, { total: candleCount });
   } else if (board.result === 'lose') {
     verdictKey = 'lose';
-    verdictTitle = fill(copy.board.verdictLose, { hits });
-    verdictSub = copy.board.verdictDoneSub;
-  } else if (hits >= 8) {
+    verdictTitle = fill(copy.board.verdictLose, { hits, total: candleCount });
+    verdictSub = fill(copy.board.verdictDoneSub, { total: candleCount });
+  } else if (hits >= need) {
     verdictKey = 'win';
     verdictTitle = copy.board.verdictLocked;
     verdictSub = fill(copy.board.verdictLockedSub, { hits });
-  } else if (miss >= 5) {
+  } else if (miss >= failAt) {
     verdictKey = 'lose';
     verdictTitle = copy.board.verdictLost;
-    verdictSub = fill(copy.board.verdictLostSub, { miss });
+    verdictSub = fill(copy.board.verdictLostSub, { miss, need });
   }
 
   // result numbers
@@ -148,10 +170,7 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
         </span>
         <div className="b-clock">
           <span className="lbl">{clockLabel}</span>
-          <div className="t">
-            {clockValue}
-            {(phase === 'observe' || phase === 'paused') && secondsRemaining !== null ? <span className="sub">{copy.board.observeTotal}</span> : null}
-          </div>
+          <div className="t">{clockValue}</div>
         </div>
         <div className="oracle">
           <span>
@@ -187,7 +206,9 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
           {phase === 'stake' ? (
             <span className="touch off">
               <IcoNo />
-              {fill(copy.board.needRise, { pct: target !== null && price !== null && price > 0 ? ((target / price - 1) * 100).toFixed(1) + '%' : '—' })}
+              {fill(copy.board.needRise, {
+                pct: target !== null && price !== null && price > 0 ? ((target / price - 1) * 100).toFixed(1) + '%' : '—',
+              })}
             </span>
           ) : (
             <span className={'touch ' + (above ? 'on' : 'off')}>
@@ -230,53 +251,53 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
           <span className="lbl">{copy.board.litNeed}</span>
           <div className="big">
             {hits}
-            <small>/ 8</small>
+            <small>/ {need}</small>
           </div>
           <div className="segs">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <i key={i} className={i < Math.min(8, hits) ? 'on' : ''} />
+            {Array.from({ length: need }).map((_, i) => (
+              <i key={i} className={i < Math.min(need, hits) ? 'on' : ''} />
             ))}
           </div>
           <div className="sub">
             {phase === 'stake'
               ? copy.board.hitSubWaiting
-              : hits >= 8
+              : hits >= need
                 ? <span className="ok">{copy.board.hitSubLocked}</span>
-                : fill(copy.board.hitSubNeed, { n: 8 - hits })}
+                : fill(copy.board.hitSubNeed, { n: hitsLeft })}
           </div>
         </div>
         <div>
           <span className="lbl">{copy.board.missLine}</span>
           <div className="big">
             {miss}
-            <small>/ 5</small>
+            <small>/ {failAt}</small>
           </div>
           <div className="segs miss">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <i key={i} className={i < Math.min(5, miss) ? 'on' : ''} />
+            {Array.from({ length: failAt }).map((_, i) => (
+              <i key={i} className={i < Math.min(failAt, miss) ? 'on' : ''} />
             ))}
           </div>
           <div className="sub">
             {phase === 'stake'
-              ? copy.board.missSubHint
-              : miss >= 5
+              ? fill(copy.board.missSubHint, { n: missAllowance })
+              : miss >= failAt
                 ? <span className="bad">{copy.board.missSubTriggered}</span>
-                : miss === 4
+                : miss === failAt - 1
                   ? <span className="bad">{copy.board.missSubOneMore}</span>
-                  : fill(copy.board.missSubLeft, { n: 4 - miss })}
+                  : fill(copy.board.missSubLeft, { n: failAt - 1 - miss })}
           </div>
         </div>
         <div>
           <span className="lbl">{copy.board.remainCandles}</span>
           <div className="big">
-            {phase === 'stake' ? 12 : board.remain}
+            {phase === 'stake' ? candleCount : board.remain}
             <small>{copy.board.unitCandle}</small>
           </div>
           <div className="sub">
             {phase === 'stake'
-              ? copy.board.remSubStake
+              ? fill(copy.board.remSubStake, { n: candleCount })
               : (board.live ? copy.board.remSubLive : '') +
-                (hits >= 8 ? copy.board.remSubNoNeed : fill(copy.board.remSubNeed, { n: Math.max(0, 8 - hits) }))}
+                (hits >= need ? copy.board.remSubNoNeed : fill(copy.board.remSubNeed, { n: hitsLeft }))}
           </div>
         </div>
       </div>
@@ -303,7 +324,11 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
             <>
               <h3>{fill(copy.board.resultWinTitle, { round: pad2(board.roundId ?? 0) })}</h3>
               <p>
-                {fill(copy.board.resultWinBody, { hits, reward: formatCompactToken(board.rewardBudgetRaw, decimals, lang) })}
+                {fill(copy.board.resultWinBody, {
+                  hits,
+                  total: candleCount,
+                  reward: formatCompactToken(board.rewardBudgetRaw, decimals, lang),
+                })}
                 {myStakeHuman > 0
                   ? ' ' +
                     fill(copy.board.resultWinMine, {
@@ -358,7 +383,7 @@ export function BattleBoard({ cfg, stats, board, secondsRemaining, me, connected
           ) : (
             <>
               <h3>{fill(copy.board.resultAbortTitle, { round: pad2(board.roundId ?? 0) })}</h3>
-              <p>{copy.board.resultAbortBody}</p>
+              <p>{fill(copy.board.resultAbortBody, { count: candleCount })}</p>
               <div className="row">
                 <Link className="btn" to="/me">
                   {copy.common.goMe}

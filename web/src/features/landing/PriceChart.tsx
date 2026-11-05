@@ -130,7 +130,8 @@ export function PriceChart({ cfg, board, copy }: Props) {
     const price = usdNum(board.priceUsdE8);
     const candlePrices = board.candles.map((c) => usdNum(c.twapPriceUsdE8));
     const liveTwap = usdNum(board.liveTwapUsdE8);
-    const cw = W / 12;
+    const count = board.candleCount;
+    const cw = W / count;
 
     const SAMPLES = 24;
     const roundSeed = (board.roundId ?? 1) * 10007;
@@ -153,16 +154,16 @@ export function PriceChart({ cfg, board, copy }: Props) {
         const liveCount = Math.max(2, Math.round(board.liveProgress * SAMPLES));
         for (let k = 0; k < liveCount; k++) {
           const t = board.done + ((k + 1) / liveCount) * board.liveProgress;
-          points.push({ t, x: 0, y: 0, price: path[k].price, candle: Math.min(12, board.done + 1) });
+          points.push({ t, x: 0, y: 0, price: path[k].price, candle: Math.min(count, board.done + 1) });
         }
         if (price !== null) {
-          points.push({ t: board.done + board.liveProgress, x: 0, y: 0, price, candle: Math.min(12, board.done + 1) });
+          points.push({ t: board.done + board.liveProgress, x: 0, y: 0, price, candle: Math.min(count, board.done + 1) });
         }
       } else if (price !== null) {
-        points.push({ t: 12, x: 0, y: 0, price, candle: points.length > 0 ? points[points.length - 1].candle : 0 });
+        points.push({ t: count, x: 0, y: 0, price, candle: points.length > 0 ? points[points.length - 1].candle : 0 });
       }
     } else if (price !== null) {
-      points.push({ t: 12, x: 0, y: 0, price, candle: 0 });
+      points.push({ t: count, x: 0, y: 0, price, candle: 0 });
     }
 
     const values: number[] = [];
@@ -203,7 +204,7 @@ export function PriceChart({ cfg, board, copy }: Props) {
     const padT = 16;
     const padB = 16;
     const toY = (value: number) => padT + (1 - (value - lo) / (hi - lo)) * (H - padT - padB);
-    const toX = (t: number) => (t / 12) * W;
+    const toX = (t: number) => (t / count) * W;
 
     points.forEach((p) => {
       p.x = toX(p.t);
@@ -212,7 +213,7 @@ export function PriceChart({ cfg, board, copy }: Props) {
     geoRef.current = { points, width: W };
 
     // candle columns
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < count; i++) {
       const x = i * cw;
       const candle = board.candles[i];
       let fillColor: string | null = null;
