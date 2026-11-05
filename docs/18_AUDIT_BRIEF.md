@@ -109,7 +109,7 @@ A9 是一个 TON 链上的价格对赌协议：**用户押本金，赌 72 小时
 cd contracts
 acton build --clear-cache    # 期望 0 error
 acton check                  # 期望 0 warning
-acton test                   # 期望 130 passed
+acton test                   # 期望 132 passed
 acton script scripts/deploy-emulation.tolk   # 期望 OK
 ```
 
@@ -145,12 +145,12 @@ acton script scripts/deploy-emulation.tolk   # 期望 OK
 
 | 合约 | 行数 | Code hash |
 | --- | --- | --- |
-| RoundController | 1,881 | 0x9BE0035A77FE3231D09D69F9A1F49DECBBE52769EFA631FE6DABC91D1738AEB9 |
-| TeamVault | 331 | 0x20E5C676878C61872BF352F1F7F43BC4B5C3E024E155E6B3E0AE53D1531432A5 |
+| RoundController | 1,924 | 0x7120E5FE1966B9C8B3DFF092D45441B6F896EF5041D36416BC5CD5B4C6893ED1 |
+| TeamVault | 336 | 0x14BA576796DF2489A17E00F5CC4FDFE1FD9DB11A3F692DB0F4A0CB5FA8F4EA41 |
 | JettonMaster | 245 | 0xDB3C43B4F1AF474416C2A27502479230B8A316A7A57F7D018452B12B25EB778B |
 | JettonWallet | 179 | 0x5840B389222182AA1D2C0C1CB2A275DB03C90D4197D5F15540EB128E615DA4CF |
 
-验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **130 passed** / `acton script scripts/deploy-emulation.tolk` OK。
+验证基线：`acton build --clear-cache` 0 error / `acton check` 0 error 0 warning / `acton test` **132 passed** / `acton script scripts/deploy-emulation.tolk` OK。
 
 若审计方的 hash 与上表不一致，说明代码已被改动，请先与项目方确认版本。
 
@@ -231,3 +231,16 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 | P2-2 | 中 | TV BurnTeamQuota 未检查 pending release | 抛 TeamRoundConflict |
 
 **关键交付：真实 JettonMaster + JettonWallet 集成测试（3 条）已建立**，覆盖成功轮释放确认、失败轮三笔销毁确认、R10 后 ClaimUnlocked 真实返回。测试总数 130。
+
+---
+
+## 13. v8.5：部署可验证性补强
+
+第四轮修复后，ops 在对接时发现两个缺口（均已补）：
+
+| 项 | 问题 | 修复 |
+| --- | --- | --- |
+| getter 缺失 | `SetJettonWalletCode` / `SetTeamWalletJettonWallet` 只写了 storage，没有只读接口 → verify_deployment 无法确认链上配置 | 新增 `get_jetton_wallet_code_hash(): uint256`（RC）与 `get_team_wallet_jetton_wallet(): address`（TV），**纯只读、零业务逻辑改动** |
+| stepwise 部署 | `admin_op.tolk` 没有两个 wiring op → 65 stepwise 广播会 unknown op | 不补 admin_op；测试网固定走「整体 deploy-emulation（内置 wiring）→ 65 --query-only → 70 --mark-bound-only」，stepwise 在 ops 层 BLOCKED |
+
+测试：132 passed / 13 文件（含 3 条真 Jetton 合约集成测试）。

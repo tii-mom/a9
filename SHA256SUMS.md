@@ -21,9 +21,9 @@
 - `docs/15_LIQUIDITY_PLAN.md`: `943877361873e3bccdc8c7484e8ada14899130291e292a8a49f35bc41a526aaf`
 - `docs/16_REWARD_EXAMPLES.md`: `6ee07cf2479bd9d71fbd25f205519b9fe6831f6ec4e974bd39e7d05b97836062`
 - `docs/17_REWARD_V2.md`: `617a6ef8578029248953ca340e8f17d9fa49461dfd9d235a1b7fb20dd9add18a`
-- `docs/18_AUDIT_BRIEF.md`: `b30fb8a728832367ba6f677f3ee3aab856733c53b1f1ba0da9d4f9dde8ca190e`
-- `contracts/contracts/RoundController.tolk`: `da7f42a6a3c293dfff9f0f18f99fd758a9389a118d633ff94d7469e65922a4c2`
-- `contracts/contracts/TeamVault.tolk`: `7b79ea32b630b4363bf8c4dae32e0b050f57e2dc7d1d04cd17aa35b4d64b9dde`
+- `docs/18_AUDIT_BRIEF.md`: `01a7ea1f3ccbc11eb646029bf941bedfc8f1c83dca6f013508ff192661c07862`
+- `contracts/contracts/RoundController.tolk`: `f34c964eb42aa7e5822c3c5d2a9149e9f401c3f11dbcb43397b7783342d6c817`
+- `contracts/contracts/TeamVault.tolk`: `d90a824ded844141145f46b29def0cbe192cb5d5158ab7df53b155ef24f87ab9`
 - `contracts/contracts/constants.tolk`: `ec7be046ebce1dfd0b4ea1eb420782fc3e22ab9fad3cf410c6a9745218756949`
 - `contracts/contracts/jetton.tolk`: `a7ed14478889e72df3155ca753da3de870ceccc4d2dd8603ba37e2e8b8808940`
 - `contracts/contracts/types.tolk`: `59e8d66624b53e053ed9226de613904962b9f1d718d9d12f068f9f90f774a5a3`
@@ -37,12 +37,12 @@
 - `contracts/contracts/jetton/storage.tolk`: `91f3cd66ae510524ceef543e9b79caf6dbe6e43007f7fd7ba6d8c402372063a6`
 - `contracts/Acton.toml`: `dcd085c65856eea06b92d4308f92d105a1ef432a99a4a5812b7e7fbea73a0f25`
 - `contracts/deploy/params.testnet.json`: `b89c1a498cfaba7c3891f72e3fda8b399bca0ba550361a3af334fb8c2403d0fc`
-- `ops/config/testnet.params.json`: `6a736c5174bdbbfb5f09224bf21202bab198012c27a34e0d368c32facdf4f580`
+- `ops/config/testnet.params.json`: `10bf9f2ed9ce0b7bf5319992e2dd5d768306fe29f8f2992ff81ceda77bcdfdfb`
 - `shared/types.ts`: `ea3b6dd27dd2c3f3de4dee8ad5d92e6faca3400f8027e070277a77d4f752415e`
 - `worker/src/protocol.ts`: `33790380790696ce6b53d288fd226e87e7ab8a42269d5ace5f7754fe19820d9d`
 - `worker/src/state.ts`: `0d24f0c6acd3228f555a1419a46b238e26fd30a595114376737e9f6be0a2f1dc`
 - `worker/src/views.ts`: `6af9718ee738f2ad9cd7b7fc1ad75ccbc58e64d208a7dbb41ec53fada4552894`
 - `worker/migrations/0004_observation_24.sql`: `6df6421d1e263dcdaa386882817bd7f43a071cf1ac4a774cac7ac56e331780db`
-- `worker/migrations/seed.sql`: `b2475a15d70710e15824aa4ebc72c93e5f69c9744e77afb719516c7fa6d27f68`
+- `worker/migrations/seed.sql`: `05ac7b0a9c5a7f684febdbd48b28893334512107d7d638adb44743f751d553c5`
 
 共 42 个文件。

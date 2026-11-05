@@ -59,11 +59,16 @@ test('allocation.sum', () => {
 });
 test('params.set_jetton_wallet_code', () => {
   assert(String(params.permissions.opcodes.SetJettonWalletCode || '').toLowerCase() === '0x5254001b', 'SetJettonWalletCode opcode 必须为 0x5254001B');
-  assert(Boolean(params.toolchain.adapters.acton.commands.setJettonWalletCode), '缺少 setJettonWalletCode 命令模板');
+  assert(String(params.permissions.opcodes.SetTeamWalletJettonWallet || '').toLowerCase() === '0x5254001c', 'SetTeamWalletJettonWallet opcode 必须为 0x5254001C');
+  assert(!params.toolchain.adapters.acton.commands.setJettonWalletCode, 'stepwise wiring 命令应已删除（admin_op 不提供）');
+  assert(!params.toolchain.adapters.acton.commands.setTeamWalletJettonWallet, 'stepwise wiring 命令应已删除（admin_op 不提供）');
+  assert(params.toolchain.adapters.acton.stepwiseDeployment && params.toolchain.adapters.acton.stepwiseDeployment.enabled === false, 'stepwiseDeployment 必须标记 disabled');
   const order = params.deployOrder.join(' ');
   assert(order.includes('SetJettonWalletCode'), 'deployOrder 缺少 SetJettonWalletCode 步骤');
-  assert(order.includes('teamWalletJettonWallet'), 'deployOrder 缺少 teamWalletJettonWallet 说明');
-  return '0x5254001B + 命令模板 + deployOrder 已就位';
+  assert(order.includes('SetTeamWalletJettonWallet'), 'deployOrder 缺少 SetTeamWalletJettonWallet 步骤');
+  const bind = params.toolchain.adapters.acton.commands.bindRoles;
+  assert(!bind.includes('A9_TEAM_WALLET_JETTON_WALLET'), 'InitController 不应再传 teamWalletJettonWallet');
+  return '1B/1C opcode + 整体部署路径 + deployOrder 已就位；stepwise wiring 已标记 disabled';
 });
 test('liquidity.cold_start', () => {
   const liquidity = params.supply.allocations.liquidity;
@@ -266,10 +271,18 @@ section('自测：SetJettonWalletCode（P0 修复）');
 test('dryrun.65.set_code', () => {
   const result = run([join(SCRIPTS, '65_set_jetton_wallets.mjs')], { OPS_REGISTRY: tempRegistry });
   assert(result.code === 0, '65 dry-run 失败：' + result.out.slice(-900));
-  for (const expected of ['SetJettonWalletCode', 'teamWalletJettonWallet', '0x5254001B']) {
+  for (const expected of ['SetJettonWalletCode', 'SetTeamWalletJettonWallet', 'teamWalletJettonWallet', '0x5254001B', '0x5254001C', 'query-only', 'BLOCKED']) {
     assert(result.out.includes(expected), '缺少新步骤字段：' + expected);
   }
-  return '65 dry-run 含 SetJettonWalletCode + 三地址查询 + teamWalletJettonWallet';
+  return '65 dry-run：整体部署 wiring + query-only 推荐 + stepwise BLOCKED';
+});
+
+test('dryrun.65.stepwise_blocked', () => {
+  const result = run([join(SCRIPTS, '65_set_jetton_wallets.mjs'), '--execute'], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 1, 'stepwise 65 应为 BLOCKED（exit 1），实际 ' + result.code);
+  assert(result.out.includes('BLOCKED'), '缺少 BLOCKED 说明');
+  assert(!result.out.includes('acton script'), 'stepwise 不应进入 acton 调用');
+  return '65 --execute（非 query-only）在 ops 层被拦截';
 });
 
 section('自测：全部脚本语法');

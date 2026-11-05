@@ -183,6 +183,7 @@
       "StakeDeposit": "0x5254000F",
       "SetJettonWallet": "0x52540016",
       "SetJettonWalletCode": "0x5254001B",
+      "SetTeamWalletJettonWallet": "0x5254001C",
       "AbortTechnical": "0x52540010",
       "StartObservation": "0x52540011",
       "InitController": "0x52540012",
@@ -226,10 +227,15 @@
           "adminOp": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} acton script scripts/deploy/admin_op.tolk {op} {roundId} {extra} --net testnet",
           "submitCandle": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_CANDLE_INDEX={candleIndex} A9_PERIOD_START={periodStart} A9_PERIOD_END={periodEnd} A9_TWAP_E8={twapUsdE8} A9_DIGEST={digest} acton script scripts/deploy/admin_op.tolk submit-candle {roundId} 0 --net testnet",
           "setJettonWallet": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} A9_TARGET_ADDRESS={targetContract} A9_JETTON_WALLET_ADDRESS={walletAddress} acton script scripts/deploy/admin_op.tolk set-jetton-wallet 0 --net testnet",
-          "setJettonWalletCode": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_JETTON_WALLET_CODE_BOC64={walletCodeBoc64} acton script scripts/deploy/admin_op.tolk set-jetton-wallet-code 0 0 --net testnet",
-          "bindRoles": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} TEAM_VAULT_ADDRESS={teamVault} A9_CONTROLLER_ADDRESS={roundController} A9_TEAM_WALLET_JETTON_WALLET={teamWalletJettonWallet} acton script scripts/deploy/admin_op.tolk init-controller 0 --net testnet"
+          "bindRoles": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} TEAM_VAULT_ADDRESS={teamVault} A9_CONTROLLER_ADDRESS={roundController} acton script scripts/deploy/admin_op.tolk init-controller 0 --net testnet"
         },
-        "note": "Acton script 只接受位置参数（按 main() 参数顺序），不支持 flag；广播脚本默认 dry-run，OPS_EXECUTE=1 才广播、OPS_CONFIRM=YES 二次确认、A9_SIGNER_WALLET 指定签名钱包；真实网络必须带 --net testnet；本地验证广播可加 OPS_ALLOW_EMULATION=true。deploy-emulation.tolk 是整体顺序部署（无子命令）；分步只保留 Jetton 两步。地址文件 contracts/deploy/{jetton-master,round-controller,team-vault}.addr 可直接读取。ABI_PENDING（task-27）：setJettonWalletCode / init-controller 的 teamWalletJettonWallet 字段按规格预留，contract-dev 交付后需复核 opcode/字段名。"
+        "note": "Acton script 只接受位置参数（按 main() 参数顺序），不支持 flag；广播脚本默认 dry-run，OPS_EXECUTE=1 才广播、OPS_CONFIRM=YES 二次确认、A9_SIGNER_WALLET 指定签名钱包；真实网络必须带 --net testnet；本地验证广播可加 OPS_ALLOW_EMULATION=true。deploy-emulation.tolk 是整体顺序部署（无子命令）；分步只保留 Jetton 两步。地址文件 contracts/deploy/{jetton-master,round-controller,team-vault}.addr 可直接读取。ABI v8.4-audit-fixed：SetJettonWalletCode=0x5254001B（code:cell，RC，仅 currentRoundId==0）、SetTeamWalletJettonWallet=0x5254001C（wallet:address，TV，admin 一次性）；TV 不通过 InitController 传 teamWallet 钱包。注意：admin_op 不提供这两个一次性 op（contract-dev 确认不补），因此测试网只走整体部署路径：15（内置 wiring）→ 65 --query-only → 70。",
+        "stepwiseDeployment": {
+          "enabled": false,
+          "blockedCommands": ["setJettonWalletCode", "setTeamWalletJettonWallet"],
+          "reason": "admin_op.tolk 未实现 set-jetton-wallet-code / set-team-wallet-jetton-wallet；仅 deploy-emulation 内置这两笔 wiring",
+          "recommendedPath": "15 deploy-emulation → 65 --query-only → 70 → 55 → 50 → 60 → 90"
+        }
       },
       "manual": {
         "bin": null,
@@ -242,6 +248,7 @@
     { "id": "jettonMaster", "step": 10, "script": "10_deploy_jetton.mjs", "modes": ["jetton"], "dependsOn": ["preflight"], "artifact": "contracts/build/JettonMaster.json" },
     { "id": "jettonMint", "step": 11, "script": "11_mint_and_lock_jetton.mjs", "modes": ["jetton"], "dependsOn": ["jettonMaster"], "artifact": "contracts/build/JettonMaster.json" },
     { "id": "contracts", "step": 15, "script": "15_deploy_contracts.mjs", "modes": ["whole"], "dependsOn": ["preflight"] },
+    { "id": "jettonWallets", "step": 65, "script": "65_set_jetton_wallets.mjs", "modes": ["whole"], "dependsOn": ["contracts"] },
     { "id": "params", "step": 40, "script": "40_init_params.mjs", "modes": ["whole"], "dependsOn": ["contracts"] },
     { "id": "tonGas", "step": 55, "script": "55_fund_ton.mjs", "modes": ["whole"], "dependsOn": ["params"] },
     { "id": "funding", "step": 50, "script": "50_fund_vaults.mjs", "modes": ["whole"], "dependsOn": ["tonGas"] },
@@ -258,10 +265,10 @@
     "2. 部署 TeamVault：jettonWallet 用占位地址（admin），controller = null",
     "3. 部署 RoundController：teamVault = TV 地址，stakingJettonWallet 用占位地址",
     "4. Jetton Master get_wallet_address(RC) → admin RC.SetJettonWallet(0x52540016)",
+    "4b. admin RC.SetJettonWalletCode(0x5254001B)：写入 jetton wallet code hash（仅 currentRoundId==0），供 ReturnExcessesBack 推导接收方 canonical 钱包（由 deploy-emulation 内置）",
     "5. Jetton Master get_wallet_address(TV) → admin TV.SetJettonWallet(0x52540016)",
-    "6. admin TV.InitController(roundController)（一次性）",
-    "4b. admin RC.SetJettonWalletCode(0x5254001B)：写入 jetton wallet code cell（仅 currentRoundId==0），供 ReturnExcessesBack 推导接收方 canonical 钱包",
-    "5b. 查询 teamWallet 的 canonical Jetton Wallet（get_wallet_address），InitController 时作为 teamWalletJettonWallet 传入 TeamVault",
+    "5b. 查询 teamWallet 的 canonical Jetton Wallet（get_wallet_address），由 admin 调 TV.SetTeamWalletJettonWallet(0x5254001C) 写入（不是 InitController 参数；由 deploy-emulation 内置）",
+    "6. admin TV.InitController(roundController)（一次性，不带 teamWallet 参数）",
     "7. 给 RC Jetton Wallet 打 70 亿 A9；给 TV Jetton Wallet 打 12 亿 A9；其余按 8/5/5 分配",
     "8. 给 RC ≥20 TON、TV ≥10 TON；admin OpenRound(round=1, twap24h) 开首轮（R1 无 PREVIEW）"
   ],

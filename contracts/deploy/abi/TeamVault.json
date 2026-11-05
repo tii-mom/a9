@@ -582,6 +582,12 @@
       "return_ty_idx": 29
     },
     {
+      "tvm_method_id": 129139,
+      "name": "get_team_wallet_jetton_wallet",
+      "parameters": [],
+      "return_ty_idx": 7
+    },
+    {
       "tvm_method_id": 103798,
       "name": "get_config",
       "parameters": [],

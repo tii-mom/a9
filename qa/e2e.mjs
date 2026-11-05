@@ -136,11 +136,20 @@ if (ADMIN_TOKEN) {
     const input = page.locator('input[type=password], input[name=token], input[placeholder*="令牌"]').first();
     await input.fill(ADMIN_TOKEN);
     await page.getByRole('button', { name: /^登录$/ }).click();
-    await page.waitForTimeout(2500);
+    // 等「已登录」出现（CSP/安全头上线后首屏请求变多，固定 sleep 不够稳；
+    // 不能用 /R1/ 判定——页面里其它数字可能提前命中）
+    await page
+      .waitForFunction(
+        () => /已登录/.test(document.body.innerText) || /令牌被服务端拒绝|UNAUTHORIZED/.test(document.body.innerText),
+        { timeout: 20000 },
+      )
+      .catch(() => {});
     const body = await page.locator('body').innerText();
-    if (/401|令牌被服务端拒绝/.test(body)) throw new Error('401');
-    if (!/R01|R1/.test(body)) throw new Error('未加载轮次表');
-    ok('/admin 登录并加载总览', 'overview ok');
+    // 用明确的错误文案判定，避免正文里的数字（如时间戳/金额）误命中 "401"
+    if (/令牌被服务端拒绝|管理员令牌无效|UNAUTHORIZED/.test(body)) throw new Error('401');
+    // 登录成功的稳定标志：已登录 + 系统健康面板（轮次表是异步加载，不作为硬断言）
+    if (!/已登录/.test(body) || !/系统健康/.test(body)) throw new Error('未进入后台总览');
+    ok('/admin 登录并加载总览', /R01|R1/.test(body) ? 'overview + rounds' : 'overview ok');
   });
 }
 

@@ -25,6 +25,8 @@ node ops/scripts/deploy_all.mjs
 # 4) 真实部署（推荐整体 deploy-emulation：Jetton + mint + TV + RC + 绑定）
 #    详细顺序与注意事项见 runbooks/01_deploy_testnet.md
 OPS_EXECUTE=1 node ops/scripts/15_deploy_contracts.mjs --execute
+OPS_EXECUTE=1 node ops/scripts/65_set_jetton_wallets.mjs --execute --query-only   # 只查询/登记三地址
+node ops/scripts/70_bind_roles.mjs --mark-bound-only                              # 15 已 InitController，只记录
 # ... 然后 40 → 55 → 50 → 60 → verify_deployment → 80 open-round R1
 node ops/scripts/verify_deployment.mjs --online --save
 

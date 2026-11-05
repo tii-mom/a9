@@ -1903,6 +1903,16 @@ get fun get_streak(owner: address): StreakInfo {
 }
 
 
+// Read-only config verification for ops: 0 before SetJettonWalletCode, then code hash.
+get fun get_jetton_wallet_code_hash(): uint256 {
+    val s = lazy Storage.load();
+    val code = vaults(s).jettonWalletCode;
+    if (code.depth() == 0) {
+        return 0 as uint256;
+    }
+    return code.hash();
+}
+
 get fun get_claim_counter(): uint64 {
     val s = lazy Storage.load();
     return s.extras.load().claimCounter;

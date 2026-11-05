@@ -22,6 +22,8 @@ node ops/scripts/deploy_all.mjs
 # 2) 真实部署（推荐：整体 deploy-emulation；会部署 Jetton + mint + TV + RC + 绑定）
 export OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name>
 node ops/scripts/15_deploy_contracts.mjs --execute   # acton script scripts/deploy-emulation.tolk --net testnet
+node ops/scripts/65_set_jetton_wallets.mjs --execute --query-only   # 只查询/登记三个 canonical 钱包（整体部署已内置 wiring）
+node ops/scripts/70_bind_roles.mjs --mark-bound-only                # 记录绑定并人工核对（15 已执行 InitController）
 node ops/scripts/40_init_params.mjs --execute --online
 OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
 OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
@@ -122,7 +124,14 @@ node ops/scripts/verify_deployment.mjs --offline
 
 ---
 
-## 5. 部署步骤（整体部署为主；Jetton 分步为备选）
+## 5. 部署步骤（整体部署是唯一推荐路径；Jetton 分步仅用于组建测试）
+
+> **唯一推荐部署路径（测试网）**：
+> `15_deploy_contracts.mjs --execute`（deploy-emulation，含 Jetton + mint + TV + RC + SetJettonWallet + **SetJettonWalletCode** + **SetTeamWalletJettonWallet** + InitController）
+> → `65_set_jetton_wallets.mjs --execute --query-only`（只查询/登记 RC/TV/teamWallet 三个 canonical 钱包）
+> → `70_bind_roles.mjs --mark-bound-only`（记录绑定并人工核对；15 已 InitController，不要再发）
+> → `40`（参数校验）→ `55`（TON gas）→ `50`（注资）→ `60`（登记表/地址簿）→ `90`（验收）→ `80 open-round R1`。
+> **stepwise 65 广播 BLOCKED**：admin_op 不提供 set-jetton-wallet-code / set-team-wallet-jetton-wallet（contract-dev 确认不补）。
 
 ### Step 0 — preflight
 
@@ -144,12 +153,13 @@ node ops/scripts/15_deploy_contracts.mjs --execute
 # 等价：cd contracts && acton script scripts/deploy-emulation.tolk --net testnet
 ~~~
 
-- 顺序：JettonMaster → mint 100 亿（**mint-once：op 0x00000015，金额必须 1e19，同一笔交易内 admin 置 null**，二次 mint 报 MintClosed(75)）→ TeamVault → RoundController → get_wallet_address → SetJettonWallet → **SetJettonWalletCode（P0 修复新增）** → InitController（带 teamWalletJettonWallet）。
-- P0 修复（ReturnExcessesBack 发送方是接收方钱包）：RC 需通过 SetJettonWalletCode(0x5254001B) 存下 JettonWallet code cell；TV 的 InitController 需带 teamWallet 的 canonical Jetton Wallet 地址。若 15 的整体脚本尚未包含这两步，执行 65 后再 70。
+- 顺序：JettonMaster → mint 100 亿（**mint-once：op 0x00000015，金额必须 1e19，同一笔交易内 admin 置 null**，二次 mint 报 MintClosed(75)）→ TeamVault → RoundController → get_wallet_address → SetJettonWallet → **SetJettonWalletCode（RC，0x5254001B）** → **SetTeamWalletJettonWallet（TV，0x5254001C）** → InitController（不带 teamWallet 参数）。
+- P0 修复（ReturnExcessesBack 发送方是接收方钱包）：RC 通过 SetJettonWalletCode(0x5254001B) 存 JettonWallet code；TV 通过独立消息 SetTeamWalletJettonWallet(0x5254001C) 存 teamWallet 的 canonical Jetton Wallet（**不是 InitController 参数**）。15 的整体脚本已内置这两笔 wiring；只需 65 --query-only 登记地址。stepwise 65 广播 BLOCKED（见 §5 唯一推荐路径）。
 - 该脚本是整体顺序部署，**没有分步子命令**；支持 --net testnet。
 - 脚本输出 JettonMaster / TeamVault / RoundController / RC Jetton Wallet / TV Jetton Wallet 地址；ops 的 15 脚本会解析这些地址写入登记表（失败时用 --from-log <日志> 重试，或 10/20/30 的 adopt 模式手工登记）。
 - 链上复核：total_supply=10000000000000000000、mintable=false、admin=null（verify_deployment 会检查）。
-- 成功后 TV/RC 已就位，跳过 Step 20/30/65/70；直接进入 Step 40。
+- 成功后 TV/RC 与两笔一次性 wiring（SetJettonWalletCode / SetTeamWalletJettonWallet）均已就位；接着执行 **65 --query-only**（只查询/登记 canonical 钱包）与 **70 --mark-bound-only**（记录绑定），再做 40/55/50/60/90。
+- **stepwise 65 广播已 BLOCKED**（admin_op 未实现对应 op），不要尝试 65 --execute。整体部署是测试网唯一推荐路径。
 
 ### Step 10 — Jetton Master（分步备选，位置参数）
 
@@ -177,25 +187,27 @@ node ops/scripts/11_mint_and_lock_jetton.mjs --execute
 
 - 整体 deploy-emulation 已部署 TeamVault 与 RoundController；20/30 仅用于 --adopt 手工登记与核对。
 
-### Step 65 — SetJettonWallet + SetJettonWalletCode + 三个 canonical 地址（P0 修复）
+### Step 65 — 只查询/登记三个 canonical Jetton Wallet（整体部署路径；stepwise 广播 BLOCKED）
 
 ~~~bash
-node ops/scripts/65_set_jetton_wallets.mjs --execute
+node ops/scripts/65_set_jetton_wallets.mjs --execute --query-only
 ~~~
 
-- 用 get_wallet_address / canonical 查询 RC、TeamVault、**teamWallet** 三个 Jetton Wallet 地址，并登记到 registry（teamWalletJettonWallet 供 70 使用）。
-- SetJettonWallet(RC/TV)（0x52540016）+ **SetJettonWalletCode(RC)**（0x5254001B，code 取自 contracts/build/JettonWallet.json 的 code_boc64；仅 currentRoundId==0，admin 一次性）。
-- 必须在 InitController / 第一轮之前完成；若整体部署已包含这些步骤，可跳过但需用 verify_deployment 核对。
-- ABI 待 contract-dev 最终确认（opcode/字段名以交付为准）。
+- 15 整体部署已内置 **SetJettonWalletCode(RC, 0x5254001B)** 与 **SetTeamWalletJettonWallet(TV, 0x5254001C)**，本步骤**不再发交易**，只查询并登记：
+  - RoundController / TeamVault / teamWallet 的 canonical Jetton Wallet（get_wallet_address / TON Center v3）；
+  - teamWalletJettonWallet 写入 registry，供 70 核对与 verify_deployment 校验。
+- **stepwise 65 广播 BLOCKED**：不要运行 65 --execute（admin_op 未实现这两个一次性 op）；runbook 已按整体部署路径改写。
+- 校验：verify_deployment 用 `get_jetton_wallet_code_hash()`（RC，uint256）与 `get_team_wallet_jetton_wallet()`（TV，address）硬校验。
 
-### Step 70 — InitController（带 teamWalletJettonWallet，不可逆）
+### Step 70 — InitController（不可逆；不再带 teamWallet 参数）
 
 ~~~bash
 OPS_CONFIRM=YES node ops/scripts/70_bind_roles.mjs --execute
 ~~~
 
-- InitController 现在还需传 teamWalletJettonWallet（由 65 查询/登记）；缺失则 EXECUTE 拒绝。
-- 双人核对 TeamVault 地址、RC 地址、teamWalletJettonWallet；若整体部署已代为 InitController，用 --mark-bound-only 记录并人工核对。
+- InitController **不带** teamWallet 参数（teamWalletJettonWallet 已由整体部署的 TV.SetTeamWalletJettonWallet(0x5254001C) 写入）；脚本只要求 RC/TV canonical 钱包已登记。
+- **整体部署路径已由 15 完成 InitController**：这里只跑 `--mark-bound-only` 记录绑定并人工核对；只有手工分步部署（未 init）才执行真实 InitController。
+- 双人核对 TeamVault 地址、RC 地址。
 
 ### Step 40 — 参数初始化校验
 
@@ -263,7 +275,7 @@ OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name> node ops/scri
 - contracts/README §3.2：R1 无 PREVIEW，OpenRound 交易中 stakeOpenAt = now，并锁定 target = max(P0×2^tier, 2×TWAP24h)。
 - 开轮前确认：TeamVault 绑定、SetJettonWallet、TON gas、奖励池/团队池已注资、公告已发、值班已就位。
 - 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> ROUND_CONTROLLER_ADDRESS=<rc> acton script scripts/deploy/admin_op.tolk open-round 1 <twap24h> --net testnet`。
-- op 映射：open-round(extra=twap24h)、close-staking(extra=twap1h)、start-observation(roundId)、finalize-round(roundId)、pause-oracle(extra=reason)、resume-oracle、abort-technical、retry-pending(roundId，无权限/任何人可触发)；set-jetton-wallet / set-jetton-wallet-code / init-controller 分别由 65/70 脚本调用（A9_TARGET_ADDRESS+A9_JETTON_WALLET_ADDRESS、A9_JETTON_WALLET_CODE_BOC64、TEAM_VAULT_ADDRESS+A9_CONTROLLER_ADDRESS+A9_TEAM_WALLET_JETTON_WALLET）。
+- op 映射：open-round(extra=twap24h)、close-staking(extra=twap1h)、start-observation(roundId)、finalize-round(roundId)、pause-oracle(extra=reason)、resume-oracle、abort-technical、retry-pending(roundId，无权限/任何人可触发，消息 value ≥0.3 TON)；set-jetton-wallet / set-jetton-wallet-code / set-team-wallet-jetton-wallet / init-controller 分别由 65/70 脚本调用（A9_TARGET_ADDRESS+A9_JETTON_WALLET_ADDRESS、A9_JETTON_WALLET_CODE_BOC64、A9_TEAM_WALLET_JETTON_WALLET、TEAM_VAULT_ADDRESS+A9_CONTROLLER_ADDRESS）。
 - RC 地址优先读登记表，缺失时回退 contracts/deploy/round-controller.addr。
 - 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
 - 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
@@ -275,7 +287,7 @@ node ops/scripts/verify_deployment.mjs --online --save
 ~~~
 
 - 离线：参数、阶梯、分配、登记表结构、资金记录。
-- 在线：合约账户 active、Jetton supply/mintable、RC 配置逐字段、R1 窗口与 target 锁定、TeamVault 参数。
+- 在线：合约账户 active、RC/TV code hash 与 build 一致、Jetton supply/mintable/admin=null、RC jettonWalletCode hash 与 JettonWallet.json 一致、TV teamWalletJettonWallet = get_wallet_address(teamWallet)、pendingQueryId 全 0、RC 配置逐字段、R1 窗口与 target 锁定、TeamVault 参数。
 - 任一 FAIL → 不得开 R1；先按失败项回退（§9）。
 
 ---
@@ -341,7 +353,7 @@ ops/config/testnet.addresses.template.json   // 人工填写模板（说明用�
 6. **Burn ack 信任模型（测试网）**：BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）；burn_notification 标准 op 为 0x7bdd97de（旧别名 0x7bcdefa0 也接受），对账按标准 op 过滤；主网前必须改为受审计扩展或“标准 burn + 链下对账 + owner 确认”。
 7. **晚开窗兜底**：keeper 错过整个 36h 报名窗口时 OpenRound 会重锚 stakeOpenAt；正常路径不触发，监控三倒计时。
 8. **Jetton mint-once**：op 0x00000015，金额 1e19，admin 置 null 必须同笔交易；二次 mint 报 MintClosed(75)。verify_deployment 检查 total_supply=1e19 / mintable=false / admin=null / decimals=9 / symbol=A9。
-9. **P0 修复 ReturnExcessesBack**：真实 TEP-74 退款由接收方钱包发出；RC 必须 SetJettonWalletCode(0x5254001B) 存 JettonWallet code，TV InitController 必须带 teamWalletJettonWallet；verify_deployment 新增 RC code / teamWallet canonical / pendingQueryId 校验。
+9. **P0 修复 ReturnExcessesBack**：真实 TEP-74 退款由接收方钱包发出；RC 必须 SetJettonWalletCode(0x5254001B) 存 JettonWallet code，TV 必须通过 SetTeamWalletJettonWallet(0x5254001C) 存 teamWallet canonical 钱包；verify_deployment 用 get_jetton_wallet_code / get_team_wallet_jetton_wallet 硬校验，并检查 pendingQueryId 全 0。
 
 ---
 

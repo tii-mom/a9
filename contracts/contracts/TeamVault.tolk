@@ -325,6 +325,11 @@ get fun get_round_state(roundId: uint8): TeamRoundState {
     return r.loadValue();
 }
 
+get fun get_team_wallet_jetton_wallet(): address {
+    val st = lazy TeamVaultStorage.load();
+    return st.extra.load().teamWalletJettonWallet;
+}
+
 get fun get_config(): TeamVaultConfig {
     val st = lazy TeamVaultStorage.load();
     return st.config;

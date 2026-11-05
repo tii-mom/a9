@@ -60,6 +60,7 @@ for (const item of plan) {
   const childArgs = [join(scriptsDir, item.script)];
   if (execute) childArgs.push('--execute');
   if (!execute && item.id === 'verify') childArgs.push('--offline');
+  if (item.id === 'jettonWallets') childArgs.push('--query-only');
   if (item.id === 'funding') childArgs.push('--all');
   section('step ' + item.step + ' — ' + item.id);
   detail('node ' + childArgs.join(' '));

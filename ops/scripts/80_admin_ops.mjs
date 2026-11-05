@@ -109,6 +109,9 @@ if (roundId < 1 && !['abort-technical', 'retry-pending', 'pause-oracle', 'resume
   fail('该动作需要 --round <1..10>');
   process.exit(finish());
 }
+if (action === 'retry-pending') {
+  detail('RetryPendingActions 无权限校验，任何人可触发；入口要求消息 value ≥ 0.3 TON（admin_op 统一按 0.3 TON 发送）。');
+}
 if (action === 'abort-technical') {
   detail('技术终止的合法条件：连续暂停 >= 14 天，或观察结束超时 >= 7 天。');
   detail('不满足条件时合约会 revert；提前触发失败会被审计日志记录。任何地址均可触发，owner 不独占。');

@@ -90,11 +90,13 @@ function isApiPath(request: Request): boolean {
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
+  // Cloudflare Web Analytics 由平台注入（无法移除）；若关闭 Analytics 可删除该域
+  "script-src 'self' https://static.cloudflareinsights.com",
+  // Google Fonts：原型字体（Big Shoulders Display / IBM Plex Mono / Noto Sans SC）
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  "connect-src 'self' https://a9.lat https://www.a9.lat https://tonapi.io https://*.tonapi.io https://bridge.tonapi.io wss://bridge.tonapi.io https://tonconnectbridge.mytonwallet.org wss://tonconnectbridge.mytonwallet.org https://app.tonkeeper.com https://web.tonkeeper.com https://tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "connect-src 'self' https://a9.lat https://www.a9.lat https://tonapi.io https://*.tonapi.io https://bridge.tonapi.io wss://bridge.tonapi.io https://tonconnectbridge.mytonwallet.org wss://tonconnectbridge.mytonwallet.org https://app.tonkeeper.com https://web.tonkeeper.com https://tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io https://cloudflareinsights.com",
   "frame-src 'self' https://app.tonkeeper.com https://web.tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io",
   "object-src 'none'",
   "frame-ancestors 'none'",

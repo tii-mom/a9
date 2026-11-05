@@ -2185,6 +2185,12 @@
       "return_ty_idx": 59
     },
     {
+      "tvm_method_id": 72064,
+      "name": "get_jetton_wallet_code_hash",
+      "parameters": [],
+      "return_ty_idx": 17
+    },
+    {
       "tvm_method_id": 109492,
       "name": "get_claim_counter",
       "parameters": [],

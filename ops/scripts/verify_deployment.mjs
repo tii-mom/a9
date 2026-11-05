@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /** 90 — 测试网部署验收：离线不变量 + 链上只读核对（--offline 跳过网络）。 */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
-import { RECORDS_DIR, asBigInt, formatTokens } from './lib/config.mjs';
+import { RECORDS_DIR, asBigInt, formatTokens, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress, resolveWalletAddress } from './lib/step.mjs';
-import { findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, parseAddress, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { CHECK_STATUS, check, verifyAllocationInvariant, verifyFundingPlan, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, summary } from './lib/log.mjs';
@@ -21,6 +21,38 @@ const offline = flag(args, 'offline');
 const strict = flag(args, 'strict');
 const checks = [];
 const add = (item) => checks.push(item);
+
+/** 期望的 JettonWallet code hash：contracts/build/JettonWallet.json 的 hash 字段。 */
+function loadBuildCodeHash(contractName) {
+  const file = resolvePath(params.toolchain.buildDir + '/' + contractName + '.json');
+  if (!existsSync(file)) return null;
+  try {
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    const hash = json.hash || json.code_hash;
+    return hash && /^[0-9a-fA-F]{64}$/.test(hash) ? hash.toLowerCase() : null;
+  } catch { return null; }
+}
+
+function hexFromCodeHashField(info) {
+  const raw = info && info.code_hash;
+  if (!raw) return null;
+  const text = String(raw).trim();
+  if (/^[0-9a-fA-F]{64}$/.test(text)) return text.toLowerCase();
+  try {
+    const hex = Buffer.from(text, 'base64').toString('hex');
+    return /^[0-9a-fA-F]{64}$/.test(hex) ? hex.toLowerCase() : null;
+  } catch { return null; }
+}
+
+function expectedJettonWalletCodeHash() {
+  const file = resolvePath(params.toolchain.buildDir + '/JettonWallet.json');
+  if (!existsSync(file)) return null;
+  try {
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    const hash = json.hash || json.code_hash;
+    return hash && /^[0-9a-fA-F]{64}$/.test(hash) ? hash.toLowerCase() : null;
+  } catch { return null; }
+}
 
 section('离线不变量');
 const allocation = verifyAllocationInvariant(params);
@@ -59,6 +91,18 @@ if (!offline) {
     });
   }
 
+  const addressHashFromSlice = (item) => {
+    if (!item || !item.value) return null;
+    try {
+      const bytes = Buffer.from(String(item.value), 'base64');
+      let bits = '';
+      for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
+      if (bits.length < 267 || bits.slice(0, 2) !== '10') return null;
+      let hex = '';
+      for (let offset = 0; offset < 256; offset += 4) hex += parseInt(bits.slice(11 + offset, 15 + offset), 2).toString(16);
+      return hex;
+    } catch { return null; }
+  };
   const tryGetMethod = async (address, methods) => {
     for (const method of methods) {
       try {
@@ -84,6 +128,15 @@ if (!offline) {
       const wallet = await findJettonWallet(params, jettonMaster, teamWallet);
       const recorded = resolveContractAddress(registry, 'teamWalletJettonWallet');
       add(check('jetton.wallet.teamWallet', wallet && recorded && wallet.address === recorded ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, wallet ? wallet.address + ' vs registry ' + (recorded || '未登记') : '未解析'));
+    });
+  }
+  for (const [key, address, buildName] of [['roundController', controller, 'RoundController'], ['teamVault', teamVault, 'TeamVault']]) {
+    if (!address) continue;
+    await netCheck(key + '.code_hash', async () => {
+      const info = await getAddressInformation(params, address);
+      const actual = hexFromCodeHashField(info);
+      const expected = loadBuildCodeHash(buildName);
+      add(check(key + '.code_hash', actual && expected && actual === expected ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, '链上 ' + (actual || '?') + ' vs build ' + (expected || '?')));
     });
   }
   for (const [key, address, minTon] of [['roundController', controller, 20], ['teamVault', teamVault, 10]]) {
@@ -115,14 +168,25 @@ if (!offline) {
   }
 
   if (controller) {
-    await netCheck('rc.jetton_wallet_code', async () => {
-      const result = await tryGetMethod(controller, ['get_jetton_wallet_code']);
-      if (!result) { add(check('rc.jetton_wallet_code', CHECK_STATUS.WARN, 'ABI_PENDING：get_jetton_wallet_code getter 待 contract-dev 确认，手动用 Acton rpc 核对')); return; }
-      const nonZero = result.stack.some((item) => {
-        const value = stackItemToBigInt(item);
-        return value !== null && value !== 0n;
-      }) || result.stack.some((item) => item && item.type === 'cell' || item && item.type === 'slice');
-      add(check('rc.jetton_wallet_code', nonZero ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, 'code cell ' + (nonZero ? '已设置' : '为空/未设置')));
+    await netCheck('rc.jetton_wallet_code_hash', async () => {
+      const expectedHash = expectedJettonWalletCodeHash();
+      if (!expectedHash) {
+        add(check('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, '缺少 contracts/build/JettonWallet.json 的 code hash；无法比对 RC.jettonWalletCode'));
+        return;
+      }
+      try {
+        const result = await tryGetMethod(controller, ['get_jetton_wallet_code_hash']);
+        if (!result) {
+          add(check('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'get_jetton_wallet_code_hash 调用失败（task-30 应提供该 getter）'));
+          return;
+        }
+        const actual = stackItemToBigInt(result.stack[0]);
+        if (actual === null) { add(check('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'getter 返回值无法解析为 uint256')); return; }
+        const actualHex = actual.toString(16).padStart(64, '0').slice(-64).toLowerCase();
+        add(check('rc.jetton_wallet_code_hash', actualHex === expectedHash ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, '链上 0x' + actualHex + ' vs build 0x' + expectedHash));
+      } catch (error) {
+        add(check('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'get_jetton_wallet_code_hash 调用失败：' + String(error.message || error).slice(0, 160)));
+      }
     });
     await netCheck('rc.get_protocol_config', async () => {
       const response = await runGetMethod(params, controller, 'get_protocol_config');
@@ -167,16 +231,30 @@ if (!offline) {
   if (teamVault) {
     await netCheck('teamVault.pending_query_ids', async () => {
       const result = await tryGetMethod(teamVault, ['get_pending_query_ids', 'get_pending_actions', 'get_pending_state']);
-      if (!result) { add(check('teamVault.pending_query_ids', CHECK_STATUS.WARN, 'ABI_PENDING：pendingQueryId getter 待 contract-dev 确认，手动用 Acton rpc 核对')); return; }
+      if (!result) { add(check('teamVault.pending_query_ids', CHECK_STATUS.WARN, '未提供聚合 pendingQueryId getter；需用索引器/Acton rpc 人工核对 pending release/burn 已清零')); return; }
       const nonZero = result.stack.map((item) => stackItemToBigInt(item)).filter((value) => value !== null && value !== 0n).length;
       add(check('teamVault.pending_query_ids', nonZero === 0 ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, nonZero === 0 ? '全为 0' : nonZero + ' 个 pending queryId 非 0'));
     });
     await netCheck('teamVault.teamWalletJettonWallet', async () => {
-      const result = await tryGetMethod(teamVault, ['get_team_wallet_jetton_wallet']);
-      if (!result) { add(check('teamVault.teamWalletJettonWallet', CHECK_STATUS.WARN, 'ABI_PENDING：getter 待 contract-dev 确认；已用 jetton.wallet.teamWallet 校验 canonical 一致性')); return; }
+      const teamWalletOwner = resolveWalletAddress(registry, 'teamWallet');
       const recorded = resolveContractAddress(registry, 'teamWalletJettonWallet');
-      const found = result.stack.some((item) => item && item.value && String(item.value).length > 0);
-      add(check('teamVault.teamWalletJettonWallet', found && recorded ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, 'registry=' + (recorded || '未登记') + ' getter=' + result.method));
+      let expectedHash = recorded ? parseAddress(recorded).hashHex : null;
+      if (jettonMaster && teamWalletOwner) {
+        try {
+          const canonical = await findJettonWallet(params, jettonMaster, teamWalletOwner);
+          if (canonical) expectedHash = parseAddress(canonical.address).hashHex;
+        } catch (error) { /* fallback to registry */ }
+      }
+      if (!expectedHash) { add(check('teamVault.teamWalletJettonWallet', CHECK_STATUS.FAIL, '无法确定期望钱包：registry 未登记且 get_wallet_address(teamWallet) 失败')); return; }
+      try {
+        const response = await runGetMethod(params, teamVault, 'get_team_wallet_jetton_wallet');
+        const stack = response.stack || [];
+        const actualHash = addressHashFromSlice(stack[0]);
+        const same = actualHash && actualHash.toLowerCase() === expectedHash.toLowerCase();
+        add(check('teamVault.teamWalletJettonWallet', same ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, same ? expectedHash : '链上 ' + (actualHash || '?') + ' vs canonical/get_wallet_address ' + expectedHash));
+      } catch (error) {
+        add(check('teamVault.teamWalletJettonWallet', CHECK_STATUS.FAIL, 'get_team_wallet_jetton_wallet 调用失败（task-30 getter）：' + String(error.message || error).slice(0, 160)));
+      }
     });
     await netCheck('teamVault.state', async () => {
       const response = await runGetMethod(params, teamVault, 'get_team_vault_state');
