@@ -3,6 +3,7 @@ import "@acton/build"
 import "@acton/emulation/network"
 import "@acton/emulation/testing"
 import "@acton/testing/expect"
+import "@acton/types/big_array"
 
 import "@contracts/constants"
 import "@contracts/types"
@@ -113,4 +114,51 @@ get fun `test C-4 real JettonWallet notifies owner after a second-hop bounce`() 
     val st = net.runGetMethod<MockBounceOwnerState>(ownerAddr, "get_state");
     expect(st.count).toEqual(1);
     expect(st.lastQueryId).toEqual(4242 as uint64);
+}
+
+
+// C-4 follow-up: low-TON wallet must still restore jetton balance when the
+// owner notification cannot be paid (SEND_MODE_IGNORE_ERRORS), with no bounce loop.
+get fun `test C-4 low-TON wallet keeps jetton rollback when owner notice fails`() {
+    val deployer = testing.treasury("c4b-deployer");
+    val admin = testing.treasury("c4b-admin");
+    val ownerInit = ContractState {
+        code: build("MockBounceOwner"),
+        data: MockBounceOwnerStorage { count: 0, lastQueryId: 0 }.toCell(),
+    };
+    val ownerAddr = AutoDeployAddress { stateInit: ownerInit }.calculateAddress();
+    expect(net.send(deployer.address, createMessage({
+        bounce: false, value: ton("1"), dest: { stateInit: ownerInit }, body: TopUpTons {},
+    }))).toHaveSuccessfulDeploy({ to: ownerAddr });
+
+    // deliberately under-funded wallet: 0.01 TON cannot pay the 0.02 TON notice
+    val walletStorage = WalletStorage {
+        jettonBalance: 0,
+        ownerAddress: ownerAddr,
+        minterAddress: admin.address,
+    };
+    val walletInit = ContractState { code: build("JettonWallet"), data: walletStorage.toCell() };
+    val walletAddr = AutoDeployAddress { stateInit: walletInit }.calculateAddress();
+    expect(net.send(deployer.address, createMessage({
+        bounce: false, value: ton("0.01"), dest: { stateInit: walletInit }, body: TopUpTons {},
+    }))).toHaveSuccessfulDeploy({ to: walletAddr });
+
+    val bounced = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x178d4519, 32) // InternalTransferStep
+        .storeUint(5150, 64)       // queryId
+        .storeCoins(1000)          // jettonAmount
+        .storeUint(0, 1)           // transferInitiator: null
+        .storeUint(0, 1)           // sendExcessesTo: null
+        .storeCoins(0)             // forwardTonAmount
+        .storeUint(0, 1)           // forwardPayload: inline empty
+        .endCell();
+    val res = net.send(admin.address, createMessage({
+        bounce: false, value: ton("0.001"), dest: walletAddr, body: bounced,
+    }).bounced());
+    // only the wallet transaction: the notice failed and was ignored (no owner tx, no loop)
+    expect(res.size()).toEqual(1);
+    val wd = net.runGetMethod<JettonWalletDataReply>(walletAddr, "get_wallet_data");
+    expect(wd.jettonBalance).toEqual(1000 as coins);
+    expect(net.runGetMethod<MockBounceOwnerState>(ownerAddr, "get_state").count).toEqual(0);
 }

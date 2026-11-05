@@ -54,7 +54,11 @@ fun onBouncedMessage(in: InMessageBounced) {
             dest: storage.ownerAddress,
             body: TransferBounced { queryId: bouncedQueryId },
         });
-        notice.send(SEND_MODE_PAY_FEES_SEPARATELY);
+        // C-4: IGNORE_ERRORS (2) is mandatory here. Without it a failed 0.02 TON
+        // notice would abort the whole action phase and roll back the jettonBalance
+        // restore above (permanent token loss). If the notice cannot be paid, we
+        // skip it and keep the balance rollback; worst case the owner stays pending.
+        notice.send(SEND_MODE_PAY_FEES_SEPARATELY | SEND_MODE_IGNORE_ERRORS);
     }
 }
 
