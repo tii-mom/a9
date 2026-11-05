@@ -71,7 +71,12 @@ Master 的结算确认。 - **向 TeamVault 下发团队额度指令**：成功�
 **pull claim / claimAll**：按（round, owner, type）做幂等记账，一次最多遍历 10 轮，合并为一笔转账。 -
 **单密钥 owner 权限最小化**：owner 仅能开轮、关报名、暂停/恢复预言机、必要时触发结算；
 不能转移用户质押本金，不能修改已开轮的目标价 / 阈值 / oracle config hash。 -
-**不可升级**（D-24）：无升级代理；不设多签。
+**不可升级**（D-24）：无升级代理；不设多签。 -
+**目标价写入（V5.4 已确认）**：合约**不预存 10 轮价格**；P0 与倍数是不
+可变常量、只存档位计数与每轮 `targetPriceUsdE8`。第 N 轮结算时写入
+第 N+1 轮 `targetPrice = P0 × 2^(下一档位)`，写入后不可改，并发出
+`TargetPriceSet(roundId, targetPriceUsdE8, tier)` 事件供索引/前端；若采用
+D-26 的「开窗闸门 + 超时提档」，提档目标价在**开轮交易**写入（仍在质押开始前、写入后不可改）。
 
 ### 2.3 StakingVault
 
@@ -126,7 +131,8 @@ ProtocolConfig {
     teamVault: address           // TeamVault 合约（持有 12 亿）
     teamWallet: address          // 团队收款钱包（个人热钱包，地址不公开）
     adminOwner: address          // 单密钥 owner（最小权限，不可升级）
-    p0UsdE8: uint128
+    p0UsdE8: uint128            // 不可变常量：$0.00116 → 116,000
+    priceMultiplier: uint8      // 不可变常量：2（V5.4 最终确认）
     tokenDecimals: uint8
     roundRewardRaw: uint128     // 700,000,000 × 10^decimals
     teamRoundRaw: uint128       // 120,000,000 × 10^decimals（每轮）
@@ -139,9 +145,16 @@ ProtocolConfig {
     configVersion: uint32
 }
 
+ProtocolState {
+    tier: uint8                  // 当前档位（= 1 + 已成功轮数；D-28 若采纳则用于同档重试）
+    currentRoundId: uint8
+}
+
 RoundData {
     roundId: uint8
-    targetPriceUsdE8: uint128
+    targetPriceUsdE8: uint128    // 由上一轮结算时写入；不可改
+    targetTier: uint8            // 写入时的档位
+    targetWrittenAt: uint64      // 写入交易时间
     rewardBudgetRaw: uint128
     status: uint8
     stakeOpenAt: uint64
@@ -362,7 +375,7 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 - **报名窗口参数**：新增 `stakeDurationSeconds = 172,800`（48h）与 `stakeGapSeconds = 172,800`（上一轮结算后 48h 开启）；`stakeOpenAt = prevSettledAt + stakeGap`，`stakeCloseAt = stakeOpenAt + stakeDuration`，报名关闭即进入观察（`observationStart = stakeCloseAt`）。（**V5 已改为 72h / gap 0**，见 §13）
 - **无人质押分支**：报名关闭时 `totalAcceptedStake == 0` 仍启动观察（不跳过、不延期、不判负）；失败照常销毁本轮 7 亿奖励，通过则按质押比例分配（0 人质押且通过时奖励销毁，D-18b 已定，见 §12）。
 - **奖励领取**：成功后**一次性发放、无归属期**（D-16/D-17 已定）；`ClaimReward` 仍是 pull claim，需幂等。
-- **价格参数**：`p0UsdE8 = 100,000`（P0 = $0.001），`target(roundId) = P0 × 2^roundId`，R10 = $1.024；`roundRewardRaw = 700,000,000 × 10^decimals`。
+- **价格参数（V5.3 时点）**：`p0UsdE8 = 100,000`（P0 = $0.001），`target(roundId) = P0 × 2^roundId`，R10 = $1.024；`roundRewardRaw = 700,000,000 × 10^decimals`。（**V5.4 已改为 P0 = 116,000**，见 §15）
 - **销毁口径**：失败轮销毁 `ROUND_REWARD + totalAcceptedStake`；无人质押时本金部分为 0。（V4 已更新为三笔，见 §12）
 
 ---
@@ -396,4 +409,14 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
   - **D-29 R1 启动规则**：Lead 推荐 R1 目标 = 1.3~1.5 × 上市基准 TWAP，之后每轮 ×2（当前仍 R1 = 2×P0）。
   - **D-30 搭便车时间加权**：Lead 建议第一版不做（方案 A）；方案 B 为报名前 24h 1.0× / 后 48h 0.5×。
 - 与 [docs/12_DESIGN_REVIEW.md](12_DESIGN_REVIEW.md) 的 P0-5 / P0-1 / P1-3 对齐；未定案前保持现有存储与状态机。
+
+---
+
+## 15. V5.4 变更注记（2026-11-05）
+
+- **P0 与比价**：**1 GRAM = 1000 A9** 固定比价 → P0 = **$0.00116**（USD_E8 = 116,000），FDV $11.6M，R1 $0.00232 → R10 $1.18784。**P0 与倍数（2×）均为不可变常量**。
+- **目标价写入时机**：合约**不预存 10 个价格**，只存 P0、倍数、档位计数、每轮 `targetPriceUsdE8`；**第 N 轮结算时写入第 N+1 轮目标价**，写入后不可改并发出 `TargetPriceSet`；R1 目标在部署/首轮开启时写入；闸门超时提档在开轮交易写入（质押开始前）。前端/文档阶梯由 `P0 × 2^n` 离线计算，任何人可用 P0 与倍数校验。
+- **冷启动池（已确认）**：1 亿 A9 + **$116,000** USDT @ $0.00116（与内盘价一致）；内盘募得 GRAM 部分换 USDT 进池、部分留营销。运营细则（分阶段双边加池、未售内盘转公开团队钱包）见 docs/01 §10 / docs/00 §7.13。
+- **D-31**：2× 最终确认，不再改动；docs/13 蒙特卡洛「2× 通过率≈0」结论保留为风险记录。
+- **D-32 待确认**：内盘/流动性比例调整（10%+5%，需减 2 点；A/B/C 三候选），当前基线仍是 70/13/12/5。
 

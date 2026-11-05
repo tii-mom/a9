@@ -8,8 +8,8 @@ export const TOKEN_DECIMALS = 9;
 export const TOKEN_SCALE = 1_000_000_000n;
 export const USD_SCALE = 100_000_000n;
 
-/** P0 = $0.001 → USD_E8（V3：第 10 轮目标 = 1024 × P0 = $1.024） */
-export const P0_USD_E8 = 100_000n;
+/** P0 = $0.00116（1 GRAM = 1000 A9，GRAM=$1.16）→ USD_E8；第 10 轮目标 = 1024 × P0 = $1.18784 */
+export const P0_USD_E8 = 116_000n;
 export const PRICE_MULTIPLIER = 2;
 /**
  * 目标价模式（V5 待决策，先用配置开关，避免定案后改合约参数名）：

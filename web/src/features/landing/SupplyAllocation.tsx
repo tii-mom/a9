@@ -32,11 +32,11 @@ export function SupplyAllocation({ cfg, rounds, copy }: Props) {
           ))}
           <div className="liq" style={{ flex: '13 1 0' }}>
             <b>{copy.supply.liq}</b>
-            <span>10%</span>
+            <span>13%</span>
           </div>
           <div className="team" style={{ flex: '12 1 0' }}>
             <b>{copy.supply.team}</b>
-            <span>10%</span>
+            <span>12%</span>
           </div>
           <div className="mkt" style={{ flex: '5 1 0' }}>
             <b>{copy.supply.mkt}</b>

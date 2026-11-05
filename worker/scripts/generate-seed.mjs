@@ -25,7 +25,7 @@ const OUT_FILE = join(WORKER_ROOT, 'migrations', 'seed.sql');
 
 const TOKEN_SCALE = 1_000_000_000n;
 const TOKEN_DECIMALS = 9;
-const P0_USD_E8 = 100_000n; // $0.001（V3）
+const P0_USD_E8 = 116_000n; // $0.00116（1 GRAM = 1000 A9，GRAM = $1.16）
 const USD_SCALE = 100_000_000n;
 const ROUND_COUNT = 10;
 const CANDLE_COUNT = 12;
