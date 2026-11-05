@@ -1,6 +1,6 @@
 # 04 --- 智能合约架构、存储与消息接口
 
-> **口径声明（V6）**：**观察 72h = 18 根 4h / 阈值 12（容错 6 根）**；**目标价开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**、锁定后不可改；**95% 闸门与 7 天提档已取消**；**24h PREVIEW 预告期已确认**（结算→预告→自动开窗）；保留触价提前关窗；单轮 7 天 / 10 轮 70 天；前端三个倒计时；内盘可售上限 8 亿 A9（硬上限、不可超卖；实际销量由项目方按市场决定、可分批；未售/撤回转团队内盘管理钱包）；合约不承担销售逻辑；分配 70% 奖励 + 8% 内盘（8 亿 A9，全售可募 $928,000）+ 5% 流动性（5 亿 A9，全额进池需 $580,000）+ 12% 团队 + 5% 营销；冷启动 1 亿 A9 + $116,000；RewardVault 70 亿 / 每轮 7 亿；**不允许取消质押（仅 TECHNICAL_ABORTED 退本金）**；D-28/29/30 待确认；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V6）**：**观察 72h = 18 根 4h / 阈值 12（容错 6 根）**；**目标价开窗时锁定 `max(阶梯 P0×2^tier, 2×开窗 24h TWAP)`**、锁定后不可改；**95% 闸门与 7 天提档已取消**；**24h PREVIEW 预告期已确认**（结算→预告→自动开窗）；保留触价提前关窗；单轮 7 天 / 10 轮 70 天；前端三个倒计时；内盘可售上限 8 亿 A9（硬上限、不可超卖；实际销量由项目方按市场决定、可分批；未售/撤回转团队内盘管理钱包）；合约不承担销售逻辑；分配 70% 奖励 + 8% 内盘（8 亿 A9，全售可募 $928,000）+ 5% 流动性（5 亿 A9，全额进池需 $580,000）+ 12% 团队 + 5% 营销；冷启动 1 亿 A9 + $116,000；RewardVault 70 亿 / 每轮 7 亿；**不允许取消质押（仅 TECHNICAL_ABORTED 退本金）**；D-29 待确认；D-28/D-30 已于 V6.1 确认；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 推荐架构
 
@@ -139,6 +139,11 @@ ProtocolConfig {
     priceMultiplier: uint8      // 不可变常量：2（V5.4 最终确认）
     tokenDecimals: uint8
     roundRewardRaw: uint128     // 700,000,000 × 10^decimals
+    minStakeRaw: uint128        // V6.1：10,000 × 10^decimals
+    maxStakePerAddressBps: uint16 // V6.1：1000（单地址 ≤ 本轮总质押 10%）
+    maxTotalStakeRaw: uint128    // V6.1：200,000,000 × 10^decimals
+    techAbortPauseSeconds: uint32    // V6.1：14 天
+    techAbortObservationTimeout: uint32 // V6.1：7 天
     teamRoundRaw: uint128       // 120,000,000 × 10^decimals（每轮）
     previewSeconds: uint32      // 86400：PREVIEW 预告期 24h（V6）
     stakeDurationSeconds: uint32 // 259200：报名窗口 72h
@@ -200,7 +205,7 @@ CandleRecord {
 建议使用字典按 `roundId`、`owner` 和 `candleIndex`
 索引。不要把无限增长的用户数组放入单个 cell，也不要在链上进行无界遍历。
 
-> **targetPrice 语义（D-28 待确认，Lead 建议：失败同档重试）**：当前 `RoundData.targetPriceUsdE8` 按「轮次」写入（`P0 × 2^roundId`，失败进入下一阶）。若采纳 D-28，需改为按「**档位 tier**」写入：
+> **targetPrice 语义（D-28 已确认，V6.1：失败同档重试）**：`RoundData.targetPriceUsdE8` 按「**档位 tier**」写入（`tier = 1 + 已成功轮数`；失败不升档、成功才升档）：
 > `targetPrice = P0 × 2^tier`，`tier = 1 + 已成功轮数`；失败轮不升档（下一轮沿用同一 targetPrice），成功才 `tier += 1`。`RoundData` 需增加 `tier: uint8` 字段（D-28 定案后）。**未定案前不要改存储结构。**
 
 ## 4. Jetton 质押入账
@@ -436,4 +441,14 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 - **取消**：95% 开窗闸门、每 4h 检查、最长 7 天等待、超时提档。
 - **保留**：触价提前关窗（报名期内 1h TWAP ≥ target 立即关窗）。
 - **时间线**：新增 `previewSeconds = 86,400`（24h PREVIEW）→ 自动开窗 → 报名 72h → 观察 72h；单轮 7 天 / 10 轮 70 天；前端三个倒计时。
+
+---
+
+## 18. V6.1 变更注记（2026-11-05）
+
+- **D-28 同档重试**：失败不升档（tier 不变），成功才 tier+1；目标价按 `max(P0×2^tier, 2×开窗 24h TWAP)` 重新锁定。
+- **D-30**：第一版不做时间加权；权重 = 有效质押数量。
+- **质押上下限**：`minStakeRaw = 10,000 × 10^decimals`；`maxStakePerAddressBps = 1000`（单地址 ≤ 本轮总质押 10%）；`maxTotalStakeRaw = 200,000,000 × 10^decimals`。
+- **技术终止**：连续暂停 14 天 或 观察结束超时 7 天 → **任何人可调用** `AbortTechnical`；退还 100% 本金、不销毁奖励/团队额度、不消耗档位；新增 `techAbortPauseSeconds` / `techAbortObservationTimeout`。
+- **R1 前校准**：V6.1 未确认；Lead 建议不保留（若保留仅限 R1 开窗前、只能下调 P0、≤30%、一次性、链上公告、执行后永久失效）。
 

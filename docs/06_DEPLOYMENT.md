@@ -87,7 +87,8 @@ project/
 配置各地址、owner 与权限（权限最小化；TeamVault.rc = RoundController）。 8. 向 RewardVault 注入70亿奖励池。 9.
 向 TeamVault 注入12亿团队额度。 10.
 验证10个轮次各有7亿独立预算（合计70亿）。 11. 验证团队额度参数与托管（每轮1.2亿 × 10轮 = 12亿，owner = TeamVault）。 12. 验证初始分配总和为100亿（70 / 8 / 5 / 12 / 5，内盘8亿 + 流动性5亿）。 13.
-验证报名窗口参数（`stakeDuration = 259200`、`stakeGap = 0`）。 14.
+验证报名窗口参数（`stakeDuration = 259200`、`previewSeconds = 86400`、观察 `candleCount = 18 / minQualified = 12 / observationSeconds = 259200`）。 14.
+验证质押限额（单笔 10,000 A9 / 单地址 ≤10% / 本轮 ≤200,000,000 A9）与技术终止参数（暂停 14 天 / 观察超时 7 天）。 15.
 验证 P0 常量（116,000）、倍数（2）与 R1 目标（$0.00232）已正确写入；结算后 `TargetPriceSet` 事件与下一轮 target 一致（不预存 10 轮价格）。 15.
 执行完整模拟轮次。
 
