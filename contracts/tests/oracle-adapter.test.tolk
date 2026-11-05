@@ -70,6 +70,7 @@ fun deployAdapter(admin: address, chainId: uint32, keys: OracleSignerKeys): Adap
         config: cfg.toCell(),
         usedMask: [],
         lastCandle: [],
+        pending: [],
     };
     val init = ContractState { code: build("OracleAdapter"), data: storage.toCell() };
     val addr = AutoDeployAddress { stateInit: init }.calculateAddress();
@@ -269,7 +270,7 @@ get fun `test 3/5 OpenRound is verified and forwarded with exact fields`() {
     val st = state(receiver);
     expect(st.openCount).toEqual(1);
     expect(st.lastTwap).toEqual(232000 as uint128);
-    expect(st.lastQueryId).toEqual(0 as uint64);
+    expect(st.lastQueryId).toEqual(65792 as uint64);
 }
 
 get fun `test 2/5 signatures are rejected`() {
@@ -497,4 +498,69 @@ get fun `test C-2 real RC accepts adapter candle sequence from index 0`() {
         i += 1;
     }
     expect(rcRound(rc, 1).candlesSeen).toEqual(3);
+}
+
+
+// C-3: RC rejects forwarded action -> adapter rolls back marker -> retry succeeds.
+get fun `test C-3 rejected CloseStaking rolls back and resubmits successfully`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val rc = deployRoundController(admin.address, adapter.address, admin.address, admin.address);
+    expect(setController(adapter, admin.address, rc.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    val hash = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_CLOSE, 1, 0, 0, 0, 250000 as uint128, 0 as uint256, T0 as uint64);
+    val body = SubmitSignedCloseStaking {
+        roundId: 1, twap1hUsdE8: 250000, timestamp: T0 as uint64,
+        sigCount: 3, sigs: buildSigs(keys, eqArray3(), hash),
+    };
+    // RC has no open round -> rejects; adapter must roll back closeUsed.
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
+        .toHaveSuccessfulTx<SubmitSignedCloseStaking>({ from: admin.address, to: adapter.address });
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).closeUsed).toBeFalse();
+
+    // make RC accept: open round 1 directly as admin
+    expect(openRound(rc, admin.address, 100000)).toHaveSuccessfulTx<OpenRound>({ from: admin.address, to: rc.address });
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
+        .toHaveSuccessfulTx<SubmitSignedCloseStaking>({ from: admin.address, to: adapter.address });
+    expect(rcStatus(rc, 1)).toEqual(STATUS_STAKING_CLOSED);
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).closeUsed).toBeTrue();
+}
+
+get fun `test C-3 rejected candle rolls back lastCandle and resubmits`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val rc = deployRoundController(admin.address, adapter.address, admin.address, admin.address);
+    expect(setController(adapter, admin.address, rc.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    expect(openRound(rc, admin.address, 100000)).toHaveSuccessfulTx<OpenRound>({ from: admin.address, to: rc.address });
+    advance(STAKE_DURATION_SECONDS as int);
+    expect(closeStaking(rc, admin.address, 0)).toHaveSuccessfulTx<CloseStaking>({ from: admin.address, to: rc.address });
+    expect(startObservation(rc, admin.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: admin.address, to: rc.address });
+    val start = rcRound(rc, 1).observationStart;
+    val pStart: uint32 = start as uint32;
+    val pEnd: uint32 = (start + (CANDLE_SECONDS as uint64)) as uint32;
+    val ts: uint64 = pEnd as uint64;
+    testing.setNow((pEnd as int) - 100); // too early for RC
+    val h = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_CANDLE, 1, 0, pStart, pEnd, 300000 as uint128, 0x77 as uint256, ts);
+    val body = SubmitSignedCandle {
+        roundId: 1, candleIndex: 0, periodStart: pStart, periodEnd: pEnd,
+        twapPriceUsdE8: 300000, dataDigest: 0x77 as uint256, timestamp: ts,
+        sigCount: 3, sigs: buildSigs(keys, eqArray3(), h),
+    };
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
+        .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
+    expect(rcRound(rc, 1).candlesSeen).toEqual(0);
+
+    testing.setNow(pEnd as int);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address, body })))
+        .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+    expect(rcRound(rc, 1).candlesSeen).toEqual(1);
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
 }

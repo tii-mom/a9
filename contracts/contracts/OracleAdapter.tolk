@@ -167,6 +167,10 @@ fun requireController(cfg: OracleAdapterConfig): address {
     return cfg.controller!;
 }
 
+fun forwardQueryId(roundId: uint8, action: uint8, candleIndex: uint8): uint64 {
+    return ((roundId as uint64) << 16) | ((action as uint64) << 8) | (candleIndex as uint64);
+}
+
 fun forwardTarget(target: address, body: cell) {
     val out = createMessage({
         bounce: true,
@@ -267,10 +271,16 @@ fun onInternalMessage(in: InMessage) {
                 throw Errors.ReplayAction;
             }
             st.usedMask.set(msg.roundId, used | SIGNED_ACTION_OPEN);
+            val q = forwardQueryId(msg.roundId, SIGNED_ACTION_OPEN, 0);
+            st.pending.set(q, OraclePendingForward {
+                kind: SIGNED_ACTION_OPEN,
+                prevLastPlus: 0,
+                acceptedLastPlus: 0,
+            });
             st.save();
             forwardTarget(controller, beginCell()
                 .storeUint(OP_OPEN_ROUND, 32)
-                .storeUint(0, 64)
+                .storeUint(q, 64)
                 .storeUint(msg.twap24hUsdE8, 128)
                 .endCell());
         }
@@ -294,10 +304,16 @@ fun onInternalMessage(in: InMessage) {
                 throw Errors.ReplayAction;
             }
             st.usedMask.set(msg.roundId, used | SIGNED_ACTION_CLOSE);
+            val q = forwardQueryId(msg.roundId, SIGNED_ACTION_CLOSE, 0);
+            st.pending.set(q, OraclePendingForward {
+                kind: SIGNED_ACTION_CLOSE,
+                prevLastPlus: 0,
+                acceptedLastPlus: 0,
+            });
             st.save();
             forwardTarget(controller, beginCell()
                 .storeUint(OP_CLOSE_STAKING, 32)
-                .storeUint(0, 64)
+                .storeUint(q, 64)
                 .storeUint(msg.twap1hUsdE8, 128)
                 .endCell());
         }
@@ -322,14 +338,21 @@ fun onInternalMessage(in: InMessage) {
             if ((msg.candleIndex as int) + 1 <= (lastPlus as int)) {
                 throw Errors.BadCandleOrder;
             }
-            st.lastCandle.set(msg.roundId, (msg.candleIndex as uint8) + 1);
+            val acceptedPlus: uint8 = (msg.candleIndex as uint8) + 1;
+            st.lastCandle.set(msg.roundId, acceptedPlus);
             val mask = st.usedMask.get(msg.roundId);
             val used: uint8 = mask.isFound ? mask.loadValue() : 0;
             st.usedMask.set(msg.roundId, used | SIGNED_ACTION_CANDLE);
+            val q = forwardQueryId(msg.roundId, SIGNED_ACTION_CANDLE, msg.candleIndex);
+            st.pending.set(q, OraclePendingForward {
+                kind: SIGNED_ACTION_CANDLE,
+                prevLastPlus: lastPlus,
+                acceptedLastPlus: acceptedPlus,
+            });
             st.save();
             forwardTarget(controller, beginCell()
                 .storeUint(OP_SUBMIT_CANDLE, 32)
-                .storeUint(0, 64)
+                .storeUint(q, 64)
                 .storeUint(msg.roundId, 8)
                 .storeUint(msg.candleIndex, 8)
                 .storeUint(msg.periodStart, 32)
@@ -343,7 +366,43 @@ fun onInternalMessage(in: InMessage) {
     }
 }
 
-fun onBouncedMessage(_in: InMessageBounced) {}
+fun onBouncedMessage(in: InMessageBounced) {
+    // C-3: RC rejected the forwarded action -> precisely roll back the replay
+    // marker before the caller can resubmit. Forwarded messages carry queryId =
+    // roundId<<16 | action<<8 | candleIndex and bounce 256 bits of the body.
+    var st = lazy OracleAdapterStorage.load();
+    val cfg = st.config.load();
+    if (cfg.controller == null || in.senderAddress != cfg.controller!) {
+        return;
+    }
+    in.bouncedBody.skipBouncedPrefix();
+    if (in.bouncedBody.remainingBitsCount() < 96) {
+        return;
+    }
+    in.bouncedBody.loadUint(32); // opcode
+    val q: uint64 = in.bouncedBody.loadUint(64) as uint64;
+    val found = st.pending.get(q);
+    if (!found.isFound) {
+        return;
+    }
+    val p = found.loadValue();
+    val roundId: uint8 = ((q >> 16) & 0xff) as uint8;
+    val maskRes = st.usedMask.get(roundId);
+    val mask: uint8 = maskRes.isFound ? maskRes.loadValue() : 0;
+    if (p.kind == SIGNED_ACTION_OPEN) {
+        st.usedMask.set(roundId, mask & ~SIGNED_ACTION_OPEN);
+    } else if (p.kind == SIGNED_ACTION_CLOSE) {
+        st.usedMask.set(roundId, mask & ~SIGNED_ACTION_CLOSE);
+    } else if (p.kind == SIGNED_ACTION_CANDLE) {
+        val lastRes = st.lastCandle.get(roundId);
+        val current: uint8 = lastRes.isFound ? lastRes.loadValue() : 0;
+        if (current == p.acceptedLastPlus) {
+            st.lastCandle.set(roundId, p.prevLastPlus);
+        }
+    }
+    st.pending.delete(q);
+    st.save();
+}
 
 // ---------------------------------------------------------------------------
 // Getters

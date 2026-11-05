@@ -700,10 +700,18 @@ struct OracleSignersTail {
     s4: uint256
 }
 
+struct OraclePendingForward {
+    kind: uint8
+    prevLastPlus: uint8
+    acceptedLastPlus: uint8
+}
+
 struct OracleAdapterStorage {
     config: Cell<OracleAdapterConfig>
     usedMask: map<uint8, uint8>
     lastCandle: map<uint8, uint8>
+    // C-3: keyed by forwarded queryId = roundId<<16 | action<<8 | candleIndex
+    pending: map<uint64, OraclePendingForward>
 }
 
 struct OracleConfigView {

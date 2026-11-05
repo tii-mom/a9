@@ -99,6 +99,48 @@ fun tonSource(envName: string): string {
     return env<string>(envName) == null ? "default" : "env";
 }
 
+fun parseEnvIntStrict(raw: string, envName: string): int {
+    var s = raw.beginParse();
+    var value: int = 0;
+    var digits: int = 0;
+    while (s.remainingBitsCount() >= 8) {
+        val ch = s.loadUint(8);
+        if (ch < 48 || ch > 57) {
+            Assert.fail(format("invalid {}={}: expected integer", envName, raw));
+        }
+        value = value * 10 + (ch - 48);
+        digits += 1;
+    }
+    if (digits == 0) {
+        Assert.fail(format("invalid {}={}: empty integer", envName, raw));
+    }
+    return value;
+}
+
+fun intSetting(envName: string, defaultVal: int): int {
+    val raw = env<string>(envName);
+    if (raw == null) {
+        return defaultVal;
+    }
+    return parseEnvIntStrict(raw!, envName);
+}
+
+fun intSource(envName: string): string {
+    return env<string>(envName) == null ? "default" : "env";
+}
+
+fun coinRawSetting(envName: string, defaultVal: uint128): uint128 {
+    val raw = env<string>(envName);
+    if (raw == null) {
+        return defaultVal;
+    }
+    val v = parseEnvIntStrict(raw!, envName);
+    if (v <= 0) {
+        Assert.fail(format("invalid {}={}: must be > 0", envName, raw!));
+    }
+    return v as uint128;
+}
+
 fun requireActive(addr: address, name: string, expectedCode: cell, needed: coins) {
     if (!scripts.isContractDeployed(addr)) {
         Assert.fail(
@@ -143,6 +185,39 @@ fun main() {
         tvTon, tonSource("A9_DEPLOY_TON_TEAM_VAULT"),
         rcTon, tonSource("A9_DEPLOY_TON_ROUND_CONTROLLER"),
     );
+    val previewSeconds = intSetting("A9_TIMING_PREVIEW_SECONDS", 43200);
+    val stakeSeconds = intSetting("A9_TIMING_STAKE_SECONDS", 129600);
+    val candleSeconds = intSetting("A9_TIMING_CANDLE_SECONDS", 3600);
+    val candleCount = intSetting("A9_TIMING_CANDLE_COUNT", 24);
+    val minQualified = intSetting("A9_TIMING_MIN_QUALIFIED", 16);
+    val observationSeconds = intSetting("A9_TIMING_OBSERVATION_SECONDS", 86400);
+    val roundRewardRaw = coinRawSetting("A9_DEPLOY_ROUND_REWARD_RAW", PARAM_ROUND_REWARD);
+    val teamRoundRaw = coinRawSetting("A9_DEPLOY_TEAM_ROUND_RAW", PARAM_TEAM_ROUND);
+
+    if (previewSeconds <= 0 || stakeSeconds <= 0 || candleSeconds <= 0 || candleCount <= 0 || observationSeconds <= 0) {
+        Assert.fail("timing values must all be > 0");
+    }
+    if (observationSeconds != candleSeconds * candleCount) {
+        Assert.fail("invalid timing: observationSeconds must equal candleSeconds * candleCount");
+    }
+    if (minQualified > candleCount || minQualified * 2 <= candleCount) {
+        Assert.fail("invalid timing: minQualified must be <= candleCount and > candleCount/2");
+    }
+    println(
+        "Timing: preview={} [{}] stake={} [{}]",
+        previewSeconds, intSource("A9_TIMING_PREVIEW_SECONDS"),
+        stakeSeconds, intSource("A9_TIMING_STAKE_SECONDS"),
+    );
+    println(
+        "Timing: candle={} [{}] count={} [{}]",
+        candleSeconds, intSource("A9_TIMING_CANDLE_SECONDS"),
+        candleCount, intSource("A9_TIMING_CANDLE_COUNT"),
+    );
+    println(
+        "Timing: minQ={} [{}] obs={} [{}]",
+        minQualified, intSource("A9_TIMING_MIN_QUALIFIED"),
+        observationSeconds, intSource("A9_TIMING_OBSERVATION_SECONDS"),
+    );
     val deployer = scripts.wallet("deployer");
     val admin = scripts.wallet("admin");
     val teamWallet = scripts.wallet("team-wallet");
@@ -151,8 +226,8 @@ fun main() {
     println("  totalSupplyRaw     = {}", PARAM_TOTAL_SUPPLY);
     println("  p0UsdE8            = {}", PARAM_P0);
     println("  priceMultiplier    = 2");
-    println("  roundRewardRaw     = {}", PARAM_ROUND_REWARD);
-    println("  teamRoundRaw       = {}", PARAM_TEAM_ROUND);
+    println("  roundRewardRaw     = {} [{}]", roundRewardRaw, intSource("A9_DEPLOY_ROUND_REWARD_RAW"));
+    println("  teamRoundRaw       = {} [{}]", teamRoundRaw, intSource("A9_DEPLOY_TEAM_ROUND_RAW"));
     println("  minStakeRaw        = {}", PARAM_MIN_STAKE);
     println("  maxTotalStakeRaw   = {}", PARAM_MAX_TOTAL_STAKE);
 
@@ -222,7 +297,7 @@ fun main() {
             jettonWallet: admin.address,
             teamWallet: teamWallet.address,
             jettonMaster: masterAddress,
-            teamRoundRaw: PARAM_TEAM_ROUND,
+            teamRoundRaw,
         }.toCell(),
         extra: TeamVaultExtra { teamWalletJettonWallet: admin.address }.toCell(),
         rounds: [],
@@ -252,6 +327,7 @@ fun main() {
         config: adapterCfg.toCell(),
         usedMask: [],
         lastCandle: [],
+        pending: [],
     };
     val adapterInit = ContractState { code: build("OracleAdapter"), data: adapterStorage.toCell() };
     val adapterAddress = AutoDeployAddress { stateInit: adapterInit }.calculateAddress();
@@ -281,19 +357,19 @@ fun main() {
     val econ = ProtocolEcon {
         p0UsdE8: PARAM_P0,
         priceMultiplier: 2,
-        roundRewardRaw: PARAM_ROUND_REWARD,
-        teamRoundRaw: PARAM_TEAM_ROUND,
+        roundRewardRaw,
+        teamRoundRaw,
         minStakeRaw: PARAM_MIN_STAKE,
         maxStakePerAddressBps: 1000,
         maxTotalStakeRaw: PARAM_MAX_TOTAL_STAKE,
     };
     val timing = ProtocolTiming {
-        previewSeconds: 43200,
-        stakeDurationSeconds: 129600,
-        candleSeconds: 3600,
-        candleCount: 24,
-        minQualifiedCandles: 16,
-        observationSeconds: 86400,
+        previewSeconds: previewSeconds as uint32,
+        stakeDurationSeconds: stakeSeconds as uint32,
+        candleSeconds: candleSeconds as uint32,
+        candleCount: candleCount as uint8,
+        minQualifiedCandles: minQualified as uint8,
+        observationSeconds: observationSeconds as uint32,
         techAbortPauseSeconds: 1209600,
         techAbortObsTimeoutSeconds: 604800,
         riskDisclosureVersion: 1,
