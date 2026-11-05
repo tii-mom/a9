@@ -631,3 +631,23 @@ get fun `test legacy ClaimAll pays principal 100 percent and reward 50 percent`(
         exitCode: Errors.AlreadyClaimed,
     });
 }
+
+
+// C-1: rolling into a STAKING_OPEN round after its deadline must be rejected.
+get fun `test C-1 roll into an expired open round is rejected`() {
+    val f = setupProtocol();
+    val alice = testing.treasury("c1-alice");
+    val keeper = f.keeper;
+    openF(f, 0);
+    stakeAccount(f, 1, alice.address, 100000000000000 as coins, 1);
+    finishSuccess(f, 1, keeper.address, 16);
+    openNext(f); // R2 is STAKING_OPEN
+    advance((STAKE_DURATION_SECONDS as int) + 1); // past R2 stakeCloseAt
+    expect(rollReward(f.rc, alice.address, 1)).toHaveFailedTx<RollReward>({
+        from: alice.address,
+        to: f.rc.address,
+        exitCode: Errors.RollNotAvailable,
+    });
+    expect(rcUserStake(f.rc, 2, alice.address).amountRaw).toEqual(0 as uint128);
+    expect(rcRewardState(f.rc, alice.address, 1).state).toEqual(REWARD_STATE_PENDING);
+}

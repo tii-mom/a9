@@ -1347,6 +1347,11 @@ fun handleRollReward(sender: address, msg: RollReward) {
     assert (
         nextRd.status == STATUS_PREVIEW || nextRd.status == STATUS_STAKING_OPEN
     ) throw Errors.RollNotAvailable;
+    if (nextRd.status == STATUS_STAKING_OPEN) {
+        // C-1: rolling into an already-open round must respect its staking deadline.
+        val now: uint64 = blockchain.now() as uint64;
+        assert (now < nextRd.stakeCloseAt) throw Errors.RollNotAvailable;
+    }
 
     var ex = s.extras.load();
     assert (ex.unlockStart == 0) throw Errors.RewardStateLocked;
