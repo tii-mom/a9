@@ -125,6 +125,31 @@ interface TonModalStateLike {
   closeReason?: string | null;
 }
 
+/** 链上交易消息（与 TON Connect SendTransactionRequest.messages 对齐）。 */
+export interface TonConnectTxMessage {
+  address: string;
+  /** nanoTon，字符串 */
+  amount: string;
+  payload?: string;
+  stateInit?: string;
+}
+
+/** TON Connect 交易请求。 */
+export interface TonConnectTxRequest {
+  /** unix 秒；缺省 = now + 5 分钟 */
+  validUntil?: number;
+  /** TON Connect chain id（'-3' 测试网 / '-239' 主网）；缺省取当前钱包网络 */
+  network?: string;
+  /** 发送者 raw 地址（'<wc>:<hex>'）；缺省取当前钱包地址 */
+  from?: string;
+  messages: TonConnectTxMessage[];
+}
+
+export interface TonConnectTxResult {
+  /** 已签名 BOC（base64） */
+  boc: string;
+}
+
 interface TonConnectLike {
   connected?: boolean;
   account?: { address?: string; chain?: string } | null;
@@ -132,6 +157,12 @@ interface TonConnectLike {
   onModalStateChange(cb: (modal: TonModalStateLike) => void): () => void;
   openModal(): Promise<void>;
   disconnect(): Promise<void>;
+  sendTransaction(transaction: {
+    validUntil: number;
+    network?: string;
+    from?: string;
+    messages: TonConnectTxMessage[];
+  }): Promise<TonConnectTxResult>;
 }
 
 let tonUI: TonConnectLike | null = null;
@@ -428,4 +459,68 @@ export function disconnect(): void {
 /** 重新拉取余额（TON 走 toncenter 只读查询，失败显示 —）。 */
 export function refreshBalances(): void {
   void doRefreshBalances();
+}
+/* ------------------------------------------------------------------ */
+/* 链上交易（后续阶段新增，不影响既有只读契约）                         */
+/* ------------------------------------------------------------------ */
+
+/** 当前 TON Connect 可用性快照（供链上模块判断能否发交易）。 */
+export interface TonConnectState {
+  /** SDK 是否加载成功 */
+  available: boolean;
+  connected: boolean;
+  /** 友好地址（UQ.../kQ...） */
+  address: string | null;
+  /** TON Connect raw 地址（'<wc>:<hex>'） */
+  rawAddress: string | null;
+  /** 当前钱包网络 */
+  network: 'mainnet' | 'testnet' | 'demo' | null;
+  walletName: string | null;
+}
+
+export function getTonConnectState(): TonConnectState {
+  return {
+    available: state.tonAvailable && tonUI !== null,
+    connected: state.status === 'connected' && !!state.address && state.mode === 'ton',
+    address: state.address,
+    rawAddress: state.rawAddress,
+    network: state.network,
+    walletName: state.walletName,
+  };
+}
+
+function txError(message: string, code: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
+}
+
+/**
+ * 通过现有单实例 TonConnectUI 发起交易（不新建实例，复用钱包连接）。
+ * 用户拒绝时抛出的错误带 code=300（TON Connect 约定），由调用方分类提示。
+ */
+export async function sendTonConnectTransaction(tx: TonConnectTxRequest): Promise<TonConnectTxResult> {
+  void ensureWalletInit();
+  if (!tx || !Array.isArray(tx.messages) || tx.messages.length === 0) {
+    throw txError('交易消息为空', 'TONCONNECT_BAD_REQUEST');
+  }
+  const ui = tonUI ?? (await ensureTon());
+  if (!ui) throw txError('TON Connect SDK 不可用', 'TONCONNECT_UNAVAILABLE');
+  if (state.status !== 'connected' || !state.address) {
+    throw txError('钱包未连接', 'WALLET_NOT_CONNECTED');
+  }
+  if (state.mode !== 'ton') {
+    throw txError('演示钱包不能签名，请连接真实 TON 钱包', 'DEMO_WALLET');
+  }
+  const network =
+    tx.network ?? (state.network === 'testnet' ? '-3' : state.network === 'mainnet' ? '-239' : undefined);
+  const response = await ui.sendTransaction({
+    validUntil: tx.validUntil ?? Math.floor(Date.now() / 1000) + 300,
+    network,
+    from: tx.from ?? state.rawAddress ?? undefined,
+    messages: tx.messages,
+  });
+  const boc = response && typeof response.boc === 'string' ? response.boc : '';
+  if (!boc) throw txError('钱包未返回已签名 BOC', 'TONCONNECT_EMPTY_BOC');
+  return { boc };
 }

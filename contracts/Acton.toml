@@ -1,0 +1,38 @@
+[package]
+name = "a9-contracts"
+description = "A9 Protocol — RoundController + TeamVault (Tolk / Acton)"
+version = "0.1.0"
+license = "MIT"
+
+[toolchain]
+acton = "1.1.0"
+
+[contracts.TeamVault]
+display-name = "TeamVault"
+src = "contracts/TeamVault.tolk"
+depends = []
+
+[contracts.RoundController]
+display-name = "RoundController"
+src = "contracts/RoundController.tolk"
+depends = ["TeamVault"]
+
+[contracts.MockJettonWallet]
+display-name = "MockJettonWallet"
+src = "contracts/mocks/MockJettonWallet.tolk"
+depends = []
+
+[test]
+
+[fmt]
+width = 100
+ignore = ["contracts/types.tolk", "contracts/constants.tolk"]
+
+[scripts]
+
+[import-mappings]
+acton = ".acton"
+contracts = "contracts"
+gen = "gen"
+tests = "tests"
+wrappers = "wrappers"

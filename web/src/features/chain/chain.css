@@ -1,0 +1,77 @@
+/* 链上交易面板（「我的战况」页） */
+
+.chain-panel { margin-top: 18px; }
+.chain-head-meta { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.chain-net { font: 500 11px var(--f-mono); letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--line-2); color: var(--text-2); white-space: nowrap; }
+.chain-net.testnet { color: var(--ember); border-color: #5a3f12; background: rgba(255, 182, 61, .07); }
+.chain-net.mainnet { color: var(--pass); border-color: #1d4a35; background: rgba(61, 220, 151, .07); }
+.chain-net.small { font-size: 10px; padding: 1px 5px; }
+.chain-addr { font: 12px var(--f-mono); color: var(--text-2); text-decoration: none; border-bottom: 1px dashed var(--line-2); display: inline-flex; gap: 6px; align-items: baseline; }
+.chain-addr:hover { color: var(--text); border-color: var(--fire); }
+.chain-addr .lbl { font-size: 10px; }
+.chain-sec { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
+.chain-sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.chain-sec-h h4 { margin: 0; font: 800 16px var(--f-disp); letter-spacing: .04em; }
+.runtime-note { font-size: 12px; color: var(--muted); margin: 6px 0 10px; }
+.chain-field { display: grid; gap: 6px; }
+.chain-input { display: flex; align-items: center; border: 1px solid var(--line-2); background: #0C0907; padding: 0 12px; }
+.chain-input input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; padding: 12px 0; font: 600 18px var(--f-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.chain-input input::placeholder { color: #5c5145; }
+.chain-input b { font: 500 12px var(--f-mono); color: var(--muted); }
+.chain-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.chain-chip { border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text-2); font: 500 12px var(--f-mono); padding: 5px 10px; border-radius: 2px; line-height: 1.2; }
+.chain-chip:hover { border-color: var(--fire); color: var(--text); }
+.chain-chip:disabled { opacity: .45; cursor: not-allowed; }
+.chain-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 12px 0 4px; font-size: 12px; color: var(--text-2); }
+.chain-meta b { font-family: var(--f-mono); color: var(--text); font-weight: 600; }
+.chain-meta .bad b { color: var(--fail); }
+.chain-check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; font-size: 12px; color: var(--text-2); line-height: 1.5; cursor: pointer; }
+.chain-check input { margin-top: 3px; accent-color: var(--fire); }
+.chain-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 0 0; }
+.chain-gas { font: 500 11px var(--f-mono); color: var(--muted); }
+.chain-hint { font-size: 11px; margin-top: 2px; }
+.chain-details { margin-top: 12px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .01), transparent); }
+.chain-details summary { cursor: pointer; padding: 8px 12px; font: 500 11px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.chain-details summary:hover { color: var(--text-2); }
+.chain-details[open] summary { border-bottom: 1px solid var(--line); }
+.chain-dl { margin: 0; padding: 8px 12px 12px; display: grid; gap: 6px; }
+.chain-dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.chain-dl dt { color: var(--muted); font: 500 11px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; }
+.chain-dl dd { margin: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; }
+.chain-warn { border: 1px solid #6b2a10; background: linear-gradient(rgba(255, 91, 31, .06), rgba(255, 91, 31, .02)); padding: 10px 12px; margin: 12px 0; font-size: 12px; color: var(--text-2); display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.chain-warn b { color: var(--ember); }
+.chain-warn p { margin: 4px 0 0; font-size: 12px; }
+.chain-balances { display: flex; gap: 20px; flex-wrap: wrap; margin: 10px 0; font-size: 12px; color: var(--text-2); }
+.chain-balances b { font-family: var(--f-mono); color: var(--text); }
+.chain-empty { font-size: 12px; color: var(--muted); border: 1px dashed var(--line); padding: 14px; margin: 10px 0; }
+.chain-claims { display: grid; gap: 10px; margin-top: 10px; }
+.chain-claim { border: 1px solid var(--line); background: var(--panel-2); padding: 10px 12px; }
+.chain-claim-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.chain-claim-amts { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); margin-top: 6px; }
+.chain-claim-amts b { font-family: var(--f-mono); color: var(--text); }
+.chain-tx { border: 1px solid var(--line); padding: 10px 12px; margin-top: 14px; background: var(--panel-2); }
+.chain-tx.ok { border-color: #1d4a35; }
+.chain-tx.bad { border-color: #6b2a10; }
+.chain-tx-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+.chain-tx-head b { color: var(--text); }
+.chain-tx.ok .chain-dot { background: var(--pass); }
+.chain-tx.bad .chain-dot { background: var(--fail); }
+.chain-tx.pending .chain-dot { background: var(--ember); animation: chain-pulse 1.2s infinite; }
+.chain-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.chain-tx-note { font-size: 11px; color: var(--muted); margin: 5px 0 0; }
+.chain-err { font-size: 12px; color: var(--fail); margin: 6px 0 0; }
+.chain-err em { color: var(--muted); font-style: normal; }
+.chain-tx-actions { display: flex; gap: 8px; margin-top: 8px; }
+.chain-hash { font: 500 12px var(--f-mono); color: var(--ember); text-decoration: none; border-bottom: 1px dashed currentColor; overflow-wrap: anywhere; }
+.chain-hash:hover { color: var(--fire); }
+.chain-last { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; margin-top: 10px; font-size: 12px; color: var(--text-2); }
+.chain-off { opacity: .92; }
+.chain-dim { color: var(--muted); }
+.chain-skeleton { display: grid; gap: 8px; padding: 16px; }
+.chain-skeleton span { display: block; height: 14px; background: var(--panel-2); }
+@keyframes chain-pulse { 50% { opacity: .35; } }
+@media (max-width: 640px) {
+  .chain-head-meta { justify-content: flex-start; }
+  .chain-input input { font-size: 16px; }
+  .chain-sec-h { align-items: flex-start; flex-direction: column; gap: 4px; }
+}

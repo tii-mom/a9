@@ -1,0 +1,361 @@
+/**
+ * TON 只读 RPC（toncenter / tonapi）：Jetton Wallet 地址解析与交易回执轮询。
+ * 全部为只读查询；发送交易走 TON Connect（wallet 模块）。
+ */
+
+import {
+  base64Decode,
+  looksLikeRawAddress,
+  parseTonAddress,
+  toRawAddress,
+  toFriendlyAddress,
+  type TonAddress,
+} from './address';
+import { beginCell, CellSlice, parseBocBase64, toBocBase64 } from './cell';
+import type { ChainConfig } from './config';
+import { chainError, ChainError } from './errors';
+
+export interface ResolvedJettonWallet {
+  raw: string;
+  friendly: string;
+}
+
+interface FetchOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  method?: 'GET' | 'POST';
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+async function fetchJson(url: string, options: FetchOptions = {}): Promise<unknown> {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timeoutMs = options.timeoutMs ?? 12000;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const onAbort = () => controller?.abort();
+  if (options.signal) {
+    if (options.signal.aborted) controller?.abort();
+    else options.signal.addEventListener('abort', onAbort, { once: true });
+  }
+  try {
+    const response = await fetch(url, {
+      method: options.method ?? 'GET',
+      headers: {
+        accept: 'application/json',
+        ...(options.body ? { 'content-type': 'application/json' } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller?.signal,
+    });
+    if (!response.ok) {
+      throw chainError('NETWORK_ERROR', 'HTTP ' + response.status, url);
+    }
+    return (await response.json()) as unknown;
+  } catch (error) {
+    if (error instanceof ChainError) throw error;
+    throw chainError('NETWORK_ERROR', error instanceof Error ? error.message : String(error), url);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    options.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+function apiKeyHeaders(chain: ChainConfig): Record<string, string> {
+  return chain.toncenterApiKey ? { 'X-API-Key': chain.toncenterApiKey } : {};
+}
+
+/* ------------------------------------------------------------------ */
+/* Jetton Wallet 解析                                                  */
+/* ------------------------------------------------------------------ */
+
+function rawFromStackValue(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const text = value.trim();
+  if (looksLikeRawAddress(text)) return toRawAddress(parseTonAddress(text));
+  // 友好地址
+  try {
+    return toRawAddress(parseTonAddress(text));
+  } catch {
+    /* 继续尝试 BOC */
+  }
+  // toncenter 的 slice 值可能是 base64 序列化的 cell
+  try {
+    const roots = parseBocBase64(text);
+    const root = roots[0];
+    if (!root) return null;
+    const address = new CellSlice(root).loadAddress();
+    return address ? toRawAddress(address) : null;
+  } catch {
+    return null;
+  }
+}
+
+interface ToncenterRunResult {
+  ok?: boolean;
+  result?: { exit_code?: number; stack?: unknown[] };
+}
+
+async function resolveViaToncenterRunGetMethod(
+  chain: ChainConfig,
+  jettonMaster: string,
+  owner: string,
+): Promise<string | null> {
+  const ownerAddress = parseTonAddress(owner);
+  const ownerRaw = toRawAddress(ownerAddress);
+  const ownerFriendly = toFriendlyAddress(ownerAddress, chain.network === 'testnet', true);
+  const addressCellBoc = toBocBase64(beginCell().writeAddress(ownerAddress).end());
+  const variants: unknown[][] = [
+    [{ type: 'slice', value: ownerRaw }],
+    [{ type: 'slice', value: ownerFriendly }],
+    [{ type: 'cell', value: addressCellBoc }],
+  ];
+  for (const stack of variants) {
+    try {
+      const response = (await fetchJson(chain.toncenterBaseUrl + '/api/v2/runGetMethod', {
+        method: 'POST',
+        headers: apiKeyHeaders(chain),
+        body: { address: jettonMaster, method: 'get_wallet_address', stack },
+      })) as ToncenterRunResult;
+      if (!response?.ok) continue;
+      const exitCode = response.result?.exit_code ?? -1;
+      if (exitCode !== 0) continue;
+      const first = response.result?.stack?.[0] as { value?: unknown } | undefined;
+      const resolved = rawFromStackValue(first?.value);
+      if (resolved) return resolved;
+    } catch {
+      /* 换下一种参数格式 */
+    }
+  }
+  return null;
+}
+
+interface TonapiAccountJettons {
+  balances?: {
+    jetton?: { address?: string };
+    wallet_address?: { address?: string } | string;
+    wallet_address_str?: string;
+  }[];
+}
+
+async function resolveViaTonapi(chain: ChainConfig, jettonMaster: string, owner: string): Promise<string | null> {
+  try {
+    const masterRaw = toRawAddress(parseTonAddress(jettonMaster));
+    const ownerRaw = toRawAddress(parseTonAddress(owner));
+    const response = (await fetchJson(chain.tonapiBaseUrl + '/v2/accounts/' + encodeURIComponent(ownerRaw) + '/jettons')) as TonapiAccountJettons;
+    const balances = response?.balances ?? [];
+    for (const balance of balances) {
+      const jettonAddress = balance?.jetton?.address;
+      if (!jettonAddress) continue;
+      let candidate: string | null = null;
+      try {
+        candidate = toRawAddress(parseTonAddress(jettonAddress));
+      } catch {
+        candidate = jettonAddress;
+      }
+      if (candidate !== masterRaw) continue;
+      const wallet = balance.wallet_address;
+      if (typeof wallet === 'string') return rawFromStackValue(wallet);
+      const walletAddress = wallet?.address ?? balance.wallet_address_str;
+      const resolved = rawFromStackValue(walletAddress);
+      if (resolved) return resolved;
+    }
+  } catch {
+    /* 交给下一策略 */
+  }
+  return null;
+}
+
+const jettonWalletCache = new Map<string, ResolvedJettonWallet>();
+
+function cacheKey(chain: ChainConfig, master: string, owner: string): string {
+  return chain.network + '|' + master + '|' + owner;
+}
+
+/**
+ * 解析某个地址在指定 Jetton Master 下的 Jetton Wallet 地址。
+ * 策略：本地缓存 → tonapi → toncenter runGetMethod（3 种参数编码）。
+ */
+export async function resolveJettonWalletAddress(params: {
+  chain: ChainConfig;
+  jettonMaster: string;
+  owner: string;
+}): Promise<ResolvedJettonWallet> {
+  const { chain, jettonMaster, owner } = params;
+  const key = cacheKey(chain, jettonMaster, owner);
+  const cached = jettonWalletCache.get(key);
+  if (cached) return cached;
+
+  const raw = (await resolveViaTonapi(chain, jettonMaster, owner)) ?? (await resolveViaToncenterRunGetMethod(chain, jettonMaster, owner));
+  if (!raw) {
+    throw chainError(
+      'JETTON_WALLET_UNRESOLVED',
+      '无法解析 Jetton Wallet 地址',
+      'tonapi 与 toncenter 均未返回 get_wallet_address 结果（可检查网络/合约是否已部署）',
+    );
+  }
+  const address = parseTonAddress(raw);
+  const resolved: ResolvedJettonWallet = {
+    raw: toRawAddress(address),
+    friendly: toFriendlyAddress(address, chain.network === 'testnet', true),
+  };
+  jettonWalletCache.set(key, resolved);
+  return resolved;
+}
+
+/* ------------------------------------------------------------------ */
+/* 交易回执                                                            */
+/* ------------------------------------------------------------------ */
+
+export interface OnchainTx {
+  /** transaction_id.hash（base64） */
+  hash: string;
+  lt: string;
+  /** 区块时间（unix 秒） */
+  utime: number;
+  aborted: boolean;
+  /** 外部消息（用户钱包合约收到并处理） */
+  external: boolean;
+  inSource: string | null;
+  inDestination: string | null;
+  inValueNanoton: string | null;
+  /** in_msg body（base64 BOC），不存在为 null */
+  inBody: string | null;
+}
+
+interface ToncenterTxRaw {
+  transaction_id?: { hash?: string; lt?: string };
+  utime?: number;
+  in_msg?: {
+    source?: string;
+    destination?: string;
+    value?: string;
+    msg_data?: { body?: string };
+  } | null;
+  description?: { aborted?: boolean };
+}
+
+interface ToncenterTxResponse {
+  ok?: boolean;
+  result?: ToncenterTxRaw[];
+  error?: string;
+}
+
+function normalizeRaw(value: string | undefined | null): string | null {
+  if (!value) return null;
+  if (/^0:0{64}$/.test(value)) return null;
+  if (/^-?\d+:[0-9a-fA-F]{64}$/.test(value)) return value.toLowerCase();
+  return value;
+}
+
+function mapToncenterTx(tx: ToncenterTxRaw): OnchainTx {
+  const inSource = normalizeRaw(tx.in_msg?.source);
+  const hash = tx.transaction_id?.hash ?? '';
+  return {
+    hash,
+    lt: tx.transaction_id?.lt ?? '0',
+    utime: Number(tx.utime ?? 0),
+    aborted: Boolean(tx.description?.aborted),
+    external: !inSource,
+    inSource: inSource ? toRawAddress(parseTonAddress(inSource)) : null,
+    inDestination: tx.in_msg?.destination ? normalizeRaw(tx.in_msg.destination) : null,
+    inValueNanoton: tx.in_msg?.value ?? null,
+    inBody: tx.in_msg?.msg_data?.body ?? null,
+  };
+}
+
+/** 拉取某地址最近的交易（toncenter v2）。 */
+export async function fetchRecentTransactions(
+  chain: ChainConfig,
+  address: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<OnchainTx[]> {
+  const normalized = (() => {
+    try {
+      return toFriendlyAddress(parseTonAddress(address), chain.network === 'testnet', true);
+    } catch {
+      return address;
+    }
+  })();
+  const url =
+    chain.toncenterBaseUrl +
+    '/api/v2/getTransactions?address=' +
+    encodeURIComponent(normalized) +
+    '&limit=' +
+    limit +
+    '&to_lt=0&archival=false';
+  const response = (await fetchJson(url, { headers: apiKeyHeaders(chain), signal })) as ToncenterTxResponse;
+  if (!response?.ok || !Array.isArray(response.result)) {
+    throw chainError('NETWORK_ERROR', 'toncenter 查询失败', response?.error ?? null);
+  }
+  return response.result.map(mapToncenterTx);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface WaitForTxOptions {
+  chain: ChainConfig;
+  /** 合约地址（RoundController），用于匹配合约侧回执 */
+  targetAddress: string;
+  /** 用户钱包地址（兜底：至少确认外部消息已上链） */
+  walletAddress: string;
+  /** 交易开始时间（unix 秒），用于过滤旧交易 */
+  sinceSec: number;
+  /** 合约侧匹配逻辑 */
+  match: (tx: OnchainTx) => boolean;
+  timeoutMs?: number;
+  intervalMs?: number;
+  signal?: AbortSignal;
+  /** 观察到用户钱包外部交易时回调（UI 可先展示 hash） */
+  onWalletTx?: (tx: OnchainTx) => void;
+}
+
+export interface WaitForTxResult {
+  /** 命中的交易（合约侧优先，其次钱包侧） */
+  tx: OnchainTx | null;
+  /** contract = 合约侧已确认；wallet = 仅确认外部消息上链；null = 超时未观察到 */
+  stage: 'contract' | 'wallet' | null;
+}
+
+/**
+ * 轮询回执：
+ *   1) 合约地址出现 match(tx) → stage=contract
+ *   2) 超过 30s 只有钱包外部交易 → stage=wallet（已签名发出）
+ *   3) 超时 → stage=null
+ */
+export async function waitForTransaction(options: WaitForTxOptions): Promise<WaitForTxResult> {
+  const timeoutMs = options.timeoutMs ?? 150000;
+  const intervalMs = options.intervalMs ?? 4000;
+  const walletFallbackMs = Math.min(30000, Math.floor(timeoutMs / 2));
+  const startedAt = Date.now();
+  let walletTx: OnchainTx | null = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (options.signal?.aborted) return { tx: walletTx, stage: walletTx ? 'wallet' : null };
+    try {
+      const targetTxs = await fetchRecentTransactions(options.chain, options.targetAddress, 20, options.signal);
+      const matched = targetTxs.find((tx) => tx.utime >= options.sinceSec - 30 && options.match(tx));
+      if (matched) return { tx: matched, stage: 'contract' };
+    } catch {
+      /* 单次查询失败不终止轮询 */
+    }
+    try {
+      const walletTxs = await fetchRecentTransactions(options.chain, options.walletAddress, 10, options.signal);
+      const external = walletTxs.find((tx) => tx.external && tx.utime >= options.sinceSec - 30);
+      if (external && !walletTx) {
+        walletTx = external;
+        options.onWalletTx?.(external);
+      }
+    } catch {
+      /* ignore */
+    }
+    if (walletTx && Date.now() - startedAt >= walletFallbackMs) {
+      return { tx: walletTx, stage: 'wallet' };
+    }
+    await sleep(intervalMs);
+  }
+  return { tx: walletTx, stage: walletTx ? 'wallet' : null };
+}

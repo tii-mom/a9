@@ -7,6 +7,7 @@ import { useDict, useLang } from '../../lib/lang';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, useWallet } from '../wallet';
+import { ChainMePanel } from '../chain';
 import type { RoundSummary, StakePosition } from '@shared/types';
 import { apiErrorText, COMMON, durationText, formatPrice, pickCurrentRound, resultLabel, sharePct } from './common';
 import { Empty, ErrorState, Loading, PageHead, Stat, StatePill, ToastView, useToast } from './ui';
@@ -299,6 +300,7 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
     <>
       {demo ? <div className="note-box ap-note">{d.demoNotice}</div> : null}
       <div className="note-box ap-note">{d.readonlyNotice}</div>
+      <ChainMePanel address={address} demo={demo} />
 
       {meQuery.error && !meQuery.data ? <ErrorState error={meQuery.error} onRetry={meQuery.refresh} /> : null}
 

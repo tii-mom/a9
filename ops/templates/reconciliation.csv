@@ -1,0 +1,4 @@
+round_id,state,tier,target_usd_e8,stake_total_raw,staker_count,expected_burn_raw,recorded_burn_raw,burn_delta_raw,team_release_expected_raw,supply_ledger_raw,supply_chain_raw,supply_drift_raw,updated_at,notes
+1,SUCCEEDED,1,232000,100000000000000000,6,0,0,0,120000000000000000,8938500000000000000,8938500000000000000,0,2026-11-01T00:00:00.000Z,"成功后团队额度释放 1.2 亿；本金/奖励待领取"
+2,FAILED_PERMANENT,2,464000,241500000000000000,9,1061500000000000000,1061500000000000000,0,0,8938500000000000000,8938500000000000000,0,2026-11-04T00:00:00.000Z,"三笔销毁：奖励 7 亿 + 团队 1.2 亿 + 本金 2.415 亿"
+3,OBSERVING,3,928000,500000000000000000,11,,,,,8938500000000000000,,,2026-11-05T00:00:00.000Z,"观察中；18 根/阈值 12"

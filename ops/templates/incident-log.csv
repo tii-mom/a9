@@ -1,0 +1,8 @@
+# 事故记录表模板（一次事故一行；P0/P1 必须 24h 内出复盘）
+incident_id,opened_at_utc,detected_by,severity,round_id,title,impact,chain_tx,runbook_ref,mitigation,resolved_at_utc,time_to_detect_min,time_to_mitigate_min,comms_sent,postmortem_due,owner
+INC-2026-001,2026-11-13T03:12:00Z,monitor_check,P1,2,"R2 K 线缺失 2 根",观察延迟无资金影响,—,runbooks/03#P1,"keeper 重启，补齐 K 线",2026-11-13T03:41:00Z,4,29,"TG 状态更新",2026-11-14,ops-a
+# 字段说明：
+# severity：P0 资金/终态错误；P1 轮次推进受阻；P2 展示/数据延迟；P3 一般缺陷
+# impact：是否影响本金/奖励/销毁/团队额度；无资金影响也要写明
+# runbook_ref：指向具体预案章节
+# 复盘要求：根因、时间线、影响、修复、预防措施、责任人、截止日期

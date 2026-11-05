@@ -1,0 +1,26 @@
+{
+  "说明": "人工填写模板：所有地址必须由项目方/部署者提供并确认。填完后用 node ops/scripts/10_deploy_jetton.mjs --adopt <address> 等方式登记，或直接写入 ops/config/testnet.registry.json（推荐脚本登记，带 CRC 校验）。",
+  "network": "testnet",
+  "chainId": -3,
+  "paramsDigest": "（由 60_verify_and_register.mjs 自动写入）",
+  "contracts": {
+    "jettonMaster": "（部署 10 后登记）",
+    "jettonMasterTreasuryWallet": "（可自动解析）",
+    "teamVault": "（部署 20 后登记）",
+    "teamVaultJettonWallet": "（50 注资时自动解析）",
+    "roundController": "（部署 30 后登记）",
+    "stakingVault": "（RC 的 Jetton Wallet，部署后登记）",
+    "stakingVaultJettonWallet": "（同上）",
+    "rewardVault": "（RC 的奖励池 Jetton Wallet，50 注资时自动解析）",
+    "rewardVaultJettonWallet": "（同上）",
+    "oracleAdapter": "（本期不部署 / null）"
+  },
+  "wallets": {
+    "adminOwner": "（单密钥 owner，硬件钱包地址）",
+    "treasury": "（初始铸造 100 亿接收地址，冷钱包）",
+    "teamWallet": "（团队收款热钱包；不公开，仅审计/交易所披露）",
+    "marketingWallet": "（营销 5 亿热钱包；不公开）",
+    "liquidityWallet": "（流动性 5 亿热钱包；不公开）",
+    "teamInternalWallet": "（团队内盘管理钱包；公开可查）"
+  }
+}

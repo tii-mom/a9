@@ -1,0 +1,153 @@
+{
+  "network": "testnet",
+  "chainId": -3,
+  "status": "not_deployed",
+  "configVersion": 1,
+  "paramsDigest": null,
+  "codeHashes": {},
+  "createdAt": "2026-11-05T07:09:38.869Z",
+  "updatedAt": "2026-11-05T07:09:38.870Z",
+  "contracts": {
+    "jettonMaster": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "jettonMasterTreasuryWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVault": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVaultJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "roundController": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "stakingVault": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "stakingVaultJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "rewardVault": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "rewardVaultJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "oracleAdapter": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    }
+  },
+  "wallets": {
+    "adminOwner": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "treasury": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "teamWallet": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "marketingWallet": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "liquidityWallet": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "teamInternalWallet": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": true,
+      "note": null
+    }
+  },
+  "bindings": {
+    "teamVaultAcceptsOnly": null,
+    "rewardVaultOwner": null,
+    "stakingVaultOwner": null,
+    "roundControllerUpgradeable": false,
+    "adminOwnerIsSingleKey": true
+  },
+  "funding": [],
+  "verification": {
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
+  },
+  "notes": [
+    "初始登记表：尚未部署。部署时由 10/20/30 脚本写入地址，60 脚本定稿并生成地址簿。"
+  ]
+}

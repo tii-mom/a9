@@ -1,0 +1,27 @@
+{
+  "note": "故障夹具：DB 不可用、预言机暂停、K 线缺失、销毁 pending、供应量漂移、管理员 error。",
+  "now": 1793450000000,
+  "health": { "ok": true, "now": 1793448800000, "db": false, "dataSource": "demo", "version": "0.1.0", "uptimeSeconds": 9000 },
+  "config": {
+    "token": { "name": "A9", "symbol": "A9", "decimals": 9 },
+    "p0UsdE8": "116000", "usdPriceScale": 100000000, "priceMultiplier": 2, "roundCount": 10,
+    "roundRewardRaw": "700000000000000000", "totalSupplyRaw": "10000000000000000000",
+    "candleSeconds": 14400, "candleCount": 18, "minQualifiedCandles": 12, "riskDisclosureVersion": 1,
+    "stakeDurationSeconds": 259200, "observationSeconds": 259200, "network": "testnet", "dataSource": "demo", "contracts": {}
+  },
+  "stats": {
+    "supplyRaw": "8800000000000000000",
+    "burnedRaw": "1000000000000000000",
+    "lockedStakeRaw": "500000000000000000",
+    "stakerCount": 3,
+    "oracle": { "online": false, "validSources": 0, "totalSources": 3, "coverageBps": 0, "configVersion": "1", "lastUpdate": 1793446400000, "paused": true },
+    "nextStakeOpenAt": 1793446400000
+  },
+  "rounds": [
+    { "roundId": 1, "state": "FAILED_PERMANENT", "priceMultiplier": 2, "targetPriceUsdE8": "232000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1792550000000, "stakeCloseAt": 1792809200000, "observationStart": 1792809200000, "observationEnd": 1793068400000, "candlesSeen": 18, "qualifiedCandles": 6, "totalAcceptedStakeRaw": "100000000000000000", "stakerCount": 3, "result": "FAILURE", "burnedRaw": "0", "updatedAt": 1793068000000 },
+    { "roundId": 2, "state": "ORACLE_PAUSED", "priceMultiplier": 4, "targetPriceUsdE8": "464000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1793250000000, "stakeCloseAt": 1793422000000, "observationStart": 1793406800000, "observationEnd": 1793681200000, "candlesSeen": 0, "qualifiedCandles": 0, "totalAcceptedStakeRaw": "500000000000000000", "stakerCount": 2, "result": null, "burnedRaw": null, "updatedAt": 1793448200000 }
+  ],
+  "admin": {
+    "events": [ { "id": 2, "ts": 1793449880000, "level": "error", "actor": "ops", "action": "oracle_pause", "detail": "rpc timeout" } ]
+  }
+}

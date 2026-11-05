@@ -140,7 +140,7 @@ ProtocolConfig {
     tokenDecimals: uint8
     roundRewardRaw: uint128     // 700,000,000 × 10^decimals
     minStakeRaw: uint128        // V6.1：10,000 × 10^decimals
-    maxStakePerAddressBps: uint16 // V6.1：1000（单地址 ≤ 本轮总质押 10%）
+    maxStakePerAddressBps: uint16 // V6.1：1000（单地址 ≤ 20,000,000 A9（= 本轮总上限 200,000,000 的 10%，固定硬顶））
     maxTotalStakeRaw: uint128    // V6.1：200,000,000 × 10^decimals
     techAbortPauseSeconds: uint32    // V6.1：14 天
     techAbortObservationTimeout: uint32 // V6.1：7 天
@@ -449,7 +449,7 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 
 - **D-28 同档重试**：失败不升档（tier 不变），成功才 tier+1；目标价按 `max(P0×2^tier, 2×开窗 24h TWAP)` 重新锁定。
 - **D-30**：第一版不做时间加权；权重 = 有效质押数量。
-- **质押上下限**：`minStakeRaw = 10,000 × 10^decimals`；`maxStakePerAddressBps = 1000`（单地址 ≤ 本轮总质押 10%）；`maxTotalStakeRaw = 200,000,000 × 10^decimals`。
+- **质押上下限**：`minStakeRaw = 10,000 × 10^decimals`；`maxStakePerAddressBps = 1000`（单地址 ≤ 20,000,000 A9（= 本轮总上限 200,000,000 的 10%，固定硬顶））；`maxTotalStakeRaw = 200,000,000 × 10^decimals`。
 - **技术终止**：连续暂停 14 天 或 观察结束超时 7 天 → **任何人可调用** `AbortTechnical`；退还 100% 本金、不销毁奖励/团队额度、不消耗档位；新增 `techAbortPauseSeconds` / `techAbortObservationTimeout`。
 - **R1 前校准**：V6.1 未确认；Lead 建议不保留（若保留仅限 R1 开窗前、只能下调 P0、≤30%、一次性、链上公告、执行后永久失效）。
 

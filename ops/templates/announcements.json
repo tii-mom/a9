@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "authority": "docs/00_DECISIONS_V2.md V6.2",
+  "channelNote": "统一发布渠道：官网公告页 / X / Telegram 中文群 / Telegram 英文群。所有公告必须带风险提示，不得承诺收益。",
+  "placeholders": [
+    "roundId", "tier", "targetUsd", "p0Usd", "previewEnd", "stakeOpenAt", "stakeCloseAt",
+    "observationStart", "observationEnd", "stakeTotal", "stakerCount", "qualified", "candleCount",
+    "rewardTokens", "teamTokens", "burnedTotal", "burnedReward", "burnedTeam", "burnedPrincipal",
+    "closeReason", "pauseReason", "resumeAt", "abortReason", "nextRoundId", "claimNote", "siteUrl"
+  ],
+  "templates": {
+    "open": {
+      "label": "开轮公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮报名开启】",
+        "第 {{roundId}} 轮目标价 {{targetUsd}}（档位 {{tier}}，锁定规则 max(P0×2^tier, 2×开窗 24h TWAP)）。",
+        "报名窗口：{{stakeOpenAt}} → {{stakeCloseAt}}（72 小时）。观察窗口：18 根 4 小时 K 线，≥12 根达标即通过。",
+        "参与方式：在官网连接 TON 钱包 → 质押 A9 → 勾选风险确认。单笔最低 10,000 A9；单地址 ≤ 本轮总质押 10%；本轮上限 2 亿 A9。",
+        "高风险提示：失败轮将销毁本轮全部质押本金、本轮 7 亿奖励与团队 1.2 亿额度。请只投入可完全损失的资金。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} staking is open]",
+        "Round {{roundId}} target price: {{targetUsd}} (tier {{tier}}, locked at open as max(P0×2^tier, 2× opening 24h TWAP)).",
+        "Staking window: {{stakeOpenAt}} → {{stakeCloseAt}} (72h). Observation: 18 × 4h candles, success at ≥12 qualified candles.",
+        "How to join: connect a TON wallet on the official site → stake A9 → accept the risk disclosure. Min 10,000 A9 per deposit; ≤10% of round total per address; round cap 200,000,000 A9.",
+        "HIGH RISK: a failed round burns 100% of staked principal plus the 7% round reward and the 12% team quota. Only stake what you can afford to lose entirely."
+      ]
+    },
+    "stake-close": {
+      "label": "报名截止公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮报名已截止】",
+        "截止原因：{{closeReason}}。本轮共有 {{stakerCount}} 个地址参与，质押合计 {{stakeTotal}} A9。",
+        "观察窗口：{{observationStart}} → {{observationEnd}}（18 根 4 小时 K 线，阈值 12/18）。",
+        "判定前不接受任何取消质押（合约无取消通道）；技术故障导致的数据缺失不计为未达标，不触发销毁。",
+        "结果将在观察结束后公布；请以官网与官方渠道为准，警惕仿冒链接。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} staking closed]",
+        "Reason: {{closeReason}}. {{stakerCount}} addresses participated with {{stakeTotal}} A9 staked in total.",
+        "Observation window: {{observationStart}} → {{observationEnd}} (18 × 4h candles, threshold 12/18).",
+        "Stakes cannot be cancelled (no cancel path in the contract). Technical data gaps are not counted as misses and never trigger burns.",
+        "Results will be announced after observation ends. Always verify links on the official site."
+      ]
+    },
+    "success": {
+      "label": "轮次成功公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮判定成功】",
+        "达标 K 线：{{qualified}} / {{candleCount}}（阈值 12），目标价 {{targetUsd}}。",
+        "本轮 {{stakerCount}} 个地址、质押 {{stakeTotal}} A9：本金可领取；{{rewardTokens}} A9 奖励按质押比例发放（pull claim，用户自付 gas，可跨轮累积一次领取）。",
+        "团队额度 {{teamTokens}} A9 已按规则释放到团队收款钱包。",
+        "下一轮将进入 24 小时预告期，预告结束后自动开窗并锁定新目标价。奖励不保证持续，请注意市场价格风险。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} SUCCEEDED]",
+        "Qualified candles: {{qualified}} / {{candleCount}} (threshold 12), target {{targetUsd}}.",
+        "{{stakerCount}} addresses staked {{stakeTotal}} A9: principal is claimable; {{rewardTokens}} A9 rewards are distributed pro-rata by stake (pull claim, user pays gas, can accumulate across rounds and claim in one transaction).",
+        "The team quota of {{teamTokens}} A9 has been released to the team wallet per the rules.",
+        "The next round enters a 24h preview; staking opens automatically afterwards with a newly locked target. Rewards are not guaranteed; market risk applies."
+      ]
+    },
+    "fail": {
+      "label": "轮次失败公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮判定失败（永久关闭）】",
+        "达标 K 线：{{qualified}} / {{candleCount}}，未达到 12 根阈值。",
+        "按规则执行三笔销毁：本轮奖励 {{burnedReward}} A9 + 团队额度 {{burnedTeam}} A9 + 全部质押本金 {{burnedPrincipal}} A9，合计 {{burnedTotal}} A9。",
+        "本轮质押本金 100% 销毁，不可退还；本轮永久关闭、不重开、奖励不回流。",
+        "下一轮沿用同一档位（同档重试），进入 24 小时预告期。请理性评估风险后再决定是否参与。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} FAILED — permanently closed]",
+        "Qualified candles: {{qualified}} / {{candleCount}}, below the threshold of 12.",
+        "Three burns executed per the rules: round reward {{burnedReward}} A9 + team quota {{burnedTeam}} A9 + all staked principal {{burnedPrincipal}} A9, total {{burnedTotal}} A9.",
+        "100% of this round's staked principal is burned and cannot be refunded. The round is permanently closed and will not reopen; rewards do not roll over.",
+        "The next round retries at the same tier after a 24h preview. Please assess the risk carefully before participating."
+      ]
+    },
+    "pause": {
+      "label": "预言机暂停公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮观察暂停】",
+        "暂停时间：{{resumeAt}}。原因：{{pauseReason}}。",
+        "暂停期间不增加达标 K 线、不把缺失数据当作未达标、不触发任何销毁；本轮不会因技术故障被判定失败。",
+        "恢复后将从完整 18 根 K 线重新开始观察；若连续暂停达到 14 天或观察结束超时 7 天，任何人可触发技术终止并退还 100% 本金（不销毁奖励/团队额度，不消耗档位）。",
+        "请以官网状态页为准，勿轻信非官方消息。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} observation paused]",
+        "Paused at: {{resumeAt}}. Reason: {{pauseReason}}.",
+        "While paused, no candles are counted, missing data is never treated as a miss, and no burns occur. The round will not be failed because of a technical fault.",
+        "After recovery, a full 18-candle observation restarts. If the pause lasts 14 consecutive days or observation-end is overdue by 7 days, anyone may trigger a technical abort: 100% principal refund, no reward/team burns, no tier consumption.",
+        "Check the official status page; do not trust unofficial messages."
+      ]
+    },
+    "resume": {
+      "label": "预言机恢复公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮观察已恢复】",
+        "恢复时间：{{resumeAt}}。本轮将从新的完整 18 根 4 小时 K 线重新开始观察（观察窗口不缩短）。",
+        "暂停期间不计入未达标，不产生销毁；此前已记录的 K 线按合约规则处理。",
+        "目标价保持开窗时锁定值 {{targetUsd}}，不会因暂停而调整。",
+        "继续关注官网与官方渠道的状态更新。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} observation resumed]",
+        "Resumed at: {{resumeAt}}. A full 18 × 4h candle observation restarts (the observation window is not shortened).",
+        "Paused time is not counted as misses and causes no burns; previously recorded candles follow the contract rules.",
+        "The target price remains the value locked at open: {{targetUsd}}.",
+        "Follow the official site and channels for status updates."
+      ]
+    },
+    "abort": {
+      "label": "技术终止公告",
+      "zh": [
+        "【A9 · 第 {{roundId}} 轮技术终止（TECHNICAL_ABORTED）】",
+        "触发原因：{{abortReason}}（连续暂停 14 天或观察结束超时 7 天，任何人可触发）。",
+        "处理结果：退还 100% 质押本金 {{stakeTotal}} A9；不销毁本轮奖励与团队额度；不消耗档位。",
+        "技术终止不属于价格失败，本轮不会标记为市场失败；退款由合约路径执行，管理员不能手工解锁，也不需要用户额外操作（以链上到账为准）。",
+        "下一轮恢复时按当前档位继续，目标价在开窗时重新锁定。"
+      ],
+      "en": [
+        "[A9 · Round {{roundId}} TECHNICAL ABORT]",
+        "Trigger: {{abortReason}} (14 consecutive days paused or observation-end overdue by 7 days; anyone may trigger).",
+        "Outcome: 100% principal refund of {{stakeTotal}} A9; no reward or team-quota burns; no tier consumed.",
+        "A technical abort is not a price failure and the round is not marked as a market failure. The refund is executed by the contract; admins cannot manually unlock funds and no user action is required (verify on-chain).",
+        "The next round resumes at the current tier, with the target locked at open."
+      ]
+    }
+  },
+  "mandatoryDisclaimers": {
+    "zh": [
+      "风险提示：本项目为高风险实验，失败轮可能损失 100% 质押本金；奖励与通过率均不保证。",
+      "项目方不提供外部法律意见，合规风险由项目方承担；请自行确认所在地区法律与税务要求。",
+      "请仅通过官网与官方渠道操作，任何索要私钥/助记词/远程控制的行为均为诈骗。"
+    ],
+    "en": [
+      "Risk notice: this is a high-risk experiment. A failed round can burn 100% of staked principal; rewards and pass rates are not guaranteed.",
+      "The project does not provide external legal advice; compliance risk is borne by the project. Verify your local laws and tax obligations.",
+      "Only use the official site and channels. Anyone asking for your seed phrase or remote access is a scammer."
+    ]
+  }
+}
