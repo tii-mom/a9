@@ -1,6 +1,6 @@
 # 04 --- 智能合约架构、存储与消息接口
 
-> **口径声明（V5）**：RewardVault 70 亿 / 每轮 7 亿；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
+> **口径声明（V5.3）**：RewardVault 70 亿 / 每轮 7 亿；观察 12 根 / 48h / 8 根（已确认不变）；**不允许取消质押（仅 TECHNICAL_ABORTED 退本金）**；D-28/29/30 待确认；团队 12 亿由**独立 TeamVault** 托管、每轮 1.2 亿释放/销毁；失败销毁三笔（奖励 + 团队 + 本金）；**报名窗口 72h**（结算后立即开启）；无人质押启动观察（0 人通过 → 奖励销毁）；**不设多签**，管理员为单密钥 owner、**RoundController 不可升级**；奖励为 **pull claim**（可跨轮累积、≤10 轮有界、一次合并转账）；收款钱包热钱包且地址不公开。与 `docs/00_DECISIONS_V2.md` 冲突时以其为准。
 
 ## 1. 推荐架构
 
@@ -78,7 +78,9 @@ Master 的结算确认。 - **向 TeamVault 下发团队额度指令**：成功�
 职责： - 接收本项目 Jetton。 - 验证 Jetton Wallet 来源。 - 验证
 roundId、nonce 和风险确认 payload。 - 记录每轮每个用户的质押本金。 -
 关闭质押后冻结 ledger。 - 成功时允许用户领取本金。 -
-失败时将本轮全部本金提交 burn。 - 处理退款、重复消息和失败重试。
+失败时将本轮全部本金提交 burn。 - 处理退款、重复消息和失败重试。 -
+**V5.3 已确认：不提供取消/提前退出通道**（无 `CancelStake` / `Withdraw` 消息）；
+只在 `TECHNICAL_ABORTED` 时按控制器指令退还全部本金。
 
 ### 2.4 RewardVault
 
@@ -179,6 +181,9 @@ CandleRecord {
 建议使用字典按 `roundId`、`owner` 和 `candleIndex`
 索引。不要把无限增长的用户数组放入单个 cell，也不要在链上进行无界遍历。
 
+> **targetPrice 语义（D-28 待确认，Lead 建议：失败同档重试）**：当前 `RoundData.targetPriceUsdE8` 按「轮次」写入（`P0 × 2^roundId`，失败进入下一阶）。若采纳 D-28，需改为按「**档位 tier**」写入：
+> `targetPrice = P0 × 2^tier`，`tier = 1 + 已成功轮数`；失败轮不升档（下一轮沿用同一 targetPrice），成功才 `tier += 1`。`RoundData` 需增加 `tier: uint8` 字段（D-28 定案后）。**未定案前不要改存储结构。**
+
 ## 4. Jetton 质押入账
 
 用户通过 Jetton Transfer 将代币转入 StakingVault 的 Jetton Wallet，并在
@@ -196,6 +201,8 @@ StakePayload {
     acceptFullPrincipalBurn: bool
 }
 ```
+
+> **V5.3 已确认**：质押一旦被接受即不可取消——**没有取消质押的消息类型**；用户只能在成功轮领取本金、或在失败轮被销毁。唯一例外：整个轮次进入 `TECHNICAL_ABORTED` 时由控制器指令退还本金（这是唯一退款路径，管理员不得手工解锁）。
 
 StakingVault 必须： 1. 验证 incoming notification 来自本项目 Jetton
 Master 对应的 canonical Jetton Wallet。 2. 解析原始发送者 owner
@@ -243,6 +250,8 @@ ABI 文档。
   `BurnTeamQuota`                   `0x5254000D` RoundController          TeamVault（失败销毁 1.2 亿）
 
   `ClaimAll`                        `0x5254000E` 用户                     RoundController（多轮奖励合并领取，≤10 轮）
+
+  `CancelStake`                      **无此消息**                          ——（V5.3 已确认：不支持取消质押）
   --------------------------------------------------------------------------------------------------
 
 ## 6. 关键 Get Methods
@@ -376,4 +385,15 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 - **D-24 已确认不可升级**：RoundController 无升级代理；管理员仅保留开轮/关报名/暂停恢复/触发结算的最小权限。
 - **收款钱包**：团队/营销/流动性均为个人热钱包，地址不对外披露（部署前填入 config，至少向审计/交易所披露）；相应风险登记见 docs/10 §9。
 - **待决策**：报名窗口 72h 下的「现价已超目标价 → 无风险白拿」问题（方案 A / **B+（Lead 推荐）** / C）见 docs/00 §7，尚未定案，当前仍按 `FIXED_LADDER` 运行。
+
+---
+
+## 14. V5.3 变更注记（2026-11-05）
+
+- **已确认（定稿）**：① 观察窗口保持 **12 根 / 48h / 8 根**（不做 18/72/12）；② **不允许取消质押**——没有 `CancelStake`/withdraw 消息，唯一退款路径是 `TECHNICAL_ABORTED`（退还全部本金）。
+- **新增待确认建议（Lead 建议，未定案）**：
+  - **D-28 失败同档重试**：`targetPrice` 改按 tier 语义（`tier = 1 + 已成功轮数`），失败沿用同档、成功才升档；需新增 `RoundData.tier` 与前端阶梯改「档位」视图。
+  - **D-29 R1 启动规则**：Lead 推荐 R1 目标 = 1.3~1.5 × 上市基准 TWAP，之后每轮 ×2（当前仍 R1 = 2×P0）。
+  - **D-30 搭便车时间加权**：Lead 建议第一版不做（方案 A）；方案 B 为报名前 24h 1.0× / 后 48h 0.5×。
+- 与 [docs/12_DESIGN_REVIEW.md](12_DESIGN_REVIEW.md) 的 P0-5 / P0-1 / P1-3 对齐；未定案前保持现有存储与状态机。
 
