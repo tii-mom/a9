@@ -1,0 +1,21 @@
+{
+  "name": "FUSE 引信协议",
+  "short_name": "FUSE",
+  "description": "TON 价格驱动型代币 · 12 根 K 线判定",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0807",
+  "theme_color": "#0A0807",
+  "icons": [
+    {
+      "src": "/fuse-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/fuse-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

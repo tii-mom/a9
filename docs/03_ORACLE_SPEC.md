@@ -1,0 +1,142 @@
+# 03 --- 价格预言机与K线验证规格
+
+## 1. 目标
+
+价格预言机决定每轮能否通过考核，是协议最关键的外部依赖。任何单一项目方后台、单一交易池或单笔交易都不得直接决定解锁结果。
+
+TON 官方文档说明，链上合约需要通过预言机将外部数据带入链上；在 TON
+的异步执行模型下，常见模式为请求-响应（pull）流程。具体预言机服务商和价格源必须由项目方在上线前选定。
+
+## 2. 价格单位
+
+建议采用 USD 计价。
+
+固定点精度建议： `USD_PRICE_SCALE = 100,000,000`
+
+例如，真实价格为 USD 0.01234567，则： `priceUsdE8 = 1,234,567`
+
+所有价格均使用无符号整数，禁止浮点数。
+
+## 3. 价格源配置
+
+上线前必须确定： - `feedId` - 代币交易对（例如 TOKEN/USD 或 TOKEN/USDT
+加独立 USD 兑换率） - 价格源/交易市场白名单 - 最少有效数据源数量 -
+最低池子流动性 - 最低观察区间成交量 - 允许的最大来源偏差 -
+4小时数据覆盖率阈值 - 数据最大延迟 - 签名验证合约地址 - oracle config
+version/hash
+
+建议至少使用多个独立来源，并采用中位数或经过审计的加权中位数聚合。若市场结构无法满足来源数量，应先设计明确的单源风险披露和额外保护，不得假称"多源去中心化"。
+
+## 4. 4小时TWAP定义
+
+每个4小时区间对应一份聚合数据。
+
+单一市场的时间加权平均价格可表示为：
+
+`TWAP = Σ(price_j × duration_j) / Σ(duration_j)`
+
+其中： - `price_j` 是该区间内某个有效采样价格； - `duration_j`
+是该价格代表的时间长度； - 覆盖范围必须属于该4小时区间。
+
+聚合器必须： 1. 仅使用白名单市场。 2. 验证每个市场在区间内有足够流动性。
+3. 排除异常成交、短暂价格尖峰和明显离群源。 4. 验证采样覆盖率。 5.
+计算每个来源的4小时TWAP。 6. 根据已锁定规则聚合为最终 `twapPriceUsdE8`。
+7. 输出来源数量、成交量、流动性和数据摘要。
+
+不能用K线最高价、单笔成交价或瞬时价格代替TWAP。
+
+## 5. Oracle Candle 数据结构
+
+每根K线的数据至少包含：
+
+``` text
+OracleCandle {
+    roundId: uint8
+    candleIndex: uint8          // 0..11
+    periodStart: uint64         // UTC Unix seconds
+    periodEnd: uint64
+    twapPriceUsdE8: uint128
+    volumeUsdE8: uint128
+    liquidityUsdE8: uint128
+    validSourceCount: uint16
+    coverageBps: uint16
+    feedId: uint32
+    oracleConfigVersion: uint32
+    dataDigest: uint256
+    nonce: uint64
+    validUntil: uint64
+}
+```
+
+`coverageBps` 以 10,000 为100%。最低覆盖率由配置决定。
+
+## 6. 提交与验证流程
+
+推荐使用可验证签名的 pull-oracle 流程：
+
+1.  链下聚合器从预先公布的市场收集价格数据。
+2.  聚合器计算完整4小时TWAP和质量指标。
+3.  数据提供方对 `OracleCandle` 摘要签名。
+4.  任意 keeper 或用户可以提交该数据，不应只有项目方单一后台有权提交。
+5.  协议向 OracleAdapter 发出验证请求，或调用已经验证签名的适配器接口。
+6.  OracleAdapter 检查签名、feedId、时间范围、有效期和配置版本。
+7.  RoundController 检查发送方是否为指定 OracleAdapter。
+8.  验证成功后，记录该 candle，并按阈值计数。
+
+任何用户都可以提交有效数据，但不能提交未签名、过期或属于其他轮次的数据。
+
+## 7. 重放与重复提交保护
+
+必须验证： - `roundId` 与当前轮次一致。 - `candleIndex` 在0至11之间。 -
+`periodStart` 和 `periodEnd` 精确匹配预期时间区间。 - `nonce` 未使用。 -
+`dataDigest` 未处理。 - 当前 candle index 尚未成功记录。 - `validUntil`
+未过期。 - `feedId` 与配置一致。 - `oracleConfigVersion`
+与本轮冻结版本一致。
+
+同一 candle 的重复提交应幂等返回，不得重复增加 `qualifiedCount`。
+
+## 8. 数据质量阈值
+
+以下参数尚未确定，属于上线阻断项：
+
+  参数                         说明
+  ---------------------------- -------------------
+  `MIN_VALID_SOURCES`          最少有效来源数
+  `MIN_LIQUIDITY_USD`          最低流动性
+  `MIN_VOLUME_USD_4H`          每4小时最低成交量
+  `MAX_SOURCE_DEVIATION_BPS`   来源间最大偏差
+  `MIN_COVERAGE_BPS`           TWAP数据覆盖率
+  `MAX_DATA_AGE_SECONDS`       数据最大延迟
+  `MAX_VALIDITY_SECONDS`       签名数据有效期限
+
+不得在观察窗口开始后修改这些参数。
+
+## 9. P0 计算
+
+P0 的最终算法仍需项目方确认。建议： - 预先公布初始观察期； -
+采用多个合格来源的聚合TWAP； - 公开所有来源、观察时间和聚合算法； - 将
+P0 和 config hash 写入链上； - P0 冻结后不得回溯修改。
+
+## 10. 故障处理
+
+以下情况进入 `ORACLE_PAUSED`： - 签名验证服务不可用； -
+有效来源数不足； - 数据过期或缺失； - 观察区间时间戳不匹配； -
+价格源被暂停或存在异常； - OracleAdapter 消息未能成功完成。
+
+暂停期间： - 不增加达标K线数量； - 不把缺失数据当成未达标K线； -
+不触发失败销毁； - 记录暂停原因和链上事件。
+
+恢复时建议重新开始完整12根K线窗口，以免混合不同数据配置或不完整观察区间。
+
+## 11. 防操纵建议
+
+-   价格来源多样化。
+-   最低流动性与成交量阈值。
+-   4小时TWAP而非瞬时价格。
+-   对来源偏差进行过滤。
+-   不允许项目方在窗口中更换价格源。
+-   每个窗口冻结 oracle config hash。
+-   对异常成交、闪电贷影响和单池价格偏移进行监控。
+-   公布可复核的价格数据摘要。
+
+TWAP只能提高操纵成本，不能保证市场价格无法被操纵。

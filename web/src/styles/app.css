@@ -1,0 +1,36 @@
+/* 应用级补充样式（落地页之外）：我的战况 / 排行榜 / 运维后台。
+   设计令牌与组件类沿用 fuse.css，避免第二套视觉语言。 */
+
+.page{padding-block:28px 64px}
+.page-h{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-end;justify-content:space-between;margin-bottom:24px}
+.page-h h1{font:900 clamp(24px,3vw,36px)/1.15 var(--f-body);margin:6px 0 8px}
+.page-h p{color:var(--text-2);margin:0;max-width:64ch}
+.cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);padding:14px 16px}
+.card .v{font:600 22px/1.2 var(--f-mono);margin-top:6px;font-variant-numeric:tabular-nums}
+.table{width:100%;border-collapse:collapse;font-size:13px}
+.table th{text-align:left;font:500 11px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);padding:8px 10px;white-space:nowrap}
+.table td{border-bottom:1px solid var(--line);padding:9px 10px;font-variant-numeric:tabular-nums}
+.table tr:hover td{background:rgba(255,255,255,.02)}
+.table .num{font-family:var(--f-mono);text-align:right}
+.empty{padding:40px 16px;text-align:center;color:var(--muted);border:1px dashed var(--line-2)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);padding:2px 8px;font:500 11px var(--f-mono);letter-spacing:.06em;color:var(--text-2)}
+.chip.ok{border-color:#1f5a42;color:var(--pass);background:rgba(61,220,151,.08)}
+.chip.bad{border-color:#5a1f1f;color:var(--fail);background:rgba(255,77,77,.08)}
+.chip.pend{color:var(--muted)}
+.stack{display:grid;gap:14px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.spacer{flex:1}
+.mono-sm{font:500 12px var(--f-mono)}
+.tabs-line{display:flex;gap:6px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.tabs-line button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;color:var(--muted);font:600 13px var(--f-body)}
+.tabs-line button[aria-selected="true"]{color:var(--text);border-color:var(--fire)}
+.field{display:grid;gap:6px;margin-bottom:12px}
+.field label{font:500 11px var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.field input,.field select{background:var(--bg-2);border:1px solid var(--line-2);padding:9px 10px;color:var(--text);font:500 13px var(--f-mono)}
+.field input:focus,.field select:focus{outline:2px solid var(--ember);outline-offset:1px}
+.note-box{background:rgba(255,182,61,.06);border:1px solid #5a3f12;padding:10px 12px;color:var(--text-2);font-size:12px}
+.err-box{background:rgba(255,77,77,.07);border:1px solid #5a1f1f;padding:10px 12px;color:#ffb3b3;font-size:12px}
+.foot-links{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
+.foot-links a{text-decoration:none}
+.foot-links a:hover{color:var(--text)}

@@ -1,0 +1,19 @@
+{
+  "name": "fuse-protocol",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FUSE 引信协议 — frontend + Cloudflare Worker backend",
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "cd web && ./node_modules/.bin/vite",
+    "dev:worker": "cd worker && ./node_modules/.bin/wrangler dev",
+    "build": "cd web && ./node_modules/.bin/vite build",
+    "typecheck": "cd web && ./node_modules/.bin/tsc --noEmit && cd ../worker && ./node_modules/.bin/tsc --noEmit",
+    "deploy": "npm run build && cd worker && ./node_modules/.bin/wrangler deploy",
+    "db:migrate": "cd worker && ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote",
+    "db:migrate:local": "cd worker && ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --local",
+    "db:seed": "cd worker && ./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql",
+    "db:seed:local": "cd worker && ./node_modules/.bin/wrangler d1 execute fuse-protocol --local --file=./migrations/seed.sql",
+    "smoke": "node worker/scripts/smoke.mjs"
+  }
+}

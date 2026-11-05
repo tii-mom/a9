@@ -1,0 +1,2 @@
+# 本地开发：复制为 worker/.dev.vars（不要提交）
+ADMIN_TOKEN=dev-admin-token-change-me
