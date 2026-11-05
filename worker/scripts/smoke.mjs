@@ -468,21 +468,27 @@ async function baseline() {
     return 'BAD_REQUEST';
   });
 
-  await test('未知 /api 路径 → 404', async () => {
+  await test('未知 /api 路径 → 404（且不触发 reconcile）', async () => {
     const res = await api('/api/nope');
     eq(res.status, 404, 'status');
     eq(res.body.error.code, 'NOT_FOUND', 'code');
+    eq(res.headers.get('x-a9-reconciled'), '0', '未知路径不应 reconcile');
     const res2 = await api('/api/rounds/99');
     eq(res2.status, 400, '非法轮次 status');
-    return '包装为 ApiResponse.error';
+    eq(res2.headers.get('x-a9-reconciled'), '0', '非法轮次不应 reconcile');
+    const res3 = await api('/api/rounds/1/nope');
+    eq(res3.status, 404, '无效子路径 status');
+    eq(res3.headers.get('x-a9-reconciled'), '0', '无效子路径不应 reconcile');
+    return '404/400 均 X-A9-Reconciled: 0';
   });
 }
 
 async function adminTests() {
-  await test('admin 鉴权：无 token / 错 token → 401', async () => {
+  await test('admin 鉴权：无 token / 错 token → 401（先鉴权后 reconcile）', async () => {
     const none = await api('/api/admin/overview');
     eq(none.status, 401, '无 token status');
     eq(none.body.error.code, 'UNAUTHORIZED', '无 token code');
+    eq(none.headers.get('x-a9-reconciled'), '0', '未授权 admin 不应 reconcile');
     const wrong = await api('/api/admin/overview', {}, 'wrong-token-123456');
     eq(wrong.status, 401, '错 token status');
     assert(!JSON.stringify(wrong.body).includes('ADMIN'), '错误信息不应泄露配置细节');
@@ -512,6 +518,20 @@ async function adminTests() {
     const stateB = second.body.data.rounds.map((row) => row.roundId + ':' + row.state + ':' + row.candlesSeen);
     eq(stateB.join(','), stateA.join(','), '两次 tick 后状态');
     return 'CAS + INSERT OR IGNORE，无重复计数';
+  });
+
+  await test('GET /api/auth/nonce 独立限流（默认 10/min）→ 429', async () => {
+    const address = ctx.claimAddress ?? UNKNOWN_ADDRESS;
+    let last = null;
+    for (let i = 0; i < 12; i++) {
+      last = await api('/api/auth/nonce?address=' + encodeURIComponent(address));
+      if (last.status === 429) break;
+    }
+    assert(last, 'nonce 请求失败');
+    eq(last.status, 429, 'nonce 超过配额应 429');
+    eq(last.body.error.code, 'RATE_LIMITED', 'code');
+    eq(last.headers.get('x-a9-reconciled'), '0', 'nonce 不应 reconcile');
+    return '第 ' + (last ? 12 : 0) + ' 次请求 429 RATE_LIMITED';
   });
 
   await test('预言机暂停/恢复（不销毁本金、不消耗档位）', async () => {

@@ -6,12 +6,14 @@
  *             || domain(utf8) || timestamp(int64 BE) || payload(utf8)
  *   signature = ed25519_sign(sha256(message))
  *
- * 说明 / TODO(chain 模式)：
+ * FIX-6：必须提交钱包 StateInit（BOC base64），服务端离线验证：
+ *   - address.hash == hash(StateInit cell)（即证明 StateInit 对应目标地址）；
+ *   - code cell hash ∈ {v3r2, v4r2, v5r1} 白名单；
+ *   - 从 data cell 指定 bit offset 解出 public_key，必须等于签名公钥。
+ *   这样攻击者无法用自造密钥对抢注任意地址；D1 wallet_bindings 首次绑定也带 code_hash/verified_at。
+ * 说明：
  *  - 演示模式（DATA_SOURCE=demo 且 DEMO_ALLOW_UNSIGNED_WRITES=true）允许无签名写接口；
  *    生产/chain 模式必须带签名，且 chain 模式的写接口本身返回 501（请直接与合约交互）。
- *  - 当前 publicKey 由客户端提供并与地址做「首次绑定」（TOFU，D1 wallet_bindings）。
- *    严格版应从 ton_proof.state_init 解析钱包公钥并校验地址=hash(state_init)，或调用
- *    tonapi /v2/account/verify；该替换点已集中在 resolvePublicKey()，接入时无需改调用方。
  */
 import type { Env } from './env';
 import type { TonProof } from '@shared/types';
@@ -82,6 +84,181 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
     offset += part.length;
   }
   return out;
+}
+
+/* ------------------- FIX-6：StateInit 解析与地址所有权证明 ------------------- */
+
+/** 已知钱包版本 code cell hash → data 布局中的 public_key 起始 bit。 */
+const WALLET_CODE_LAYOUTS: Record<string, { version: string; publicKeyOffsetBits: number }> = {
+  // WalletV3R2
+  '84dafa449f98a6987789ba232358072bc0f76dc4524002a5d0918b9a75d2d599': { version: 'v3r2', publicKeyOffsetBits: 64 },
+  // WalletV4R2
+  feb5ff6820e2ff0d9483e7e0d62c817d846789fb4ae580c878866d959dabd5c0: { version: 'v4r2', publicKeyOffsetBits: 64 },
+  // WalletV5R1（is_signature_allowed 1 bit + seqno 32 + wallet_id 32）
+  '20834b7b72b112147e1b2fb457b84e74d1a30f04f737d4f62a668e9552d2b72f': { version: 'v5r1', publicKeyOffsetBits: 65 },
+};
+
+interface ParsedCell {
+  data: Uint8Array;
+  bitsLen: number;
+  refs: ParsedCell[];
+  hash: Uint8Array;
+  depth: number;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+/** BOC 里非整字节 cell 的 padding：最后一个非零字节的最低置位为 padding 标记。 */
+function paddedBufferBitLength(data: Uint8Array): number {
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i] !== 0) {
+      const testByte = data[i];
+      let bitPos = testByte & -testByte;
+      if ((bitPos & 1) === 0) bitPos = Math.log2(bitPos) + 1;
+      const base = i > 0 ? i << 3 : 0;
+      return base + 8 - bitPos;
+    }
+  }
+  return 0;
+}
+
+function readUintBE(bytes: Uint8Array, offset: number, length: number): number {
+  let value = 0;
+  for (let i = 0; i < length; i++) value = value * 256 + (bytes[offset + i] ?? 0);
+  return value;
+}
+
+/**
+ * 解析 TON BOC（标准 magic 0xB5EE9C72，支持 has_idx / has_crc32c），返回 root cell。
+ * 仅接受普通 level0 cell（钱包 StateInit 即此类；exotic/带缓存 hash 的直接拒绝）。
+ */
+async function parseBocRoot(bytes: Uint8Array): Promise<ParsedCell> {
+  if (bytes.length < 6) throw unauthorized();
+  if (readUintBE(bytes, 0, 4) !== 0xb5ee9c72) throw unauthorized();
+  let p = 4;
+  const flags = bytes[p++];
+  const hasIdx = (flags & 0x80) !== 0;
+  const hasCrc = (flags & 0x40) !== 0;
+  const sizeBytes = flags & 0x07;
+  if (sizeBytes < 1 || sizeBytes > 4) throw unauthorized();
+  const offBytes = bytes[p++];
+  const cellsCount = readUintBE(bytes, p, sizeBytes); p += sizeBytes;
+  const rootsCount = readUintBE(bytes, p, sizeBytes); p += sizeBytes;
+  p += sizeBytes; // absent count
+  const totalSize = readUintBE(bytes, p, offBytes); p += offBytes;
+  const roots: number[] = [];
+  for (let i = 0; i < rootsCount; i++) { roots.push(readUintBE(bytes, p, sizeBytes)); p += sizeBytes; }
+  if (hasIdx) p += cellsCount * offBytes;
+  const cellData = bytes.subarray(p, p + totalSize);
+  if (cellData.length !== totalSize) throw unauthorized();
+  if (hasCrc && bytes.length < p + totalSize + 4) throw unauthorized();
+
+  interface RawCell { d1: number; d2: number; data: Uint8Array; bitsLen: number; refs: number[] }
+  const raws: RawCell[] = [];
+  let q = 0;
+  for (let i = 0; i < cellsCount; i++) {
+    const d1 = cellData[q++];
+    const d2 = cellData[q++];
+    const refsCount = d1 & 7;
+    if (d1 & 8) throw unauthorized();
+    if (d1 & 16) throw unauthorized();
+    const dataBytes = Math.ceil(d2 / 2);
+    const paddingAdded = d2 % 2 === 1;
+    const data = cellData.subarray(q, q + dataBytes); q += dataBytes;
+    if (data.length !== dataBytes) throw unauthorized();
+    const bitsLen = paddingAdded ? paddedBufferBitLength(data) : dataBytes * 8;
+    const refs: number[] = [];
+    for (let r = 0; r < refsCount; r++) { refs.push(readUintBE(cellData, q, sizeBytes)); q += sizeBytes; }
+    raws.push({ d1, d2, data, bitsLen, refs });
+  }
+
+  const cache = new Map<number, ParsedCell>();
+  const visiting = new Set<number>();
+  const build = async (index: number): Promise<ParsedCell> => {
+    const cached = cache.get(index);
+    if (cached) return cached;
+    if (visiting.has(index)) throw unauthorized();
+    visiting.add(index);
+    const raw = raws[index];
+    if (!raw) throw unauthorized();
+    const children: ParsedCell[] = [];
+    for (const refIndex of raw.refs) children.push(await build(refIndex));
+    let maxDepth = 0;
+    for (const child of children) maxDepth = Math.max(maxDepth, child.depth);
+    const depth = children.length ? maxDepth + 1 : 0;
+    const repr = new Uint8Array(2 + raw.data.length + children.length * 34);
+    repr[0] = raw.d1;
+    repr[1] = raw.d2;
+    repr.set(raw.data, 2);
+    let offset = 2 + raw.data.length;
+    for (const child of children) {
+      repr[offset++] = Math.floor(child.depth / 256);
+      repr[offset++] = child.depth % 256;
+    }
+    for (const child of children) {
+      repr.set(child.hash, offset);
+      offset += 32;
+    }
+    const cell: ParsedCell = { data: raw.data, bitsLen: raw.bitsLen, refs: children, hash: await sha256(repr), depth };
+    cache.set(index, cell);
+    visiting.delete(index);
+    return cell;
+  };
+
+  const rootIndex = roots[0];
+  if (rootIndex === undefined) throw unauthorized();
+  return build(rootIndex);
+}
+
+/** 从 cell 的 bit offset 读出 length 位 → 字节（大端对齐）。 */
+function readBitsAsBytes(cell: ParsedCell, offsetBits: number, lengthBits: number): Uint8Array {
+  const out = new Uint8Array(Math.ceil(lengthBits / 8));
+  for (let i = 0; i < lengthBits; i++) {
+    const pos = offsetBits + i;
+    const byte = cell.data[pos >> 3] ?? 0;
+    const bit = (byte >> (7 - (pos & 7))) & 1;
+    if (bit) out[i >> 3] |= 0x80 >> (i & 7);
+  }
+  return out;
+}
+
+/**
+ * FIX-6 核心：验证 ton_proof.state_init 确实是 address 对应的钱包合约状态，
+ * 且 data 中的 public_key 与签名公钥一致。
+ * StateInit = split_depth(None 0) | special(None 0) | code:^Cell | data:^Cell | library(empty 0)
+ */
+async function verifyWalletStateInit(
+  proof: TonProof,
+  address: string,
+): Promise<{ codeHash: string; publicKeyHex: string; version: string }> {
+  if (typeof proof.stateInit !== 'string' || !proof.stateInit) throw unauthorized();
+  let bytes: Uint8Array;
+  try {
+    bytes = base64ToBytes(proof.stateInit);
+  } catch {
+    throw unauthorized();
+  }
+  const root = await parseBocRoot(bytes);
+  // StateInit 由 split_depth / special / code / data / library 组成；这里只要求恰好 code+data 两个 ref。
+  // 根 cell 的 bit 内容不参与语义判断（address.hash == hash(StateInit) 已把全部内容绑定）。
+  if (root.refs.length !== 2 || root.bitsLen > 64) throw unauthorized();
+
+  const parsedAddress = decodeTonAddress(address);
+  if (!parsedAddress) throw unauthorized();
+  if (!bytesEqual(root.hash, parsedAddress.hash)) throw unauthorized();
+
+  const codeHash = bytesToHex(root.refs[0].hash);
+  const layout = WALLET_CODE_LAYOUTS[codeHash];
+  if (!layout) throw unauthorized();
+
+  const dataCell = root.refs[1];
+  const publicKeyHex = bytesToHex(readBitsAsBytes(dataCell, layout.publicKeyOffsetBits, 256));
+  return { codeHash, publicKeyHex, version: layout.version };
 }
 
 /** 解析 TON 用户友好地址（UQ/EQ, 48 chars base64url）→ workchain + 32 字节 hash。 */
@@ -174,7 +351,7 @@ function allowedProofDomains(env: Env): string[] {
     .filter(Boolean);
 }
 
-function clientIp(request: Request): string {
+export function clientIp(request: Request): string {
   return (
     request.headers.get('cf-connecting-ip') ||
     (request.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() ||
@@ -220,9 +397,9 @@ export async function requireWriteAuth(
   if (!publicKey) throw unauthorized();
   const publicKeyHex = bytesToHex(publicKey);
 
-  // 地址 ↔ 公钥绑定：首次成功绑定；后续必须一致，且同一公钥只能绑定一个地址。
-  const binding = await store.getWalletBinding(env, address);
-  if (binding && binding.public_key.toLowerCase() !== publicKeyHex) throw unauthorized();
+  // FIX-6：用 StateInit 证明「该公钥确实控制该地址」，并与客户端声明的公钥比对
+  const stateInitProof = await verifyWalletStateInit(proof, address);
+  if (stateInitProof.publicKeyHex !== publicKeyHex) throw unauthorized();
 
   let signature: Uint8Array;
   try {
@@ -247,16 +424,50 @@ export async function requireWriteAuth(
   const consumed = await store.consumeAuthNonce(env, { nonce, address, now });
   if (!consumed) throw unauthorized();
 
-  if (!binding) {
-    const bound = await store.insertWalletBinding(env, { address, publicKey: publicKeyHex, now });
-    if (!bound) throw unauthorized();
+  // 地址 ↔ 公钥绑定（带 StateInit 证明的 code_hash / verified_at；旧的 TOFU 行会被清理并重建）
+  interface BindingRow {
+    address: string;
+    public_key: string;
+    code_hash: string | null;
+    verified_at: number | null;
+  }
+  const binding = await env.DB.prepare(
+    'SELECT address, public_key, code_hash, verified_at FROM wallet_bindings WHERE address = ?',
+  )
+    .bind(address)
+    .first<BindingRow>();
+
+  if (binding && binding.verified_at) {
+    if (binding.public_key.toLowerCase() !== publicKeyHex) throw unauthorized();
+    if (binding.code_hash && binding.code_hash.toLowerCase() !== stateInitProof.codeHash) throw unauthorized();
+    return { signed: true, ip };
+  }
+  if (binding) {
+    // 迁移前遗留的 TOFU 绑定：无 StateInit 证明，清掉后按本次已验证内容重建
+    await env.DB.prepare('DELETE FROM wallet_bindings WHERE address = ?').bind(address).run();
+  }
+  try {
+    await env.DB.prepare(
+      'INSERT INTO wallet_bindings (address, public_key, code_hash, verified_at, bound_at) VALUES (?, ?, ?, ?, ?)',
+    )
+      .bind(address, publicKeyHex, stateInitProof.codeHash, now, now)
+      .run();
+  } catch {
+    // public_key UNIQUE 冲突：同一公钥已绑定其它地址 → 拒绝
+    throw unauthorized();
   }
   return { signed: true, ip };
 }
 
-/** 限流：/api/admin/*、/api/stake、/api/claim。超阈值抛 429（RATE_LIMITED）。 */
-export async function enforceRateLimit(env: Env, request: Request, scope: string, now = Date.now()): Promise<void> {
-  const limit = Number(env.RATE_LIMIT_PER_MINUTE ?? '30');
+/** 限流：/api/admin/*、/api/stake、/api/claim、/api/auth/nonce（可传单独配额）。超阈值抛 429。 */
+export async function enforceRateLimit(
+  env: Env,
+  request: Request,
+  scope: string,
+  now = Date.now(),
+  limitOverride?: number,
+): Promise<void> {
+  const limit = limitOverride ?? Number(env.RATE_LIMIT_PER_MINUTE ?? '30');
   if (!Number.isFinite(limit) || limit <= 0) return;
   const result = await store.hitRateLimit(env, {
     key: clientIp(request) + '|' + scope,

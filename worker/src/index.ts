@@ -33,7 +33,7 @@ import * as state from './state';
 import * as store from './store';
 import * as views from './views';
 import * as v8 from './v8';
-import { enforceRateLimit, issueAuthNonce, requireWriteAuth } from './tonproof';
+import { clientIp, enforceRateLimit, issueAuthNonce, requireWriteAuth } from './tonproof';
 import { notImplemented } from './http';
 import { ownWeightFor, streakForRound } from './protocol';
 import { clampInt, mulDivFloor, toBigInt } from './util';
@@ -74,7 +74,6 @@ function v8WeightReward(st: ReconcileResult, roundId: number, address: string): 
 }
 
 async function handleStake(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
-  await enforceRateLimit(env, request, '/api/stake', st.now);
   const body = await readJsonBody(request);
   // P1-D：chain 模式禁止演示写入（请直接与合约交互）
   if (st.params.dataSource === 'chain') {
@@ -181,7 +180,6 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
 }
 
 async function handleClaim(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
-  await enforceRateLimit(env, request, '/api/claim', st.now);
   const body = await readJsonBody(request);
   if (st.params.dataSource === 'chain') {
     throw notImplemented('链上模式请直接与合约交互：/api/claim 仅用于演示数据源');
@@ -328,7 +326,6 @@ async function handleAdmin(
   st: ReconcileResult,
   parts: string[],
 ): Promise<Response> {
-  await enforceRateLimit(env, request, '/api/admin', Date.now());
   const { actor } = requireAdmin(request, env);
 
   if (parts.length === 2 && parts[1] === 'overview') {
@@ -363,6 +360,137 @@ async function handleAdmin(
     return okResponse(await views.buildAdminOverview(env, next));
   }
   throw notFound('管理接口不存在');
+}
+
+/** FIX-7：廉价路由分类（不触碰 DB）。null = 404（未知路径/方法）。 */
+type D1Scope = 'admin' | 'stake' | 'claim' | 'nonce';
+
+interface RoutePlan {
+  requiresState: boolean;
+  requiresAdmin: boolean;
+  d1Scope: D1Scope | null;
+  cacheable: boolean;
+  cheap: 'none' | 'nonce' | 'health' | 'version';
+  badRequestMessage?: string;
+}
+
+function routePlan(partial: Partial<RoutePlan>): RoutePlan {
+  return {
+    requiresState: true,
+    requiresAdmin: false,
+    d1Scope: null,
+    cacheable: false,
+    cheap: 'none',
+    ...partial,
+  };
+}
+
+/** 路由白名单：只有命中已知路径才可能进入 reconcile。 */
+function classifyRoute(method: string, url: URL): RoutePlan | null {
+  const segments = url.pathname.split('/').filter(Boolean);
+  if (segments[0] !== 'api') return null;
+  const parts = segments.slice(1);
+  const isGet = method === 'GET';
+  const isPost = method === 'POST';
+
+  if (parts.length === 1) {
+    switch (parts[0]) {
+      case 'health':
+        return isGet ? routePlan({ requiresState: false, cheap: 'health' }) : null;
+      case 'version':
+        return isGet ? routePlan({ requiresState: false, cheap: 'version' }) : null;
+      case 'config':
+        return isGet ? routePlan({}) : null;
+      case 'stats':
+        return isGet ? routePlan({ cacheable: true }) : null;
+      case 'rounds':
+        return isGet ? routePlan({}) : null;
+      case 'trades':
+        return isGet ? routePlan({}) : null;
+      case 'book':
+        return isGet ? routePlan({ cacheable: true }) : null;
+      case 'me':
+        return isGet
+          ? routePlan(
+              url.searchParams.get('address') ? {} : { badRequestMessage: '缺少字段 address' },
+            )
+          : null;
+      case 'stake':
+        return isPost ? routePlan({ d1Scope: 'stake' }) : null;
+      case 'claim':
+        return isPost ? routePlan({ d1Scope: 'claim' }) : null;
+      default:
+        return null;
+    }
+  }
+
+  if (parts[0] === 'auth' && parts.length === 2 && parts[1] === 'nonce') {
+    return isGet ? routePlan({ requiresState: false, cheap: 'nonce', d1Scope: 'nonce' }) : null;
+  }
+
+  if (parts[0] === 'referral' && parts.length === 2) {
+    return isGet ? routePlan({}) : null;
+  }
+
+  if (parts[0] === 'rounds' && parts.length >= 2 && parts.length <= 3) {
+    if (!isGet) return null;
+    const roundId = Number(parts[1]);
+    if (!Number.isInteger(roundId) || roundId < 1 || roundId > 10) {
+      return routePlan({ badRequestMessage: '轮次必须是 1..10 的整数' });
+    }
+    if (parts.length === 2) return routePlan({});
+    if (parts[2] === 'candles' || parts[2] === 'leaderboard') return routePlan({});
+    return null;
+  }
+
+  if (parts[0] === 'admin') {
+    if (parts.length === 2 && parts[1] === 'overview') {
+      return isGet ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+    }
+    if (parts.length === 2 && parts[1] === 'tick') {
+      return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+    }
+    if (parts.length === 3 && parts[1] === 'oracle' && (parts[2] === 'pause' || parts[2] === 'resume')) {
+      return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+    }
+    if (parts.length === 3 && parts[1] === 'rounds' && parts[2] === 'advance') {
+      return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/* ------------------------------------------------------------------ *
+ * FIX-7：内存级限流（所有 /api 请求 + 静态 GET，不写 D1）
+ * ------------------------------------------------------------------ */
+
+const memoryWindows = new Map<string, { bucket: number; count: number }>();
+
+function memoryLimitExceeded(env: Env, request: Request, scope: string, now: number): boolean {
+  const limit =
+    scope === 'static'
+      ? Number(env.RATE_LIMIT_STATIC_PER_MINUTE ?? '600')
+      : Number(env.RATE_LIMIT_READ_PER_MINUTE ?? '120');
+  if (!Number.isFinite(limit) || limit <= 0) return false;
+  const key = clientIp(request) + '|' + scope;
+  const bucket = Math.floor(now / 60_000);
+  const entry = memoryWindows.get(key);
+  if (!entry || entry.bucket !== bucket) {
+    if (memoryWindows.size > 5_000) memoryWindows.clear();
+    memoryWindows.set(key, { bucket, count: 1 });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > limit;
+}
+
+/** 标记本次请求是否执行了 reconcile（供 smoke/运维断言「未知路径不触发 reconcile」）。 */
+function withReconciled(response: Response, reconciled: boolean): Response {
+  const headers = new Headers(response.headers);
+  headers.set('X-A9-Reconciled', reconciled ? '1' : '0');
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function route(
@@ -454,26 +582,64 @@ async function route(
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
   const method = request.method.toUpperCase();
+  const now = Date.now();
+
+  // ① 廉价路由判定（无 DB）+ 内存级 IP 限流（覆盖未知路径与所有 /api 请求）
+  const plan = classifyRoute(method, url);
+  const memScope = plan ? (plan.requiresState ? 'api-read' : 'api-cheap') : 'api-unknown';
+  if (memoryLimitExceeded(env, request, memScope, now)) {
+    return withReconciled(apiErrorResponse(new ApiError('RATE_LIMITED', '请求过于频繁，请稍后重试')), false);
+  }
+  if (!plan) {
+    return withReconciled(apiErrorResponse(notFound('接口不存在')), false);
+  }
+  if (plan.badRequestMessage) {
+    return withReconciled(apiErrorResponse(badRequest(plan.badRequestMessage)), false);
+  }
+
+  // ② 敏感路径 D1 限流（admin/stake/claim/nonce；nonce 单独更低配额）
+  if (plan.d1Scope) {
+    const limitOverride =
+      plan.d1Scope === 'nonce' ? Number(env.RATE_LIMIT_NONCE_PER_MINUTE ?? '10') : undefined;
+    await enforceRateLimit(env, request, plan.d1Scope, now, limitOverride);
+  }
+
+  // ③ admin 先做 Bearer 鉴权（常量时间比较，无 DB），再决定是否 reconcile
+  if (plan.requiresAdmin) requireAdmin(request, env);
+
+  // ④ 廉价端点直接返回，不 reconcile
+  if (plan.cheap === 'nonce') {
+    const address = parseAddress(url.searchParams.get('address'));
+    return withReconciled(okResponse(await issueAuthNonce(env, address, now)), false);
+  }
+  if (plan.cheap === 'health') {
+    const db = await store.dbPing(env);
+    const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
+    return withReconciled(okResponse(views.buildHealth(env, db, dataSource)), false);
+  }
+  if (plan.cheap === 'version') {
+    const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
+    return withReconciled(okResponse(views.buildVersionInfo(env, dataSource)), false);
+  }
+
+  // ⑤ 只有确实要返回协议数据的路径才 reconcile
   const ttl = cacheTtlMs(env);
   const cacheKey = url.pathname + url.search;
-  const cacheable = method === 'GET' && CACHEABLE_GET.has(url.pathname);
-
-  if (cacheable) {
-    const hit = cacheGet(cacheKey, Date.now(), ttl);
-    if (hit) return cachedResponse(hit);
+  if (plan.cacheable) {
+    const hit = cacheGet(cacheKey, now, ttl);
+    if (hit) return withReconciled(cachedResponse(hit), false);
   }
 
   const st = await state.reconcile(env);
   if (st.changed) bustCache();
-
   const response = await route(request, env, url, method, st);
 
-  if (cacheable && ttl > 0) {
+  if (plan.cacheable && ttl > 0) {
     const body = await response.clone().text();
     cacheSet(cacheKey, response.status, body, Date.now());
   }
   if (method !== 'GET' && method !== 'OPTIONS') bustCache();
-  return response;
+  return withReconciled(response, true);
 }
 
 export default {
@@ -485,10 +651,15 @@ export default {
       const url = new URL(request.url);
       const isApi = url.pathname === '/api' || url.pathname.startsWith('/api/');
       if (!isApi) {
-        // 非 /api：交给 ASSETS（not_found_handling=single-page-application 负责 SPA 回退）。
-        response = await env.ASSETS.fetch(request);
+        // FIX-7：静态 GET 也有内存级 IP 限流（不写 D1）
+        if (memoryLimitExceeded(env, request, 'static', Date.now())) {
+          response = apiErrorResponse(new ApiError('RATE_LIMITED', '请求过于频繁，请稍后重试'));
+        } else {
+          // 非 /api：交给 ASSETS（not_found_handling=single-page-application 负责 SPA 回退）。
+          response = await env.ASSETS.fetch(request);
+        }
       } else if (request.method.toUpperCase() === 'OPTIONS') {
-        response = preflightResponse();
+        response = withReconciled(preflightResponse(), false);
       } else {
         response = await handleApi(request, env, url);
       }
@@ -497,6 +668,12 @@ export default {
         console.error('[fetch] unhandled', error instanceof Error ? (error.stack ?? error.message) : String(error));
       }
       response = apiErrorResponse(error);
+      try {
+        const path = new URL(request.url).pathname;
+        if (path === '/api' || path.startsWith('/api/')) response = withReconciled(response, false);
+      } catch {
+        /* ignore */
+      }
     }
     const final = finalizeResponse(response, env, request);
     logRequest(request, final.status, started);

@@ -40,8 +40,14 @@ ALLOWED_ORIGINS = "https://a9.lat,https://www.a9.lat"
 DEMO_ALLOW_UNSIGNED_WRITES = "true"
 # ton_proof 允许的 domain（逗号分隔；生产只保留 a9.lat 系列）
 TON_PROOF_DOMAINS = "a9.lat,www.a9.lat,localhost,127.0.0.1"
-# 最简限流：每个 IP+路径 每分钟请求数（保护 admin/stake/claim）
+# 最简限流：每个 IP+路径 每分钟请求数（D1 计数，保护 admin/stake/claim）
 RATE_LIMIT_PER_MINUTE = "60"
+# /api/auth/nonce 单独更低配额（D1 计数）
+RATE_LIMIT_NONCE_PER_MINUTE = "10"
+# 协议只读 GET 的内存级限流（不写 D1）
+RATE_LIMIT_READ_PER_MINUTE = "120"
+# 静态资源 GET 的内存级限流（不写 D1）
+RATE_LIMIT_STATIC_PER_MINUTE = "600"
 # 语义化版本 / 部署核对信息（部署时可用 --var GIT_SHA:xxx --var DEPLOYED_AT:xxx 覆盖）
 VERSION = "1.0.0"
 # GIT_SHA = ""

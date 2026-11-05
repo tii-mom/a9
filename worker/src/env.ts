@@ -39,8 +39,14 @@ export interface Env {
   DEMO_ALLOW_UNSIGNED_WRITES?: string;
   /** ton_proof 允许的 domain（逗号分隔，大小写不敏感） */
   TON_PROOF_DOMAINS?: string;
-  /** 限流阈值：每个 IP+路径 每分钟请求数（默认 30） */
+  /** 限流阈值：每个 IP+路径 每分钟请求数（默认 30；admin/stake/claim） */
   RATE_LIMIT_PER_MINUTE?: string;
+  /** /api/auth/nonce 单独更低配额（默认 10/min） */
+  RATE_LIMIT_NONCE_PER_MINUTE?: string;
+  /** 协议只读 GET 的内存级限流（默认 120/min，不写 D1） */
+  RATE_LIMIT_READ_PER_MINUTE?: string;
+  /** 静态资源 GET 的内存级限流（默认 600/min） */
+  RATE_LIMIT_STATIC_PER_MINUTE?: string;
 }
 
 /**
