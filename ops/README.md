@@ -25,7 +25,7 @@ node ops/scripts/deploy_all.mjs
 # 4) 真实部署（有合约构建产物、参数签字、地址就绪后）
 #    详细顺序与注意事项见 runbooks/01_deploy_testnet.md
 OPS_EXECUTE=1 node ops/scripts/10_deploy_jetton.mjs --execute
-# ... 逐步执行 11 → 20 → 30 → 40 → 70 → 50 → 60
+# ... 逐步执行 11 → 20 → 30 → 40 → 65 → 70 → 55 → 50 → 60
 node ops/scripts/verify_deployment.mjs --online --save
 
 # 5) 运营期
@@ -55,6 +55,8 @@ ops/
 │   ├── 20_deploy_teamvault.mjs      TeamVault（controller=null 部署）
 │   ├── 30_deploy_round_controller.mjs RoundController + 初始化数据
 │   ├── 40_init_params.mjs           参数快照 + 链上 get_protocol_config 比对
+│   ├── 55_fund_ton.mjs              TON gas 充值（RC ≥20 / TV ≥10）
+│   ├── 65_set_jetton_wallets.mjs    SetJettonWallet(0x52540016)：RC/TV 绑定 canonical Jetton Wallet
 │   ├── 50_fund_vaults.mjs           注资（70 亿奖励 + 12 亿团队；--all 含 8/5/5 亿分配）
 │   ├── 60_verify_and_register.mjs   登记表定稿 + 地址簿生成
 │   ├── 70_bind_roles.mjs            TeamVault.InitController（不可逆，双人核对）
@@ -91,7 +93,7 @@ ops/
 
 | 任务交付项 | 对应文件 | 验证方式 |
 | --- | --- | --- |
-| ① 测试网部署脚本 | scripts/00~70、deploy_all.mjs、lib/* | selftest 的 dry-run 用例 + 01 部署 Runbook |
+| ① 测试网部署脚本 | scripts/00~70（含 55/65）、deploy_all.mjs、lib/* | selftest 的 dry-run 用例 + 01 部署 Runbook |
 | ① 地址登记表 | config/testnet.registry.json、addresses.template.json、60 生成地址簿 | 60_verify_and_register + verify_deployment |
 | ② 10 轮运营手册（每轮 SOP） | runbooks/02_round_operations.md | 覆盖成功/失败/无人/暂停恢复/技术终止五条路径 |
 | ② 六类公告模板 | templates/announcements.json（7 模板）+ runbooks/05 | selftest 渲染 7 类 × 中英 + 风险提示 |
@@ -124,7 +126,9 @@ ops/
 - 代币金额：raw units 字符串（1 A9 = 1e9）；脚本用 BigInt，禁止浮点。
 - 价格：USD_E8 字符串（$0.00116 = 116000）；P0 = 116000，倍数 2（不可变）。
 - 时间：链上 Unix 秒；运营文档统一 UTC。
-- 关键参数：PREVIEW 86400s、报名 259200s、观察 259200s（18 根 × 14400s，阈值 12）、单轮 604800s、10 轮 6048000s。
+- 关键参数：PREVIEW 86400s（R1 无 PREVIEW）、报名 259200s、观察 259200s（18 根 × 14400s，阈值 12；18 根齐备后 <12 即失败）、单轮 604800s、10 轮 6048000s。
+- 质押限额：单笔 ≥10,000 A9；单地址固定硬顶 20,000,000 A9（contracts/README §9.1）；本轮 ≤200,000,000 A9。
+- TON gas：RC ≥20 TON、TeamVault ≥10 TON（每条跨合约指令约 0.05 TON）。
 - 配置哈希：scripts/lib/config.mjs 对协议关键参数做 canonical JSON + sha256；部署前写入登记表并公示。
 - 参数变更后必须重跑：selftest → preflight → dry-run → 重新生成配置哈希。
 
@@ -132,12 +136,15 @@ ops/
 
 ## 6. 已知限制 / 待对接
 
-1. **部署命令模板依赖 contracts/scripts**：当前 ops 的 Acton 命令模板按约定路径编写；contract-dev 交付实际脚本后需核对参数（在 config/testnet.params.json 的 toolchain.commands 中修改模板，不改脚本逻辑）。
-2. **chain 适配器尚未实现**：monitor/reconcile 的链上事件级指标（三笔 burn 明细、claim 事件）在 worker 切真链后补齐；当前用 API 汇总 + 链上 total_supply 交叉核对。
-3. **技术终止 14 天/7 天不可压缩**：测试网演练需用独立短参数部署（或真实等待），见 04 手册 §8。
-4. **Acton 钱包**：部署前需在 contracts/ 下导入项目钱包；00_preflight 会检查但不会读取私钥。
-5. **公告发送**：默认只渲染不发送；发送需 TELEGRAM_* + OPS_CONFIRM=YES，且人工审批文案。
-6. **真实地址未写入**：testnet.registry.json 初始为 not_deployed（部署时由 10/20/30/60 写入）。
+1. **部署命令模板依赖 contracts/scripts**：当前 contracts/scripts 只有 deploy-emulation.tolk（`--net testnet` 可整体部署并打印地址）；ops 的分步命令模板（--only ...）需等待 contract-dev 增加子命令，或改用“整体部署 + --adopt 登记 + 65/70 补步骤”。模板在 config/testnet.params.json 的 toolchain.commands。
+2. **与 contract README 的实现差异**：无独立 StakingVault/RewardVault（RC 单 Jetton Wallet）；单地址固定硬顶 20M；18 根后 <12 即失败；R1 无 PREVIEW 需手动开轮；SetJettonWallet 一次性；测试网 BurnAck 由 jettonMaster 充当 ack 权威（主网阻塞项）。详见 runbooks/01 §8.1 与 02 §12。
+3. **chain 适配器尚未实现**：monitor/reconcile 的链上事件级指标（三笔 burn 明细、claim 事件）在 worker 切真链后补齐；当前用 API 汇总 + 链上 total_supply 交叉核对。
+4. **BurnAck 信任模型**：测试网由部署方 jettonMaster 地址充当 ack 权威；主网前必须改为受审计扩展或“标准 burn + 链下对账 + 单密钥 owner 确认”。
+5. **晚开窗兜底**：keeper 错过 72h 窗口时 OpenRound 重锚 stakeOpenAt；监控三倒计时，异常即公告。
+6. **技术终止 14 天/7 天不可压缩**：测试网演练需用独立短参数部署（或真实等待），见 04 手册 §8。
+7. **Acton 钱包**：部署前需在 contracts/ 下导入项目钱包；00_preflight 会检查但不会读取私钥。
+8. **公告发送**：默认只渲染不发送；发送需 TELEGRAM_* + OPS_CONFIRM=YES，且人工审批文案。
+9. **真实地址未写入**：testnet.registry.json 初始为 not_deployed（部署时由 10/20/30/65/70/50/60 写入）。
 
 ---
 

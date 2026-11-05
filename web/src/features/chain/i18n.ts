@@ -36,6 +36,7 @@ export interface ChainDict {
   minStake: string;
   maxStake: string;
   maxPerAddress: string;
+  capRefundNote: string;
   failLoss: string;
   shareEst: string;
   myStake: string;
@@ -106,6 +107,7 @@ const ZH: ChainDict = {
   minStake: '单笔最低',
   maxStake: '本轮总上限',
   maxPerAddress: '单地址上限',
+  capRefundNote: '两个上限独立校验：单地址累计 ≤ 20,000,000 A9、本轮总质押 ≤ 200,000,000 A9。超出上限的交易会被合约整笔原路退款（本金不损失，但会消耗 gas），因此前端会提前拦截。',
   failLoss: '失败损失',
   shareEst: '预计占比',
   myStake: '本轮已有质押',
@@ -201,6 +203,7 @@ const EN: ChainDict = {
   minStake: 'Minimum per stake',
   maxStake: 'Round cap',
   maxPerAddress: 'Per-address cap',
+  capRefundNote: 'The two caps are enforced independently: per-address cumulative ≤ 20,000,000 A9 and round total ≤ 200,000,000 A9. A transaction exceeding either cap is refunded in full by the contract (principal is safe, but gas is spent), so the UI blocks it up front.',
   failLoss: 'On failure',
   shareEst: 'Estimated share',
   myStake: 'Already staked this round',

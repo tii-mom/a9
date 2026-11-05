@@ -1,29 +1,46 @@
 #!/usr/bin/env node
 /** 70 — 角色绑定：TeamVault.InitController(roundController) 一次性调用，并记录绑定关系。 */
 
-import { requireConfirm } from './lib/cli.mjs';
+import { flag, requireConfirm } from './lib/cli.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
 import { commandTemplate, runCommand, substitute } from './lib/toolchain.mjs';
 import { writeRegistry } from './lib/registry.mjs';
 import { addressEquals } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, detail } from './lib/log.mjs';
 
-const { execute, params, registry } = bootstrap({
+const { args, execute, params, registry } = bootstrap({
   id: '70',
   title: '角色绑定：TeamVault.InitController → RoundController',
-  dependsOn: ['params'],
+  dependsOn: ['jettonWallets', 'params'],
 });
 
 const teamVault = resolveContractAddress(registry, 'teamVault');
 const controller = resolveContractAddress(registry, 'roundController');
+const rcWallet = resolveContractAddress(registry, 'roundControllerJettonWallet');
+const tvWallet = resolveContractAddress(registry, 'teamVaultJettonWallet');
 const registeredBinding = registry.bindings.teamVaultAcceptsOnly;
+const markBoundOnly = flag(args, 'mark-bound-only');
 
 section('绑定检查');
 kv('TeamVault', teamVault || '（未登记）');
 kv('RoundController', controller || '（未登记）');
 kv('当前绑定记录', registeredBinding || '（未绑定）');
 kv('调用者', 'TeamVault.admin（部署者/硬件钱包），只能调用一次');
+kv('RC Jetton Wallet', rcWallet || '（未登记：先执行 65_set_jetton_wallets.mjs）');
+kv('TV Jetton Wallet', tvWallet || '（未登记：先执行 65_set_jetton_wallets.mjs）');
+detail('顺序（contracts/README §7.2）：SetJettonWallet(RC) → SetJettonWallet(TV) → InitController；setter 必须早于 InitController。');
+detail('若 contracts/scripts/deploy-emulation.tolk 已代为执行 InitController：用 --mark-bound-only 只登记绑定，不要重复发送。');
 
+if (markBoundOnly) {
+  if (!teamVault || !controller) {
+    fail('--mark-bound-only 需要已登记 TeamVault 与 RoundController 地址');
+    process.exit(finish());
+  }
+  registry.bindings.teamVaultAcceptsOnly = controller;
+  writeRegistry(registry);
+  ok('已按 --mark-bound-only 记录绑定（未发交易）；请用 Acton rpc 读取 TeamVault.get_config().controller 人工核对');
+  process.exit(finish({ 结果: 'MARKED_BY_MANUAL_VERIFICATION', TeamVault: teamVault, RoundController: controller }));
+}
 if (!teamVault || !controller) {
   if (execute) {
     fail('缺少 TeamVault 或 RoundController 地址：先完成 20/30 部署，或用 --adopt 登记');
@@ -32,6 +49,11 @@ if (!teamVault || !controller) {
   warn('TeamVault / RoundController 未登记：dry-run 仅打印绑定计划（不可逆操作，部署后双人核对再执行）');
   process.exit(finish({ 模式: 'DRY-RUN（未部署）' }));
 }
+if (execute && (!rcWallet || !tvWallet)) {
+  fail('SetJettonWallet 尚未完成（RC/TV Jetton Wallet 未登记）：先执行 65_set_jetton_wallets.mjs；setter 必须早于 InitController');
+  process.exit(finish());
+}
+if (!rcWallet || !tvWallet) warn('Jetton Wallet 未登记（dry-run 继续；EXECUTE 前必须先完成 65）');
 if (registeredBinding && !addressEquals(registeredBinding, controller)) {
   fail('登记表显示 TeamVault 已绑定到其他地址：' + registeredBinding + '（链上不可逆，立刻停止并核查）');
   process.exit(finish());

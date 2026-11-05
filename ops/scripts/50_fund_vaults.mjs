@@ -24,7 +24,7 @@ const treasury = str(args, 'treasury') || resolveWalletAddress(registry, 'treasu
 const plan = verifyFundingPlan(params, { all });
 
 const OWNER_BY_KIND = {
-  roundRewards: { owner: roundController, ownerLabel: 'RoundController（奖励池 Jetton Wallet owner）', walletKey: 'rewardVault' },
+  roundRewards: { owner: roundController, ownerLabel: 'RoundController（RC Jetton Wallet owner，托管本金+奖励）', walletKey: 'roundControllerJettonWallet' },
   team: { owner: teamVault, ownerLabel: 'TeamVault（其 Jetton Wallet owner）', walletKey: 'teamVaultJettonWallet' },
   marketing: { owner: resolveWalletAddress(registry, 'marketingWallet'), ownerLabel: '营销热钱包', walletKey: null },
   liquidity: { owner: resolveWalletAddress(registry, 'liquidityWallet'), ownerLabel: '流动性热钱包', walletKey: null },

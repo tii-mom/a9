@@ -5,8 +5,8 @@
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
-  "createdAt": "2026-11-05T07:08:41.144Z",
-  "updatedAt": "2026-11-05T07:08:41.145Z",
+  "createdAt": "2026-11-05T07:24:58.925Z",
+  "updatedAt": "2026-11-05T07:24:58.926Z",
   "contracts": {
     "jettonMaster": {
       "address": null,
@@ -48,31 +48,7 @@
       "deployedAt": null,
       "note": null
     },
-    "stakingVault": {
-      "address": null,
-      "raw": null,
-      "deployTxHash": null,
-      "codeHash": null,
-      "deployedAt": null,
-      "note": null
-    },
-    "stakingVaultJettonWallet": {
-      "address": null,
-      "raw": null,
-      "deployTxHash": null,
-      "codeHash": null,
-      "deployedAt": null,
-      "note": null
-    },
-    "rewardVault": {
-      "address": null,
-      "raw": null,
-      "deployTxHash": null,
-      "codeHash": null,
-      "deployedAt": null,
-      "note": null
-    },
-    "rewardVaultJettonWallet": {
+    "roundControllerJettonWallet": {
       "address": null,
       "raw": null,
       "deployTxHash": null,
@@ -135,8 +111,8 @@
   },
   "bindings": {
     "teamVaultAcceptsOnly": null,
-    "rewardVaultOwner": null,
-    "stakingVaultOwner": null,
+    "roundControllerJettonWalletOwner": null,
+    "teamVaultJettonWalletOwner": null,
     "roundControllerUpgradeable": false,
     "adminOwnerIsSingleKey": true
   },

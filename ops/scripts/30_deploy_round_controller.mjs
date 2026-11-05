@@ -34,7 +34,9 @@ const initData = {
     jettonMaster,
   },
   vaults: {
-    stakingJettonWallet: resolveContractAddress(registry, 'stakingVaultJettonWallet') || '（部署后由 70 绑定/登记）',
+    // contracts/README §5：Jetton Wallet 地址由 owner=RC 推导，部署时先用占位（admin），
+    // RC 部署后由 65_set_jetton_wallets.mjs 调用 SetJettonWallet(0x52540016) 一次性写入。
+    stakingJettonWallet: adminOwner || '<ADMIN_PLACEHOLDER>',
     teamVault,
   },
   econ: {
@@ -93,13 +95,15 @@ if (execute) {
     fail('EXECUTE 前置缺失：adminOwner / jettonMaster / teamVault 必须已确定');
     process.exit(finish());
   }
-  const missingVault = initData.vaults.stakingJettonWallet.startsWith('（');
-  if (missingVault) warn('stakingJettonWallet 尚未确定：需先由 RoundController 地址推导并登记，或在部署脚本中由合约自行派生（与 contract-dev 确认后回填）');
+  if (initData.vaults.stakingJettonWallet === '<ADMIN_PLACEHOLDER>' || !adminOwner) {
+    warn('stakingJettonWallet 为占位地址：部署后必须由 65_set_jetton_wallets.mjs 调 SetJettonWallet 写入真实 RC Jetton Wallet');
+  }
 }
 
 const rendered = substitute(commandTemplate(params, 'deployRoundController'), {
   contractsDir: params.toolchain.contractsDir,
   initDataFile,
+  teamVault: teamVault || '',
 });
 section('执行计划');
 detail('命令：' + rendered);

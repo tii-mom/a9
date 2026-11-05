@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
-import { getAddressInformation, getJettonData, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { findJettonWallet, getAddressInformation, getJettonData, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { CHECK_STATUS, check, verifyAllocationInvariant, verifyFundingPlan, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, summary } from './lib/log.mjs';
@@ -48,12 +48,33 @@ if (!offline) {
     try { await fn(); } catch (error) { add(check(name, strict ? CHECK_STATUS.FAIL : CHECK_STATUS.WARN, '读取失败：' + String(error.message || error).slice(0, 200))); }
   };
 
-  for (const [key, address] of [['jettonMaster', jettonMaster], ['roundController', controller], ['teamVault', teamVault]]) {
+  const rcWallet = resolveContractAddress(registry, 'roundControllerJettonWallet');
+  const tvWallet = resolveContractAddress(registry, 'teamVaultJettonWallet');
+  for (const [key, address] of [['jettonMaster', jettonMaster], ['roundController', controller], ['teamVault', teamVault], ['roundControllerJettonWallet', rcWallet], ['teamVaultJettonWallet', tvWallet]]) {
     if (!address) { add(check('account.' + key, CHECK_STATUS.SKIP, '未登记')); continue; }
     await netCheck('account.' + key, async () => {
       const info = await getAddressInformation(params, address);
       const state = String(info.state || 'unknown');
       add(check('account.' + key, state === 'active' ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, 'state=' + state + ' balance=' + info.balance));
+    });
+  }
+
+  if (jettonMaster && controller) {
+    await netCheck('jetton.wallet.rc', async () => {
+      const wallet = await findJettonWallet(params, jettonMaster, controller);
+      add(check('jetton.wallet.rc', wallet && rcWallet && wallet.address === rcWallet ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, wallet ? wallet.address : '未解析'));
+    });
+    await netCheck('jetton.wallet.tv', async () => {
+      const wallet = await findJettonWallet(params, jettonMaster, teamVault);
+      add(check('jetton.wallet.tv', wallet && tvWallet && wallet.address === tvWallet ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, wallet ? wallet.address : '未解析'));
+    });
+  }
+  for (const [key, address, minTon] of [['roundController', controller, 20], ['teamVault', teamVault, 10]]) {
+    if (!address) continue;
+    await netCheck('ton.balance.' + key, async () => {
+      const balance = await getTonBalance(params, address);
+      const ton = Number(BigInt(balance.balanceNano)) / 1e9;
+      add(check('ton.balance.' + key, ton >= minTon ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, ton.toFixed(2) + ' TON（建议 ≥' + minTon + '）'));
     });
   }
 

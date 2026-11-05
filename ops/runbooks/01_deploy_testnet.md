@@ -26,10 +26,14 @@ node ops/scripts/11_mint_and_lock_jetton.mjs --execute
 node ops/scripts/20_deploy_teamvault.mjs --execute
 node ops/scripts/30_deploy_round_controller.mjs --execute
 node ops/scripts/40_init_params.mjs --execute --online
+node ops/scripts/65_set_jetton_wallets.mjs --execute
 OPS_CONFIRM=YES node ops/scripts/70_bind_roles.mjs --execute
+node ops/scripts/55_fund_ton.mjs --execute
 node ops/scripts/50_fund_vaults.mjs --execute --all
 node ops/scripts/60_verify_and_register.mjs --execute
 node ops/scripts/verify_deployment.mjs --online --save
+# 最后：开 R1（R1 无 PREVIEW，需 admin 手动 OpenRound）
+OPS_CONFIRM=YES node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
 ~~~
 
 > 注意：**70_bind_roles.mjs 的 InitController 不可逆**（TeamVault.controller 一旦写入不可改），执行前必须双人核对两个地址；宁可停在 dry-run 也不要试错。
@@ -153,9 +157,10 @@ node ops/scripts/11_mint_and_lock_jetton.mjs --execute
 node ops/scripts/20_deploy_teamvault.mjs --execute
 ~~~
 
-- 部署时 controller 必须为 **null**（contracts/contracts/TeamVault.tolk 注释：随后通过 InitController 一次绑定）。
+- 部署时 controller 必须为 **null**，jettonWallet 用占位地址（建议 admin）（contracts/README §7.2）。
 - 参数：admin、teamWallet、teamRoundRaw = 120000000000000000。
-- 此时**不要**注入 12 亿；先完成 RC 部署与 InitController，再注资。
+- 当前 contracts/scripts 只提供 deploy-emulation.tolk：可用 cd contracts && acton script scripts/deploy-emulation.tolk --net testnet 一次部署 TV+RC 并打印地址，再用 --adopt 登记；或由合约负责人提供分步部署脚本后回填命令模板。
+- 此时**不要**注入 12 亿；先完成 RC 部署、SetJettonWallet 与 InitController，再注资。
 
 ### Step 30 — RoundController
 
@@ -164,6 +169,7 @@ node ops/scripts/30_deploy_round_controller.mjs --execute
 ~~~
 
 - 脚本先生成 ops/records/round-controller.init.json（addresses / vaults / econ / timing），再调用部署命令。
+- vaults.stakingJettonWallet 部署时用 admin 占位（contracts/README §5：地址环依赖），部署后必须由 65 步骤 SetJettonWallet(0x52540016) 写入真实 RC Jetton Wallet。
 - 关键常量：P0=116000、2×、PREVIEW 86400、报名 259200、18 根 × 14400、阈值 12、限额（10000 / 1000 bps / 2 亿）、技术终止（14 天 / 7 天）。
 - RC **不可升级**（无代理）；部署即终局，参数写错只能重新部署一套（见 §9）。
 
@@ -175,7 +181,17 @@ node ops/scripts/40_init_params.mjs --execute --online
 
 - 生成 ops/records/params-snapshot.json（配置哈希、opcodes、阶梯）。
 - --online：调用 get_protocol_config 逐字段比对（17 个数值字段）；任一不匹配 → FAIL，禁止开轮。
-- 若 RC 初始化数据含 stakingJettonWallet（RC 的 Jetton Wallet）：需在 RC 部署后解析并回填，与合约负责人确认派生方式。
+- stakingJettonWallet 的占位值由 65 步骤 SetJettonWallet 替换为真实 RC Jetton Wallet；40 只校验数值参数，地址字段用 Acton rpc 人工核对。
+
+### Step 65 — SetJettonWallet（RC / TeamVault，一次性）
+
+~~~bash
+node ops/scripts/65_set_jetton_wallets.mjs --execute
+~~~
+
+- 用 Jetton Master 的 get_wallet_address 得到 RC / TV 的 canonical Jetton Wallet，再由 admin 调 SetJettonWallet(0x52540016)。
+- **必须早于 InitController 与第一轮**；两个 setter 都只能 admin 调用、一次性。
+- 复核：get_protocol_config().stakingJettonWallet 与 get_team_vault_state().jettonWallet 应等于解析值。
 
 ### Step 70 — 角色绑定（不可逆）
 
@@ -185,8 +201,18 @@ OPS_CONFIRM=YES node ops/scripts/70_bind_roles.mjs --execute
 
 - 发送 InitController(roundController) 给 TeamVault，调用者必须是 TeamVault.admin。
 - 双人核对：TeamVault 地址、RC 地址、admin 钱包来源；核对后登记表写入 bindings.teamVaultAcceptsOnly。
+- 顺序：SetJettonWallet(RC) → SetJettonWallet(TV) → InitController；若 deploy-emulation 已代为 InitController，用 --mark-bound-only 只登记绑定并人工核对 get_config().controller。
 - 复核：get_config 的 controller 必须等于 RC；建议截图 + 交易哈希归档。
 - 失败/填错：controller 不可改 → 只能废弃 TeamVault，**在注资前**重新部署（注资后极难恢复）。
+
+### Step 55 — TON gas 充值（RC ≥20 TON / TeamVault ≥10 TON）
+
+~~~bash
+node ops/scripts/55_fund_ton.mjs --execute
+~~~
+
+- contracts/deploy/params.testnet.json 要求 RC ≥20 TON、TV ≥10 TON；每条跨合约指令约 0.05 TON。
+- 余额不足时跨合约消息（release/burn/ack）会失败，轮次卡在 SETTLING。
 
 ### Step 50 — 注资与初始分配
 
@@ -198,8 +224,8 @@ node ops/scripts/50_fund_vaults.mjs --execute --all
 
 | 分配 | 金额 (A9) | 接收方 |
 | --- | --- | --- |
-| 十轮奖励 | 7,000,000,000 | RC 的奖励金库 Jetton Wallet（owner = RC） |
-| 团队 | 1,200,000,000 | TeamVault 的 Jetton Wallet（owner = TeamVault） |
+| 十轮奖励 | 7,000,000,000 | RC Jetton Wallet（owner = RC，同时托管本金+奖励） |
+| 团队 | 1,200,000,000 | TeamVault Jetton Wallet（owner = TeamVault） |
 | 内盘销售 | 800,000,000 | 团队内盘管理钱包（公开可查） |
 | 流动性 | 500,000,000 | 流动性热钱包 |
 | 营销 | 500,000,000 | 营销热钱包 |
@@ -217,6 +243,16 @@ node ops/scripts/60_verify_and_register.mjs --execute
 - 写入 paramsDigest、校验地址/资金、生成 ops/records/address-book.testnet.md 与 .json。
 - 地址簿含合约、钱包（标注公开性）、注资记录、配置哈希与登记表摘要。
 - 团队/营销/流动性地址：**不公开**，只出现在内部地址簿；对外透明页只写“项目方热钱包持有”。
+
+### Step 95 — 开 R1（R1 无 PREVIEW）
+
+~~~bash
+OPS_CONFIRM=YES node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
+~~~
+
+- contracts/README §3.2：R1 无 PREVIEW，OpenRound 交易中 stakeOpenAt = now，并锁定 target = max(P0×2^tier, 2×TWAP24h)。
+- 开轮前确认：TeamVault 绑定、SetJettonWallet、TON gas、奖励池/团队池已注资、公告已发、值班已就位。
+- 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
 
 ### Step 90 — 全量验收
 
@@ -243,7 +279,7 @@ node ops/scripts/20_deploy_teamvault.mjs --adopt <teamVault>
 node ops/scripts/30_deploy_round_controller.mjs --adopt <roundController>
 ~~~
 
-3. 其余步骤（40/70/50/60/90）不变。
+3. 其余步骤（40/65/70/55/50/60/90）不变；65 的 Jetton Wallet 地址可由 v3 / get_wallet_address 解析。
 4. adopt 地址必须是**测试网地址**（address flag 含 testnet）；主网地址会被拒绝。
 
 ---
@@ -269,7 +305,7 @@ ops/config/testnet.addresses.template.json   // 人工填写模板（说明用�
 
 对应 docs/06 §5 / docs/10 §10：
 
-- [ ] 成功轮：18 根中 ≥12 达标 → 本金可领取、7 亿奖励可 claimAll、TeamVault 释放 1.2 亿且只释放一次。
+- [ ] 成功轮：18 根齐备且 ≥12 达标 → 本金可领取、7 亿奖励可 claimAll、TeamVault 释放 1.2 亿且只释放一次；<12 即失败（contracts/README §9.2 裁决，无 7~11 中间态）。
 - [ ] 失败轮：三笔销毁（7 亿 + 1.2 亿 + 全部本金）→ total_supply 实际减少，三笔独立确认。
 - [ ] 无人质押轮：照常 18 根观察；失败销毁奖励 + 团队额度；通过时 0 人则销毁 7 亿（D-18b）。
 - [ ] 预言机暂停/恢复：暂停不判负、不销毁；恢复后重收满 18 根。
@@ -277,6 +313,18 @@ ops/config/testnet.addresses.template.json   // 人工填写模板（说明用�
 - [ ] TeamVault 非 RC 指令被拒；同轮 release/burn 互斥幂等。
 - [ ] 技术终止：需 14 天暂停或观察超时 7 天才能触发；若测试网无法等待，使用独立的短参数测试部署演练，**不要**改主测试网参数。
 - [ ] 每次演练都用 reconcile.mjs 对账，并把 CSV 归档到 ops/records/。
+
+---
+
+## 8.1 与 contracts/README 的工程裁决（部署/运营必须知悉）
+
+1. **无独立 StakingVault / RewardVault 地址**：RC 只有一个 Jetton Wallet，同时托管质押本金 + 每轮 7 亿奖励；不要部署/登记不存在的 vault 地址。
+2. **单地址限额为固定硬顶 20,000,000 A9**（= 200M × 10%，contracts/README §9.1），不是动态 10%。
+3. **18 根齐备后 <12 即失败**（无 7~11 中间态，§9.2）；ops 公告与对账按此口径。
+4. **R1 无 PREVIEW**：需 admin 手动 OpenRound（带 twap24h）。
+5. **SetJettonWallet 一次性**（0x52540016），必须早于 InitController/第一轮。
+6. **Burn ack 信任模型（测试网）**：BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）；主网前必须改为受审计扩展或“标准 burn + 链下对账 + owner 确认”。
+7. **晚开窗兜底**：keeper 错过整个 72h 窗口时 OpenRound 会重锚 stakeOpenAt；正常路径不触发，监控三倒计时。
 
 ---
 

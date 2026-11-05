@@ -21,6 +21,8 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 
 - 报名时长严格 259,200 秒；观察窗口 259,200 秒 / 18 根；单轮 7 天、10 轮 70 天。
 - PREVIEW 与开窗由合约按 prevSettledAt 推导，不人工指定；测试网仅做**确认与监控**，不提前/延后开窗。
+- **例外（contracts/README §3.2）**：R1 无 PREVIEW，由 admin 在部署完成后手动 OpenRound（交易中 stakeOpenAt = now，并锁定 target）；R2~R10 才有 24h PREVIEW。
+- **晚开窗兜底（contracts/README §9.7）**：若 keeper 错过整个 72h 窗口，OpenRound 会把 stakeOpenAt 重锚为 now；正常路径不触发，但必须监控三个倒计时。
 - 触价提前关窗只改变关窗时刻，观察仍是完整 72h/18 根。
 
 ---
@@ -56,6 +58,7 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 ### 3.2 P1 — PREVIEW 预告（T0 → T0+24h）
 
 - [ ] 计算下一轮：tier = 1 + 已成功轮数（失败同档）；阶梯下限 = P0 × 2^tier；实际 target 在开窗时锁定。
+- [ ] 若是 R1（部署后首轮）：无 PREVIEW，按 runbooks/01 §Step95 由 admin 手动 OpenRound（带 twap24h），公告与开轮同步。
 - [ ] 检查 TeamVault 与奖励池余额 ≥ 本轮额度（12 亿池剩余、70 亿池剩余）。
 - [ ] 准备并审批开轮公告（open 模板），预告期结束前发布；前端三个倒计时（距开窗 / 距关窗 / 距判定）核对。
 - [ ] 确认流动性/做市就绪（不做单边加池）；确认客服 FAQ 已更新。
@@ -99,7 +102,8 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 
 ### 3.6 P5 — 判定与结算（T0+168h 前后）
 
-- [ ] 18 根齐备后：qualified ≥ 12 → 成功；qualified ≤ 6 → 失败；6~11 根属中间带（按合约：只有 18 根齐备且 ≤6 才失败）。
+- [ ] 18 根齐备后：qualified ≥ 12 → 成功；**<12 即失败**（contracts/README §9.2 裁决：无 7~11 中间态，避免轮次永久卡住）。
+- [ ] 失败条件必须以链上状态为准（SETTLING_FAILURE/FAILED_PERMANENT），公告数字与 RoundSettled 事件一致。
 - [ ] 触发结算（正常由 keeper/任何人触发；owner 仅必要时介入）：80_admin_ops --action finalize-round --round <N>。
 - [ ] 成功：确认本金可领取 + 7 亿奖励可 claimAll + TeamVault 释放 1.2 亿（仅一次）。
 - [ ] 失败：确认三笔销毁全部确认后状态才进入 FAILED_PERMANENT；未确认前不得公告“已销毁”。
@@ -126,7 +130,7 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 | 路径 | 触发条件 | 合约行为 | 运营动作 | 公告模板 |
 | --- | --- | --- | --- | --- |
 | 成功 | 18 根齐备且 qualified ≥ 12 | 本金可领 + 7 亿奖励可 claimAll + 团队释放 1.2 亿 | 核对领取、对账、KPI，发成功公告 | success |
-| 失败 | 18 根齐备且 qualified ≤ 6 | 三笔 burn（7 亿 + 1.2 亿 + 本金），终态永久关闭 | 核对三笔与 supply 减少、对账、发失败公告、准备同档下一轮 | fail |
+| 失败 | 18 根齐备且 qualified < 12 | 三笔 burn（7 亿 + 1.2 亿 + 本金），终态永久关闭 | 核对三笔与 supply 减少、对账、发失败公告、准备同档下一轮 | fail |
 | 无人质押 | 关窗时 totalStake = 0 | 照常观察；失败销毁奖励+团队；通过且 0 人 → 奖励销毁（D-18b） | 公告说明；对账时本金笔为 0 | stake-close / fail / success |
 | 暂停恢复 | 预言机/数据故障 | ORACLE_PAUSED；不判负不销毁；恢复后重收满 18 根 | 发暂停公告、定位数据源、恢复公告；14 天阈值计时 | pause / resume |
 | 技术终止 | 连续暂停 ≥14 天 或 观察超时 ≥7 天 | 任何人可 AbortTechnical：退 100% 本金、不销毁奖励/团队、不消耗档位 | 发 abort 公告、核对退款、继续下一轮 | abort |
@@ -141,11 +145,12 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 - 10 轮 ≠ 10 档位：连续失败可能让后续轮次停留在低档。
 - 每轮 target 在开窗时锁定：max(P0 × 2^tier, 2 × 开窗 24h TWAP)；公告中的数字以链上 TargetPriceSet 为准。
 - 阶梯下限参考（P0 = $0.00116）：tier1 $0.00232、tier2 $0.00464、tier3 $0.00928、tier4 $0.01856、tier5 $0.03712、tier6 $0.07424、tier7 $0.14848、tier8 $0.29696、tier9 $0.59392、tier10 $1.18784。
+- 单地址限额为**固定硬顶 20,000,000 A9**（contracts/README §9.1），不是动态 10%；本轮总上限仍 200,000,000 A9。
 - 排期表模板：templates/round-schedule.md（含失败调整规则）。
 
 | 轮次 | 计划窗口 | 奖励 | 团队额度 | 关键动作 |
 | --- | --- | --- | --- | --- |
-| R1 | T0+24h → +96h（报名）/ +168h（观察结束） | 7 亿 | 1.2 亿 | 首轮：确认流动性、公告、客服峰值 |
+| R1 | 部署后 admin 手动 OpenRound（无 PREVIEW）→ +72h 报名 → +72h 观察 | 7 亿 | 1.2 亿 | 首轮：SetJettonWallet/InitController/TON gas 就绪、确认流动性、公告、客服峰值 |
 | R2~R10 | 各自 T0（上一轮结算）+24h 起 | 7 亿 | 1.2 亿 | 按 §3 SOP 滚动；失败轮同档重试 |
 
 ---
@@ -236,6 +241,21 @@ T0+168h     观察结束 → 判定 → 结算 → 下一轮 T0
 - 事故记录模板：ops/templates/incident-log.csv；P0/P1 必须 24h 内出复盘。
 - 值班表模板：ops/templates/shift-schedule.csv。
 - 所有对外数字必须链上可验证；不发布未确认的销毁/释放数字。
+
+---
+
+## 12. 与 contracts/README 的实现差异（运维必须按实现执行）
+
+| 项 | docs 旧口径 | 实现 / 裁决 | 运营影响 |
+| --- | --- | --- | --- |
+| Vault 架构 | StakingVault + RewardVault 两个地址 | RC 只拥有 1 个 Jetton Wallet（本金+奖励），无独立 vault | 地址簿/公告不要出现不存在的 vault 地址 |
+| 单地址限额 | 本轮总质押 10%（动态） | 固定硬顶 20,000,000 A9 + 总上限 2 亿 | 前端/客服话术按固定硬顶解释 |
+| 7~11 根达标 | 只写 ≥12 成功 / ≤6 失败 | 18 根齐备后 <12 即失败 | 判定/公告不再存在“中间带” |
+| R1 启动 | 24h PREVIEW | R1 无 PREVIEW，admin 手动 OpenRound | 上线当日必须安排开轮操作与公告 |
+| SetJettonWallet | 未提及 | 0x52540016 一次性，admin 调用，早于 InitController | 部署 65 → 70 顺序不可颠倒 |
+| Burn ack | 标准 TEP-74 无 ack | 测试网由 jettonMaster 地址充当 ack 权威 | 主网前必须换受审计扩展；对账以链上 supply 为准 |
+| 晚开窗 | 严格推导 | 错过 72h 窗口会重锚 stakeOpenAt | 监控三倒计时 + 告警；异常时公告 |
+| 技术终止后 | 未明确 | 创建下一轮 PREVIEW、tier 不变 | 继续排期，不消耗档位 |
 
 ---
 

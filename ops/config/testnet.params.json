@@ -45,7 +45,7 @@
   "supply": {
     "roundCount": 10,
     "allocations": {
-      "roundRewards": { "percent": 70, "tokens": 7000000000, "raw": "7000000000000000000", "recipient": "rewardVault (Jetton Wallet owner = RoundController)" },
+      "roundRewards": { "percent": 70, "tokens": 7000000000, "raw": "7000000000000000000", "recipient": "roundControllerJettonWallet (owner = RoundController；同时托管本金+奖励)" },
       "internalSale": { "percent": 8, "tokens": 800000000, "raw": "800000000000000000", "recipient": "teamInternalWallet (公开可查；硬上限 8 亿，不可超卖)" },
       "liquidity": { "percent": 5, "tokens": 500000000, "raw": "500000000000000000", "recipient": "liquidityWallet (热钱包；冷启动先用 1 亿 A9 + $116,000 USDT)" },
       "team": { "percent": 12, "tokens": 1200000000, "raw": "1200000000000000000", "recipient": "TeamVault (teamVaultJettonWallet)" },
@@ -144,7 +144,8 @@
   },
   "permissions": {
     "adminOwnerAllowed": [
-      "OpenRound (仅在上一轮终态后；V6 不设常规手动开轮，测试网用于演练)",
+      "OpenRound (R1 无 PREVIEW 必须手动；R2~R10 自动开窗后的确认)",
+      "SetJettonWallet (RC/TV 部署后、InitController 前，一次性)",
       "CloseStaking",
       "PauseOracle / ResumeOracle",
       "FinalizeRound (必要时触发结算)",

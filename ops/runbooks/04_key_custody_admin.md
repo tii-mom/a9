@@ -32,7 +32,7 @@
                     └─────────────────┘
 ~~~
 
-- **管理员 = RoundController 单密钥 owner**，只能：开轮确认、关报名、暂停/恢复预言机、必要时触发结算、技术终止（任何人可触发，非特权）。
+- **管理员 = RoundController 单密钥 owner**，只能：开轮确认（含 R1 手动开轮）、SetJettonWallet（一次性）、关报名、暂停/恢复预言机、必要时触发结算、技术终止（任何人可触发，非特权）。
 - **TeamVault 只接受 RC 指令**；非 RC 来源一律拒绝。
 - **RC 不可升级**：无代理、无 setCode；规则只能通过新部署改变。
 - **不允许取消质押**：唯一退款路径是 TECHNICAL_ABORTED（合约内条件触发，管理员不能手工退款）。
@@ -96,7 +96,8 @@
 
 | 操作 | 条件 | 说明 |
 | --- | --- | --- |
-| OpenRound | 上一轮已终态；V6 不设常规手动开轮（测试网用于演练） | 开窗交易锁定 target |
+| OpenRound | 上一轮已终态；R1 无 PREVIEW 必须 admin 手动开（R2~R10 自动） | 开窗交易锁定 target；R1 交易带 twap24h |
+| SetJettonWallet（0x52540016） | RC/TV 部署后、InitController 前，一次性 | admin 写入 canonical Jetton Wallet；之后不可改 |
 | CloseStaking | 报名窗口内/触价 | 正常到点自动关；手动仅兜底 |
 | PauseOracle / ResumeOracle | 数据故障/恢复 | 暂停不判负、不销毁 |
 | FinalizeRound | 18 根齐备/条件满足 | 必要时触发；正常任何人可触发 |
@@ -156,10 +157,21 @@ node ops/scripts/80_admin_ops.mjs --action pause-oracle --round <N> --reason <co
 - 正常到点自动关窗/结算；仅在逾期或 keeper 故障时由 owner 兜底，且必须先确认窗口/18 根数据条件。
 - 失败结算必须确认三笔 burn 全部 BurnAck 后才可对外公告；不得手工把状态改为 FAILED_PERMANENT。
 
-### 6.4 开轮确认（测试网）
+### 6.4 开轮（R1 必须手动，R2~R10 自动）
 
-- 正常由 PREVIEW 结束自动开窗；测试网人工只做确认与公告，不提前/延后。
-- 若需演练手动开轮：先确认上一轮终态、余额、公告已发；双人；记录 target 与 TWAP。
+- R1（contracts/README §3.2）：无 PREVIEW，部署完成后由 admin 手动 OpenRound，交易中传 twap24h，stakeOpenAt = now。
+- R2~R10：PREVIEW 结束自动开窗；测试网人工只做确认与公告，不提前/延后。
+- 开轮前检查：SetJettonWallet 已完成、InitController 已绑定、RC ≥20 TON、TV ≥10 TON、奖励/团队已注资、公告已发。
+- 双人核对，记录 target 与 TWAP，开轮后核对 TargetPriceSet 事件。
+
+---
+
+## 6.5 SetJettonWallet SOP（一次性）
+
+1. 条件：RC/TV 已部署，Jetton Master 可查询 get_wallet_address。
+2. 执行：node ops/scripts/65_set_jetton_wallets.mjs --execute（双人）。
+3. 复核：RC get_protocol_config().stakingJettonWallet、TV get_team_vault_state().jettonWallet 等于解析地址。
+4. 顺序：必须先做完两个 SetJettonWallet，再执行 InitController；setter 不可逆（一次性）。
 
 ---
 

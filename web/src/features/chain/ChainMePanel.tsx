@@ -329,6 +329,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
                   {d.failLoss}: <b>100%</b>
                 </span>
               </div>
+              <p className="note chain-dim">{d.capRefundNote}</p>
 
               <label className="chain-check">
                 <input

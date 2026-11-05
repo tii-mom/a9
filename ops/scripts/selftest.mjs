@@ -176,7 +176,7 @@ test('monitor.faults', () => {
 });
 
 section('自测：部署脚本 dry-run（临时登记表）');
-for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '70_bind_roles.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs']) {
+for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '55_fund_ton.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs']) {
   test('dryrun.' + script, () => {
     const extra = script === '50_fund_vaults.mjs' ? ['--all'] : [];
     const result = run([join(SCRIPTS, script), ...extra], { OPS_REGISTRY: tempRegistry });
@@ -187,7 +187,7 @@ for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_l
 }
 
 section('自测：全部脚本语法');
-const scriptFiles = ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs', '70_bind_roles.mjs', '80_admin_ops.mjs', 'deploy_all.mjs', 'verify_deployment.mjs', 'reconcile.mjs', 'monitor_check.mjs', 'announcement.mjs'];
+const scriptFiles = ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '50_fund_vaults.mjs', '55_fund_ton.mjs', '60_verify_and_register.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '80_admin_ops.mjs', 'deploy_all.mjs', 'verify_deployment.mjs', 'reconcile.mjs', 'monitor_check.mjs', 'announcement.mjs'];
 test('syntax.all', () => {
   const bad = [];
   for (const file of scriptFiles) {

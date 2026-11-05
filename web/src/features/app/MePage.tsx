@@ -25,6 +25,8 @@ interface MeDict extends Record<string, unknown> {
   gateHint: string;
   demoNotice: string;
   readonlyNotice: string;
+  chainNotice: string;
+  chainClaimHint: string;
   statMyStake: string;
   statClaimPrincipal: string;
   statClaimReward: string;
@@ -79,6 +81,8 @@ const ZH: MeDict = {
   gateHint: '仅读取地址与余额，不签名、不转账；质押与领取请在首页指挥台完成。',
   demoNotice: '当前为演示钱包：地址由本地生成或取自演示数据，资金与链上数据均为演示用途。',
   readonlyNotice: '只读模式：不会发起任何交易；合约部署后开放真实质押与领取。',
+  chainNotice: '链上模式：合约已配置。质押与领取请在下方「链上操作」面板中签名完成，本页仅做数据展示。',
+  chainClaimHint: '链上领取请使用上方「链上操作」面板（链上交易需钱包签名）；本页不再提供演示领取。',
   statMyStake: '当前轮质押',
   statClaimPrincipal: '可领取本金',
   statClaimReward: '可领取奖励',
@@ -141,6 +145,8 @@ const EN: MeDict = {
   gateHint: 'Only address and balance are read. No signature, no transfer. Stake and claim from the home command panel.',
   demoNotice: 'Demo wallet: the address is generated locally or taken from demo data. All funds are simulated.',
   readonlyNotice: 'Read-only mode: no transactions are sent. Real staking and claiming open after contract deployment.',
+  chainNotice: 'On-chain mode: contracts are configured. Stake and claim from the On-chain panel below (wallet signature required); this page only displays data.',
+  chainClaimHint: 'Claim on-chain from the On-chain panel above (a wallet signature is required). Demo claiming is disabled on this page.',
   statMyStake: 'Current stake',
   statClaimPrincipal: 'Claimable principal',
   statClaimReward: 'Claimable reward',
@@ -230,6 +236,8 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
   const configQuery = useQuery(() => api.config(), [], { intervalMs: 0 });
   const roundsQuery = useQuery(() => api.rounds(), [], { intervalMs: 5000 });
   const decimals = configQuery.data?.token.decimals ?? 9;
+  // 链上模式：/api/config 下发了 roundController 合约地址（为空则保持演示模式）
+  const chainMode = Boolean(configQuery.data?.contracts?.roundController);
   const rounds = roundsQuery.data ?? [];
   const currentRound = useMemo(() => pickCurrentRound(rounds), [rounds]);
   const currentRoundId = currentRound?.roundId ?? null;
@@ -299,8 +307,12 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
   return (
     <>
       {demo ? <div className="note-box ap-note">{d.demoNotice}</div> : null}
-      <div className="note-box ap-note">{d.readonlyNotice}</div>
-      <ChainMePanel address={address} demo={demo} />
+      {chainMode ? (
+        <div className="note-box ap-note">{d.chainNotice}</div>
+      ) : (
+        <div className="note-box ap-note">{d.readonlyNotice}</div>
+      )}
+      {chainMode ? <ChainMePanel address={address} demo={demo} /> : null}
 
       {meQuery.error && !meQuery.data ? <ErrorState error={meQuery.error} onRetry={meQuery.refresh} /> : null}
 
@@ -469,7 +481,9 @@ function MeDashboard({ address, demo }: { address: string; demo: boolean }) {
               <span className="ap-muted mono-sm">{d.claimDesc}</span>
             </div>
             <div className="ap-pad">
-              {meQuery.error ? (
+              {chainMode ? (
+                <div className="note-box">{d.chainClaimHint}</div>
+              ) : meQuery.error ? (
                 <ErrorState error={meQuery.error} onRetry={meQuery.refresh} />
               ) : meQuery.loading && !meQuery.data ? (
                 <Loading rows={2} />

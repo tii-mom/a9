@@ -110,6 +110,14 @@ ClaimPayload（104 bit）
 
 > `shared/types.ts` 的 `contracts` 已包含主要地址字段；扩展字段由 Lead 决定是否正式纳入。前端读取时全部做了「存在即用、缺失即回退」处理，因此后端可以逐步补充。
 
+**质押限额（V6.1 定稿，contract-dev 2026-11-05 确认）**：
+
+- 合约公式：`perAddressCap = maxTotalStakeRaw × maxStakePerAddressBps / 10000` = `200,000,000 × 1000 / 10000 = 20,000,000 A9`；
+  这是**固定硬顶**（沿用 bps 字段只是为了用同一公式离线校验），**不是**「本轮当前总质押的 10%」动态比例——首个存款人也可以占满 100%（合约测试 `test first depositor and exact 20,000,000 A9 hard cap are accepted` 锁死）。
+- 本轮总上限 200,000,000 A9 独立校验；单地址按**累计**质押（本轮已有 + 本笔）校验。
+- 任一上限超出 → 合约把该笔**整笔原路退款**（本金不损失，但会消耗 gas），因此前端前置拦截并提示两个独立上限。
+- 前端默认按同一公式从 `maxTotalStakeRaw × maxStakePerAddressBps` 派生单地址上限；若后端显式下发 `maxStakePerAddressRaw`，以显式值为准。
+
 ## 5. 测试网联调步骤（合约部署 + /api/config 下发后）
 
 1. 部署 Jetton Master / RoundController / TeamVault，把地址写入 D1 的 `kv`（`contract_jetton_master`、`contract_round_controller`...），确认 `GET /api/config` 返回 `network: \"testnet\"` 且两个地址非空。

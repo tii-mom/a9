@@ -7,12 +7,9 @@
     "jettonMaster": "（部署 10 后登记）",
     "jettonMasterTreasuryWallet": "（可自动解析）",
     "teamVault": "（部署 20 后登记）",
-    "teamVaultJettonWallet": "（50 注资时自动解析）",
+    "teamVaultJettonWallet": "（65 SetJettonWallet / 50 注资时解析）",
     "roundController": "（部署 30 后登记）",
-    "stakingVault": "（RC 的 Jetton Wallet，部署后登记）",
-    "stakingVaultJettonWallet": "（同上）",
-    "rewardVault": "（RC 的奖励池 Jetton Wallet，50 注资时自动解析）",
-    "rewardVaultJettonWallet": "（同上）",
+    "roundControllerJettonWallet": "（65 SetJettonWallet / 50 注资时解析；同时托管本金+奖励）",
     "oracleAdapter": "（本期不部署 / null）"
   },
   "wallets": {

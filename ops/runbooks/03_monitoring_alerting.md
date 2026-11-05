@@ -49,6 +49,7 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 | monitor.supply.chain_drift | 账本 vs 链上 total_supply | TON RPC | ≠ 0 | 同上；以链上为准，检查漏记 burn/claim |
 | monitor.roundN.burn_pending | FAILED_PERMANENT 但 burnedRaw=0 | API | 任意 | 检查三笔 burn/BurnAck；确认前不得公告“已销毁” |
 | monitor.roundN.burn_mismatch | 销毁金额 ≠ 7 亿+1.2 亿+本金 | API | 任意 | 与财务核对；疑似漏洞升级合约负责人+审计 |
+| monitor.roundN.burn_ack_authority | BurnAck 是否来自 config.jettonMaster（测试网 ack 权威） | 链上事件 | 非预期发送者 | 测试网信任模型：主网前必须换受审计扩展；异常立即暂停对外 |
 | monitor.roundN.settling_timeout | SETTLING_* 超过 30 分钟 | API | > 30 min | 查 pending 动作；重试；必要时双人升级 |
 
 <a id="P1"></a>
@@ -58,7 +59,8 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 | --- | --- | --- | --- | --- |
 | monitor.cron.heartbeat | Worker 心跳/更新时间 | API | > 5 min | 检查 cron/手动 tick；页面可能停更 |
 | monitor.roundN.candle_missing | 应见 K 线 - 已见 K 线 | API/链上 | > 1 根 | keeper 补提交；连续缺 2 根发暂停公告 |
-| monitor.roundN.finalize_overdue | 观察结束 1h 后仍 OBSERVING | API | > 1h | 触发/催促结算；检查 18 根是否齐备 |
+| monitor.roundN.finalize_overdue | 观察结束 1h 后仍 OBSERVING | API | > 1h | 触发/催促结算；18 根齐备后 <12 即失败（无中间态） |
+| monitor.round1.open_overdue | 部署完成后 1h 仍未开 R1 | 链上 | R1 无 PREVIEW，需 admin OpenRound | 检查 SetJettonWallet/InitController/TON gas；双人开轮 |
 | monitor.roundN.close_overdue | 报名截止 1h 后仍 STAKING_OPEN | API | > 1h | 检查关窗交易；必要时 owner 手动关窗（双人） |
 | monitor.oracle.paused | 预言机暂停/离线 | API/链上 | true | 发 pause 公告；定位数据源；计时 14 天 |
 | monitor.admin.error_events | 管理员操作 error 事件 | D1 admin_events | 近 15 min 任意 | 核对签名者与操作；异常升级 P0 |
@@ -71,7 +73,7 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 | --- | --- | --- | --- | --- |
 | monitor.roundN.stale | 轮次数据 15 分钟未更新 | API | > 15 min | 检查索引/缓存；页面是否正常 |
 | monitor.admin.warn_events | 管理员 warn 事件 | D1 | 近 15 min | 确认是否计划内操作 |
-| monitor.contract_ton_balance | RC/TeamVault TON 余额 | TON RPC | < 0.5 TON | 补 gas；否则跨合约消息失败 |
+| monitor.contract_ton_balance | RC/TeamVault TON 余额 | TON RPC | RC <20 TON / TV <10 TON | 补 gas；否则 release/burn/ack 失败、轮次卡 SETTLING |
 | monitor.rpc_latency | TON RPC p95 | 探针 | > 3 s | 切换 RPC/配置 API key |
 | monitor.worker.p95 | API p95 | Workers Analytics | > 800 ms | 查缓存/查询 |
 
@@ -87,6 +89,7 @@ Jetton / RC / TeamVault              /api/health /stats /rounds
 - **暂停不判负、不销毁、不计未达标**；暂停期间禁止结算。
 - 连续暂停 14 天 → 技术终止条件（见 04 手册 tech-abort），任何人可触发。
 - 恢复后重收完整 18 根，不缩短窗口。
+- 暂停/恢复均为 owner 操作（双人），但**不改变目标价**；公告必须写明这一点。
 
 <a id="reconcile"></a>
 ### 3.6 对账专项
@@ -238,6 +241,15 @@ WantedBy=timers.target
 | 供应量漂移告警 | 手工转账/漏记 burn | 以链上为准，补账本/对账 |
 | oracle.paused 告警 | 数据源短时抖动 | 确认是否自动恢复；>30 分钟发暂停公告 |
 | admin.activity P3 | 计划内操作 | 确认操作日志与值班记录 |
+
+---
+
+## 12. 与合约实现的对应口径
+
+- 18 根齐备后 <12 即失败（无 7~11 中间态）；监控以链上 RoundView/Settled 事件为准。
+- RC 只有一个 Jetton Wallet（本金+奖励），不存在独立 StakingVault/RewardVault；监控余额只查 RC/TV 两个 Jetton Wallet。
+- 测试网 BurnAck 来自 config.jettonMaster（部署方充当 ack 权威）：监控需记录 ack 发送者，主网前必须替换为受审计方案。
+- 晚开窗兜底会使 stakeOpenAt 重锚：监控三倒计时；若发现异常重锚，立即公告并复盘。
 
 ---
 

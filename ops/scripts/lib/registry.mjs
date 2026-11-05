@@ -53,8 +53,8 @@ export function emptyRegistry() {
     wallets,
     bindings: {
       teamVaultAcceptsOnly: null,
-      rewardVaultOwner: null,
-      stakingVaultOwner: null,
+      roundControllerJettonWalletOwner: null,
+      teamVaultJettonWalletOwner: null,
       roundControllerUpgradeable: false,
       adminOwnerIsSingleKey: true,
     },

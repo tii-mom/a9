@@ -9,7 +9,6 @@ import type { DataSource, ProtocolConfig } from '@shared/types';
 import { base64Decode, base64UrlEncode } from './address';
 import {
   DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
-  DEFAULT_MAX_STAKE_PER_ADDRESS_TOKENS,
   DEFAULT_MAX_TOTAL_STAKE_TOKENS,
   DEFAULT_MIN_STAKE_TOKENS,
   DEFAULT_TOKEN_DECIMALS,
@@ -82,6 +81,15 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
   const roundController = config?.contracts.roundController?.trim() || null;
   const jettonMaster = config?.contracts.jettonMaster?.trim() || null;
 
+  // 限额：与合约公式一致——perAddressCap = maxTotalStakeRaw × maxStakePerAddressBps / 10000
+  // （V6.1 定稿：200,000,000 × 1000 / 10000 = 20,000,000 A9 固定硬顶，不是动态比例）
+  const maxTotalStakeRaw = parseRawExtra(contractExtra(config, 'maxTotalStakeRaw'), DEFAULT_MAX_TOTAL_STAKE_TOKENS * tokenUnit);
+  const maxStakePerAddressBps = parseBpsExtra(
+    contractExtra(config, 'maxStakePerAddressBps'),
+    DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
+  );
+  const derivedPerAddressCap = (maxTotalStakeRaw * BigInt(maxStakePerAddressBps)) / 10000n;
+
   let disabledReason: ChainDisabledReason | null = null;
   if (!config) disabledReason = 'no-config';
   else if (network === 'demo') disabledReason = 'demo';
@@ -106,12 +114,9 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     tokenDecimals: decimals,
     roundCount: config?.roundCount ?? 10,
     minStakeRaw: parseRawExtra(contractExtra(config, 'minStakeRaw'), DEFAULT_MIN_STAKE_TOKENS * tokenUnit),
-    maxTotalStakeRaw: parseRawExtra(contractExtra(config, 'maxTotalStakeRaw'), DEFAULT_MAX_TOTAL_STAKE_TOKENS * tokenUnit),
-    maxStakePerAddressRaw: parseRawExtra(
-      contractExtra(config, 'maxStakePerAddressRaw'),
-      DEFAULT_MAX_STAKE_PER_ADDRESS_TOKENS * tokenUnit,
-    ),
-    maxStakePerAddressBps: parseBpsExtra(contractExtra(config, 'maxStakePerAddressBps'), DEFAULT_MAX_STAKE_PER_ADDRESS_BPS),
+    maxTotalStakeRaw,
+    maxStakePerAddressRaw: parseRawExtra(contractExtra(config, 'maxStakePerAddressRaw'), derivedPerAddressCap),
+    maxStakePerAddressBps,
     dataSource: config?.dataSource ?? 'demo',
     tonConnectManifestUrl: config?.tonConnectManifestUrl ?? null,
   };
