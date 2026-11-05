@@ -365,6 +365,8 @@ export async function reconcile(env: Env, now = Date.now()): Promise<ReconcileRe
     if (isTerminal(round.state)) continue;
 
     if (params.paused && round.state === 'OBSERVING') {
+      // H-3：chain 模式暂停由链上 status=5 驱动（索引器映射），本地不推进
+      if (params.dataSource === 'chain') continue;
       if (await store.casRoundState(env, round.round_id, 'OBSERVING', 'ORACLE_PAUSED', now)) {
         round.state = 'ORACLE_PAUSED';
         round.updated_at = now;
@@ -410,6 +412,9 @@ export async function reconcile(env: Env, now = Date.now()): Promise<ReconcileRe
     }
 
     if (round.state !== 'OBSERVING') continue;
+    // H-3：chain 模式结算只能由链上 FinalizeRound + burn ack 驱动（索引器写入）；
+    // 本地提前 settle 会在三笔 burn 确认前显示「已销毁」，销毁三态永远不成立。
+    if (params.dataSource === 'chain') continue;
     if (seen < params.candleCount) continue;
     const settled = qualified >= params.minQualifiedCandles
       ? await settleSuccess(env, params, round, now)

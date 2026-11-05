@@ -12,6 +12,7 @@ export type ErrorCode =
   | 'RATE_LIMITED'
   | 'CONFLICT'
   | 'NOT_IMPLEMENTED'
+  | 'ORACLE_PAUSED'
   | 'INTERNAL';
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
@@ -21,6 +22,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   CONFLICT: 409,
   RATE_LIMITED: 429,
   NOT_IMPLEMENTED: 501,
+  ORACLE_PAUSED: 503,
   INTERNAL: 500,
 };
 
@@ -54,6 +56,10 @@ export function unauthorized(message = '未授权'): ApiError {
 
 export function notImplemented(message: string): ApiError {
   return new ApiError('NOT_IMPLEMENTED', message);
+}
+
+export function oraclePaused(message = '链上数据源未就绪（ORACLE_PAUSED）'): ApiError {
+  return new ApiError('ORACLE_PAUSED', message);
 }
 
 export function rateLimited(message = '请求过于频繁，请稍后重试'): ApiError {

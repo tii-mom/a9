@@ -4,8 +4,9 @@
  *
  * 用法：
  *   # 终端 1（推荐：极速演示种子做全链路覆盖）
- *   DEMO_CANDLE_SECONDS=2 node scripts/generate-seed.mjs
+ *   DEMO_CANDLE_SECONDS=2 node scripts/generate-seed.mjs        # 输出 worker/seed/seed.sql（不是迁移！）
  *   ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --local --persist-to /tmp/a9-smoke
+ *   ./node_modules/.bin/wrangler d1 execute fuse-protocol --local --persist-to /tmp/a9-smoke --file=./seed/seed.sql
  *   ./node_modules/.bin/wrangler dev --port 8901 --persist-to /tmp/a9-smoke \
  *       --var DEMO_CANDLE_SECONDS:2 --var DEMO_PREVIEW_SECONDS:2
  *
@@ -507,6 +508,21 @@ async function adminTests() {
     eq(typeof data.worker.demoCandleSeconds, 'number', 'worker.demoCandleSeconds');
     eq(data.worker.dataSource, 'demo', 'worker.dataSource');
     return '10 轮 / ' + data.events.length + ' 条审计事件';
+  });
+
+  await test('POST /api/admin/indexer/tick + reconcile（运维手动触发）', async () => {
+    const tick = await apiPost('/api/admin/indexer/tick');
+    eq(tick.status, 200, 'indexer tick status');
+    eq(tick.body.ok, true, 'indexer tick ok');
+    assert(typeof tick.body.data.pages === 'number', 'tick.pages');
+    assert(typeof tick.body.data.writes === 'number', 'tick.writes');
+    const rec = await apiPost('/api/admin/indexer/reconcile');
+    eq(rec.status, 200, 'indexer reconcile status');
+    eq(rec.body.ok, true, 'indexer reconcile ok');
+    assert(Array.isArray(rec.body.data.diffs), 'reconcile.diffs');
+    const unauth = await api('/api/admin/indexer/tick', { method: 'POST' });
+    eq(unauth.status, 401, '无 token indexer tick 应 401');
+    return 'tick 200 / reconcile 200 / 无 token 401（demo stub 返回未实现但不抛错）';
   });
 
   await test('POST /api/admin/tick 幂等（连续两次状态一致）', async () => {

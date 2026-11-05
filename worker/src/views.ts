@@ -205,7 +205,20 @@ export async function buildStats(env: Env, state: ReconcileResult): Promise<Prot
   const focus = focusRound(state);
   const price = focus ? priceFor(state, focus) : 0n;
   const supply = params.totalSupplyRaw > burned ? params.totalSupplyRaw - burned : 0n;
-  const liquidity = toBigInt(state.kv.get('liquidity_usd_e8') ?? '180000000000000');
+
+  // H-5：demo 用演示流动性；chain 模式只认单独的 chain_liquidity_usd_e8（ops/索引器写入），
+  // 不读演示键 liquidity_usd_e8（避免 chain 部署误加载 demo seed 时把 1.8e14 当成真实流动性）。
+  const liquidityKey = params.dataSource === 'chain' ? 'chain_liquidity_usd_e8' : 'liquidity_usd_e8';
+  const liquidityOverride = state.kv.get(liquidityKey);
+  const liquidity: bigint | null =
+    liquidityOverride !== undefined && liquidityOverride !== ''
+      ? toBigInt(liquidityOverride)
+      : params.dataSource === 'demo'
+        ? 180_000_000_000_000n
+        : null;
+
+  // H-5：demo 用 −3.8% 演示估算；chain 模式取真实 24h 前 K 线 TWAP（metrics 或 candles），拿不到就 null
+  const price24hAgo = resolvePrice24hAgo(state, focus, price);
 
   const roundsById = new Map(rounds.map((row) => [row.round_id, row]));
   const unlockStats = await v8.buildUnlockStats(env, params, state.rewardRows, roundsById, now);
@@ -218,12 +231,32 @@ export async function buildStats(env: Env, state: ReconcileResult): Promise<Prot
     unlock: unlockStats.unlock,
     stakerCount: stakers,
     volume24hUsdE8: volume.toString(),
-    liquidityUsdE8: liquidity.toString(),
+    // H-5：chain 模式未知值返回 null（shared/types 已放宽为 string | null，前端展示「数据不可用」）
+    liquidityUsdE8: liquidity === null ? null : liquidity.toString(),
     priceUsdE8: price.toString(),
-    price24hAgoUsdE8: ((price * 962n) / 1000n).toString(),
+    price24hAgoUsdE8: price24hAgo === null ? null : price24hAgo.toString(),
     oracle: buildOracleStatus(state),
     nextStakeOpenAt,
   };
+}
+
+/**
+ * 24h 前真实参考价：
+ *  1) 索引器写入 metrics.price_24h_ago_usd_e8（USD_E8）；
+ *  2) chain 模式回退到当前轮 candles 中覆盖 (now - 24h) 的那根 K 线 TWAP；
+ *  3) demo 模式保留演示估算（price × 0.962，仅演示，不可用于主网展示）；
+ *  4) 无法取得 → null（chain 模式下禁止返回假数字）。
+ */
+function resolvePrice24hAgo(state: ReconcileResult, focus: RoundRow | undefined, price: bigint): bigint | null {
+  const fromMetrics = state.kv.get('price_24h_ago_usd_e8');
+  if (fromMetrics !== undefined && fromMetrics !== '') return toBigInt(fromMetrics);
+  const dataSource = state.params.dataSource;
+  if (dataSource === 'demo') return (price * 962n) / 1000n;
+  if (!focus) return null;
+  const cutoff = state.now - DAY_MS;
+  const candles = state.candlesByRound.get(focus.round_id) ?? [];
+  const candle = candles.find((row) => row.period_start <= cutoff && row.period_end > cutoff);
+  return candle ? toBigInt(candle.twap_price_usd_e8) : null;
 }
 
 export function buildRoundDetail(state: ReconcileResult, row: RoundRow): RoundDetail {
@@ -535,7 +568,12 @@ export async function buildAdminOverview(env: Env, state: ReconcileResult): Prom
   };
 }
 
-export function buildHealth(env: Env, db: boolean, dataSource: 'demo' | 'chain'): HealthResponse {
+export function buildHealth(
+  env: Env,
+  db: boolean,
+  dataSource: 'demo' | 'chain',
+  configError: string | null = null,
+): HealthResponse & { oracle: { paused: boolean; reason: string | null } } {
   const sha = (env.GIT_SHA ?? '').trim();
   const version = (env.VERSION ?? DEFAULT_VERSION).trim() + (sha ? '+' + sha.slice(0, 7) : '');
   return {
@@ -545,6 +583,8 @@ export function buildHealth(env: Env, db: boolean, dataSource: 'demo' | 'chain')
     dataSource,
     version,
     uptimeSeconds: uptimeSeconds(Date.now()),
+    // H-6：配置缺失时 health 仍 200，但明确告知 oracle 暂停原因（外部监控可区分）
+    oracle: { paused: configError !== null, reason: configError },
   };
 }
 

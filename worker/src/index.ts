@@ -2,7 +2,7 @@
  * A9 Worker 入口：/api/* 走 API，其余交给 ASSETS（web/dist，SPA 回退）。
  */
 import type { Env } from './env';
-import { markIsolateStarted } from './env';
+import { chainConfigError, markIsolateStarted } from './env';
 import { requireAdmin } from './auth';
 import {
   ApiError,
@@ -34,7 +34,8 @@ import * as store from './store';
 import * as views from './views';
 import * as v8 from './v8';
 import { clientIp, enforceRateLimit, issueAuthNonce, requireWriteAuth } from './tonproof';
-import { notImplemented } from './http';
+import { notImplemented, oraclePaused } from './http';
+import { reconcile as indexerReconcile, tick as indexerTick } from './indexer';
 import { ownWeightFor, streakForRound } from './protocol';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 import type { ReconcileResult } from './state';
@@ -359,6 +360,28 @@ async function handleAdmin(
     bustCache();
     return okResponse(await views.buildAdminOverview(env, next));
   }
+  if (parts.length === 3 && parts[1] === 'indexer' && (parts[2] === 'tick' || parts[2] === 'reconcile')) {
+    assertMethod(method, 'POST');
+    try {
+      const result =
+        parts[2] === 'tick' ? await indexerTick(env, Date.now()) : await indexerReconcile(env, Date.now());
+      return okResponse(result);
+    } catch (error) {
+      // indexer tick/reconcile 约定永不抛出；这里兜底并写审计，不把堆栈返回给客户端
+      try {
+        await store.logEvent(
+          env,
+          'error',
+          actor,
+          'INDEXER_ADMIN_ERROR',
+          (error instanceof Error ? error.message : String(error)).slice(0, 240),
+        );
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError('INTERNAL', '索引器操作失败');
+    }
+  }
   throw notFound('管理接口不存在');
 }
 
@@ -454,6 +477,10 @@ function classifyRoute(method: string, url: URL): RoutePlan | null {
       return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
     }
     if (parts.length === 3 && parts[1] === 'rounds' && parts[2] === 'advance') {
+      return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+    }
+    if (parts.length === 3 && parts[1] === 'indexer' && (parts[2] === 'tick' || parts[2] === 'reconcile')) {
+      // H-4 补充：运维手动触发索引器（tick）/ 全量对账（reconcile）
       return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
     }
     return null;
@@ -593,6 +620,13 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (!plan) {
     return withReconciled(apiErrorResponse(notFound('接口不存在')), false);
   }
+
+  // H-6：chain 模式缺少 TONCENTER_API_KEY（且未显式放行公共端点）→ 除 health 外拒绝服务，不降级抖动。
+  // health 必须保持 200（外部监控能区分「服务挂了」与「配置缺失」），原因写在 body.oracle 里。
+  const chainError = chainConfigError(env);
+  if (chainError && plan.cheap !== 'health') {
+    return withReconciled(apiErrorResponse(oraclePaused(chainError)), false);
+  }
   if (plan.badRequestMessage) {
     return withReconciled(apiErrorResponse(badRequest(plan.badRequestMessage)), false);
   }
@@ -615,7 +649,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (plan.cheap === 'health') {
     const db = await store.dbPing(env);
     const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
-    return withReconciled(okResponse(views.buildHealth(env, db, dataSource)), false);
+    return withReconciled(okResponse(views.buildHealth(env, db, dataSource, chainError)), false);
   }
   if (plan.cheap === 'version') {
     const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
@@ -689,6 +723,53 @@ export default {
           const auto = await state.autoplay(env);
           const st = await state.reconcile(env);
           await state.refreshDemoMarket(env, st);
+
+          // H-4：chain 模式 cron 驱动索引器（tick 永不抛出；cron 任何异常都必须被吞掉并记审计）
+          if (st.params.dataSource === 'chain') {
+            const cfgError = chainConfigError(env);
+            if (cfgError) {
+              try {
+                await store.logEvent(env, 'warn', 'indexer', 'INDEXER_SKIPPED', cfgError);
+              } catch {
+                /* 审计写失败也不能让 cron 抛错 */
+              }
+            } else {
+              try {
+                const result = await indexerTick(env, st.now);
+                if (!result.ok) {
+                  try {
+                    await store.logEvent(
+                      env,
+                      'warn',
+                      'indexer',
+                      'INDEXER_TICK_WARN',
+                      JSON.stringify({
+                        skipped: result.skipped ?? null,
+                        error: result.error ?? null,
+                        pages: result.pages,
+                        writes: result.writes,
+                      }).slice(0, 240),
+                    );
+                  } catch {
+                    /* ignore */
+                  }
+                }
+              } catch (error) {
+                try {
+                  await store.logEvent(
+                    env,
+                    'error',
+                    'indexer',
+                    'INDEXER_CRON_ERROR',
+                    (error instanceof Error ? error.message : String(error)).slice(0, 240),
+                  );
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+          }
+
           const now = Date.now();
           await Promise.all([
             store.pruneRateLimit(env, now - 10 * 60 * 1000),

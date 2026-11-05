@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * 生成 Cloudflare D1 演示种子数据：worker/migrations/seed.sql
+ * 生成 Cloudflare D1 演示种子数据：worker/seed/seed.sql
+ *
+ * ⚠️ 本文件输出**不是迁移**，禁止放入 worker/migrations/：`wrangler d1 migrations apply`
+ *    会执行该目录下所有 .sql，导致演示假数据被灌进生产库。seed 只能在本地/demo 环境显式执行。
  *
  * 设计目标：
  *  - 可复现：所有地址/数量/成交由固定种子推导，时间以 EPOCH（默认 now）为锚点。
@@ -26,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WORKER_ROOT = join(HERE, '..');
-const OUT_FILE = join(WORKER_ROOT, 'migrations', 'seed.sql');
+const OUT_FILE = join(WORKER_ROOT, 'seed', 'seed.sql');
 
 const TOKEN_SCALE = 1_000_000_000n;
 const TOKEN_DECIMALS = 9;
@@ -722,6 +725,9 @@ const metricsRows = [
 const statementChunks = [];
 statementChunks.push(
   '-- A9 引信协议 — 演示种子数据（由 worker/scripts/generate-seed.mjs 生成，请勿手改）\n' +
+    '-- ⚠️ 仅用于本地 / demo 环境；禁止在生产 chain 库执行。\n' +
+    '-- ⚠️ 禁止移动到 worker/migrations/：D1 migrations 会执行该目录所有 .sql，会把演示假数据灌进生产。\n' +
+    '-- 用法：wrangler d1 execute fuse-protocol --local --file=./seed/seed.sql（远端仅在 demo 环境显式执行）\n' +
     '-- EPOCH=' + EPOCH + ' (' + new Date(EPOCH).toISOString() + '), DEMO_CANDLE_SECONDS=' + DEMO_CANDLE_SECONDS + '\n' +
     '-- 状态：R1 SUCCEEDED(20/24)、R2 FAILED_PERMANENT(12/24，三笔销毁 1,061.5M)、R3 OBSERVING(12/24 已收盘)、R4..R10 UNOPENED\n' +
     '-- 档位（D-28 tier = 1 + 已成功轮数，失败不升档）：R1 tier1=232000 / R2 tier2=464000 / R3 tier2=464000 / R4 tier3=928000 …\n' +

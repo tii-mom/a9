@@ -47,6 +47,23 @@ export interface Env {
   RATE_LIMIT_READ_PER_MINUTE?: string;
   /** 静态资源 GET 的内存级限流（默认 600/min） */
   RATE_LIMIT_STATIC_PER_MINUTE?: string;
+
+  // ---- chain 模式（索引器 / 真实链上数据源，task-39）----
+  /** toncenter API key（chain 模式必须；缺失则拒绝启动并报 ORACLE_PAUSED） */
+  TONCENTER_API_KEY?: string;
+  /** 本地调试允许无 key 直连公共端点（仅显式=1 时生效） */
+  TONCENTER_ALLOW_PUBLIC?: string;
+  TONCENTER_V2_URL?: string;
+  TONCENTER_V3_URL?: string;
+  /** 'mainnet' | 'testnet' */
+  CHAIN_NETWORK?: string;
+  ROUND_CONTROLLER_ADDRESS?: string;
+  TEAM_VAULT_ADDRESS?: string;
+  JETTON_MASTER_ADDRESS?: string;
+  ORACLE_CONFIG_VERSION?: string;
+  ORACLE_CONFIG_HASH?: string;
+  /** 索引器租约 TTL（秒，默认 120） */
+  INDEXER_LEASE_SECONDS?: string;
 }
 
 /**
@@ -64,8 +81,22 @@ export function uptimeSeconds(now = Date.now()): number {
   return Math.max(0, Math.floor((now - startedAtMs) / 1000));
 }
 
+/**
+ * H-6：chain 模式启动前置校验。缺失 TONCENTER_API_KEY（且未显式 TONCENTER_ALLOW_PUBLIC=1）
+ * 时不允许降级运行——调用方应返回 ORACLE_PAUSED / 跳过 indexer tick。
+ */
+export function chainConfigError(env: Env): string | null {
+  const dataSource = (env.DATA_SOURCE ?? 'demo').trim();
+  if (dataSource !== 'chain') return null;
+  if (env.TONCENTER_ALLOW_PUBLIC === '1') return null;
+  if (!env.TONCENTER_API_KEY || !env.TONCENTER_API_KEY.trim()) {
+    return 'chain 模式缺少 TONCENTER_API_KEY（本地调试可显式 TONCENTER_ALLOW_PUBLIC=1）';
+  }
+  return null;
+}
+
 /** D1 schema 版本，与 migrations 文件名一致，健康检查里暴露用于上线核对。 */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 9;
 
 /** Worker 默认语义化版本。 */
 export const DEFAULT_VERSION = '1.0.0';

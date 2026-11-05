@@ -41,6 +41,13 @@ export interface RoundRow {
   total_weight_raw: string;
   /** V8：K 线滚动哈希（链上只存此值） */
   candle_hash: string | null;
+  /** chain 模式（索引器落库）：最近一根已收盘 K 线 TWAP / 时间（USD_E8 / unix ms） */
+  last_candle_twap_usd_e8?: string | null;
+  last_candle_at?: number | null;
+  /** chain 模式：开窗时锁定的 24h TWAP 参考价（USD_E8），用于 /api/stats 的 price24hAgoUsdE8 */
+  target_twap24h_usd_e8?: string | null;
+  /** chain 模式：链上原始状态码（RoundController get_round_status），用于对账/审计 */
+  chain_status?: number | null;
   staker_count: number;
   result: 'SUCCESS' | 'FAILURE' | 'TECHNICAL_ABORT' | null;
   burned_raw: string | null;
@@ -117,6 +124,8 @@ export interface BurnRow {
   confirmed: number;
   created_at: number;
   confirmed_at: number | null;
+  /** chain 模式：链上 burn 交易哈希（BurnAck 对账） */
+  chain_tx_hash?: string | null;
 }
 
 export interface EventRow {
@@ -725,6 +734,171 @@ export async function updateRoundWeightHash(
     now,
     roundId,
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * 链上索引器配套（indexer-dev / task-39；签名以 indexer-dev 契约为准）
+ * ------------------------------------------------------------------ */
+
+/** 原子获取索引器租约（单写者）：value = now + ttl；value 仍大于 now 时抢不到。 */
+export async function tryAcquireLease(
+  env: Env,
+  key: string,
+  now: number,
+  ttlMs = 120_000,
+): Promise<boolean> {
+  const expiresAt = now + ttlMs;
+  const sql =
+    'INSERT INTO metrics (key, value, updated_at) VALUES (?, ?, ?) ' +
+    'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at ' +
+    'WHERE CAST(metrics.value AS INTEGER) < ?';
+  const changes = await run(env, sql, key, String(expiresAt), now, now);
+  return changes > 0;
+}
+
+/** 释放租约（仅持有者调用；直接写 0）。 */
+export async function releaseLease(env: Env, key: string, now: number): Promise<void> {
+  await run(env, 'UPDATE metrics SET value = ?, updated_at = ? WHERE key = ?', '0', now, key);
+}
+
+/** 链上快照 → rounds 行的部分更新（chain 模式唯一写 rounds 的链上入口）。 */
+export interface RoundChainPatch {
+  state?: RoundStateName;
+  target_tier?: number;
+  target_price_usd_e8?: string;
+  target_twap24h_usd_e8?: string | null;
+  reward_budget_raw?: string;
+  stake_open_at?: number | null;
+  stake_close_at?: number | null;
+  observation_start?: number | null;
+  observation_end?: number | null;
+  candles_seen?: number;
+  qualified_candles?: number;
+  total_accepted_stake_raw?: string;
+  staker_count?: number;
+  total_weight_raw?: string;
+  candle_hash?: string | null;
+  result?: 'SUCCESS' | 'FAILURE' | 'TECHNICAL_ABORT' | null;
+  burned_raw?: string | null;
+  chain_status?: number | null;
+  last_candle_twap_usd_e8?: string | null;
+  last_candle_at?: number | null;
+}
+
+export async function patchRoundChain(
+  env: Env,
+  roundId: number,
+  patch: RoundChainPatch,
+  now: number,
+): Promise<number> {
+  const sets: string[] = ['updated_at = ?'];
+  const binds: Bind[] = [now];
+  const add = (column: string, value: Bind): void => {
+    sets.push(column + ' = ?');
+    binds.push(value);
+  };
+  if (patch.state !== undefined) add('state', patch.state);
+  if (patch.target_tier !== undefined) add('target_tier', patch.target_tier);
+  if (patch.target_price_usd_e8 !== undefined) add('target_price_usd_e8', patch.target_price_usd_e8);
+  if (patch.target_twap24h_usd_e8 !== undefined) add('target_twap24h_usd_e8', patch.target_twap24h_usd_e8);
+  if (patch.reward_budget_raw !== undefined) add('reward_budget_raw', patch.reward_budget_raw);
+  if (patch.stake_open_at !== undefined) add('stake_open_at', patch.stake_open_at);
+  if (patch.stake_close_at !== undefined) add('stake_close_at', patch.stake_close_at);
+  if (patch.observation_start !== undefined) add('observation_start', patch.observation_start);
+  if (patch.observation_end !== undefined) add('observation_end', patch.observation_end);
+  if (patch.candles_seen !== undefined) add('candles_seen', patch.candles_seen);
+  if (patch.qualified_candles !== undefined) add('qualified_candles', patch.qualified_candles);
+  if (patch.total_accepted_stake_raw !== undefined) add('total_accepted_stake_raw', patch.total_accepted_stake_raw);
+  if (patch.staker_count !== undefined) add('staker_count', patch.staker_count);
+  if (patch.total_weight_raw !== undefined) add('total_weight_raw', patch.total_weight_raw);
+  if (patch.candle_hash !== undefined) add('candle_hash', patch.candle_hash);
+  if (patch.result !== undefined) add('result', patch.result);
+  if (patch.burned_raw !== undefined) add('burned_raw', patch.burned_raw);
+  if (patch.chain_status !== undefined) add('chain_status', patch.chain_status);
+  if (patch.last_candle_twap_usd_e8 !== undefined) add('last_candle_twap_usd_e8', patch.last_candle_twap_usd_e8);
+  if (patch.last_candle_at !== undefined) add('last_candle_at', patch.last_candle_at);
+  if (sets.length === 1) return 0;
+  binds.push(roundId);
+  return run(env, 'UPDATE rounds SET ' + sets.join(', ') + ' WHERE round_id = ?', ...binds);
+}
+
+/** 引导：为链上尚不存在的轮次插入 UNOPENED 行（必须 INSERT OR IGNORE，防 REPLACE 级联删子表）。 */
+export interface RoundChainSeed {
+  round_id: number;
+  state: RoundStateName;
+  target_price_usd_e8: string;
+  reward_budget_raw: string;
+  chain_status?: number | null;
+  updated_at: number;
+}
+
+export async function ensureRoundRows(env: Env, rows: RoundChainSeed[]): Promise<void> {
+  if (!rows.length) return;
+  const sql =
+    'INSERT OR IGNORE INTO rounds ' +
+    '(round_id, state, target_price_usd_e8, reward_budget_raw, chain_status, updated_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?)';
+  const statements = rows.map((row) =>
+    env.DB.prepare(sql).bind(
+      row.round_id,
+      row.state,
+      row.target_price_usd_e8,
+      row.reward_budget_raw,
+      row.chain_status ?? null,
+      row.updated_at,
+    ),
+  );
+  await runBatches(env, statements);
+}
+
+/** 销毁三态（dispatched = confirmed:0 → confirmed:1）；只允许 0→1，单调不可回退。 */
+export interface BurnLedgerUpsert {
+  roundId: number;
+  kind: 'reward' | 'principal' | 'team';
+  amountRaw: string;
+  burnRef: string;
+  confirmed: boolean;
+  txHash?: string | null;
+  now: number;
+}
+
+export async function upsertBurnLedger(env: Env, input: BurnLedgerUpsert): Promise<boolean> {
+  const sql =
+    'INSERT INTO burn_ledger ' +
+    '(round_id, kind, amount_raw, burn_ref, confirmed, created_at, confirmed_at, chain_tx_hash) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(burn_ref) DO UPDATE SET ' +
+    'confirmed = excluded.confirmed, confirmed_at = excluded.confirmed_at, ' +
+    'chain_tx_hash = excluded.chain_tx_hash ' +
+    'WHERE burn_ledger.confirmed < excluded.confirmed';
+  const changes = await run(
+    env,
+    sql,
+    input.roundId,
+    input.kind,
+    input.amountRaw,
+    input.burnRef,
+    input.confirmed ? 1 : 0,
+    input.now,
+    input.confirmed ? input.now : null,
+    input.txHash ?? null,
+  );
+  return changes > 0;
+}
+
+/** 兼容 task-42 最小约定：按 burn_ref 确认销毁（等价于 upsertBurnLedger confirmed=true）。 */
+export async function updateBurnConfirmed(
+  env: Env,
+  input: { burnRef: string; chainTxHash: string; now: number },
+): Promise<boolean> {
+  const changes = await run(
+    env,
+    'UPDATE burn_ledger SET confirmed = 1, chain_tx_hash = ?, confirmed_at = ? WHERE burn_ref = ? AND confirmed = 0',
+    input.chainTxHash,
+    input.now,
+    input.burnRef,
+  );
+  return changes > 0;
 }
 
 /* ------------------------------------------------------------------ *
