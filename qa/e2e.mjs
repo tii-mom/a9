@@ -25,7 +25,7 @@ await page.waitForTimeout(3000);
 
 await step('hero 标题', async () => {
   const t = await page.locator('h1').first().innerText();
-  if (!/押多少你定/.test(t) || !/至少翻倍/.test(t)) throw new Error('h1 文案不符: ' + t.slice(0, 60));
+  if (!/参与价格考核/.test(t) || !/失败失去本金/.test(t)) throw new Error('h1 文案不符: ' + t.slice(0, 60));
   ok('hero 标题', t.replace(/\s+/g, ' ').slice(0, 30));
 });
 
@@ -74,11 +74,11 @@ await step('成交流有数据', async () => {
 
 await step('中英切换', async () => {
   const before = await page.locator('h1').first().innerText();
-  await page.getByRole('button', { name: '切换语言' }).click();
+  await page.getByRole('button', { name: 'Switch to English' }).click();
   await page.waitForTimeout(600);
   const after = await page.locator('h1').first().innerText();
   if (before === after) throw new Error('语言未切换');
-  await page.getByRole('button', { name: 'Switch language' }).click();
+  await page.getByRole('button', { name: '切换到中文' }).click();
   await page.waitForTimeout(500);
   ok('中英切换', 'zh <-> en');
 });

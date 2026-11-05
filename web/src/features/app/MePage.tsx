@@ -22,6 +22,8 @@ import {
   TIMING_FALLBACKS,
 } from './common';
 import { Empty, ErrorState, Loading, PageHead, Stat, StatePill, ToastView, useToast } from './ui';
+import { deriveChainConfig } from '../chain/config';
+import { QueryNotice } from '../chain/QueryNotice';
 import './pages.css';
 
 interface MeDict extends Record<string, unknown> {
@@ -84,16 +86,16 @@ interface MeDict extends Record<string, unknown> {
 const ZH: MeDict = {
   lbl: '我的质押',
   title: '我的质押',
-  desc: '当前轮质押、可领取本金与奖励、历史轮次与累计记录。钱包为只读连接，不会发起任何交易。',
+  desc: '查看当前轮仓位、待处理权益与历史记录。真实链上操作需单独确认签名。',
   connect: '连接钱包',
   demo: '使用演示钱包',
   disconnect: '断开',
   gateTitle: '连接钱包查看你的质押',
-  gateDesc: '连接 TON 钱包（只读）或使用演示钱包，即可查看当前轮质押、可领取与历史记录。',
-  gateHint: '仅读取地址与余额，不签名、不转账；质押与领取请在首页交易台完成。',
-  demoNotice: '当前为演示钱包：地址由本地生成或取自演示数据，资金与链上数据均为演示用途。',
-  readonlyNotice: '只读模式：不会发起任何交易；合约部署后开放真实质押与领取。',
-  chainNotice: '链上模式：合约已配置。质押与领取请在下方「链上操作」面板中签名完成，本页仅做数据展示。',
+  gateDesc: '连接TON钱包查看你的记录，或主动选择演示账户体验。',
+  gateHint: '连接仅共享地址。真实质押与领取均需逐笔确认签名；演示操作不涉及真实资产。',
+  demoNotice: '当前为演示账户：可能采用公开榜单地址展示示例记录，余额为模拟值，不代表你控制该地址。',
+  readonlyNotice: '当前仅展示账户记录，真实链上操作尚未启用。',
+  chainNotice: '链上模式：在下方交易面板操作，每笔交易均需钱包确认签名。',
   chainClaimHint: '链上领取请使用上方「链上操作」面板（链上交易需钱包签名）；本页不再提供演示领取。',
   chainDesc: '当前轮质押、可领取本金与奖励、历史轮次与累计记录；链上质押与领取请在「链上交易」面板签名完成。',
   statMyStake: '当前轮质押',
@@ -109,12 +111,12 @@ const ZH: MeDict = {
   noStakeThisRound: '本轮你还没有质押。',
   goStake: '前往交易台质押',
   claimTitle: '可领取',
-  claimDesc: '本金与奖励分别领取，操作幂等',
+  claimDesc: '领取前请核对奖励选择',
   claimEmpty: '暂无可领取',
   claimEmptyDesc: '成功结算后，本金与奖励会出现在这里；失败轮次会直接销毁，不可领取。',
   claimPrincipal: '领取本金',
   claimReward: '领取奖励',
-  claimNote: '领取为主动操作，重复提交不会重复发放（后端幂等）。',
+  claimNote: '这些按钮仅更新演示记录，不发送链上交易。',
   historyTitle: '历史轮次',
   historyDesc: '你参与过的全部轮次与资金状态',
   historyEmpty: '暂无质押记录',
@@ -149,16 +151,16 @@ const ZH: MeDict = {
 const EN: MeDict = {
   lbl: 'My Stake',
   title: 'My Stake',
-  desc: 'Current-round stake, claimable principal and rewards, round history and cumulative record. The wallet is read-only and never sends a transaction.',
+  desc: 'View current positions, pending rewards and history. Live transactions require a separate wallet signature.',
   connect: 'Connect wallet',
   demo: 'Use demo wallet',
   disconnect: 'Disconnect',
   gateTitle: 'Connect a wallet to see your stake',
-  gateDesc: 'Connect a TON wallet (read-only) or use the demo wallet to see your current stake, claimables and history.',
-  gateHint: 'Only address and balance are read. No signature, no transfer. Stake and claim from the home trade desk.',
-  demoNotice: 'Demo wallet: the address is generated locally or taken from demo data. All funds are simulated.',
-  readonlyNotice: 'Read-only mode: no transactions are sent. Real staking and claiming open after contract deployment.',
-  chainNotice: 'On-chain mode: contracts are configured. Stake and claim from the On-chain panel below (wallet signature required); this page only displays data.',
+  gateDesc: 'Connect a TON wallet to see your records, or explicitly select a demo account to explore.',
+  gateHint: 'Connecting shares your address. Each live stake or claim needs a separate signature. Demo actions use no real assets.',
+  demoNotice: 'Demo account: a public leaderboard address may be used for sample records. Balances are simulated; this does not mean you control the address.',
+  readonlyNotice: 'Account records only. Live transactions are not enabled in this environment.',
+  chainNotice: 'On-chain mode: use the transaction panels below. Every transaction requires wallet confirmation.',
   chainClaimHint: 'Claim on-chain from the On-chain panel above (a wallet signature is required). Demo claiming is disabled on this page.',
   chainDesc: 'Current-round stake, claimable principal and rewards, round history and cumulative record. On-chain stake and claim are signed from the On-chain panel.',
   statMyStake: 'Current stake',
@@ -174,12 +176,12 @@ const EN: MeDict = {
   noStakeThisRound: 'You have no stake in this round yet.',
   goStake: 'Stake from the trade desk',
   claimTitle: 'Claimable',
-  claimDesc: 'Principal and reward are claimed separately; idempotent',
+  claimDesc: 'Review reward choices before claiming',
   claimEmpty: 'Nothing to claim',
   claimEmptyDesc: 'After a successful settlement, principal and reward appear here. A failed round burns them permanently.',
   claimPrincipal: 'Claim principal',
   claimReward: 'Claim reward',
-  claimNote: 'Claiming is a pull action; repeated submissions never double-pay (server-side idempotent).',
+  claimNote: 'These buttons update demo records only and do not send on-chain transactions.',
   historyTitle: 'Round history',
   historyDesc: 'Every round you joined and the status of your funds',
   historyEmpty: 'No stakes yet',
@@ -302,6 +304,7 @@ function MeDashboard({
 
   const claim = useCallback(
     async (roundId: number, kind: 'principal' | 'reward') => {
+      if (!demo || chainMode || claiming !== null || !meQuery.data || meQuery.error) return;
       const key = `${roundId}:${kind}`;
       setClaiming(key);
       try {
@@ -315,7 +318,7 @@ function MeDashboard({
         setClaiming(null);
       }
     },
-    [address, meQuery.refresh, roundsQuery.refresh, show, d.toastClaimOk, d.toastClaimFail, decimals, lang],
+    [demo, chainMode, claiming, meQuery.data, meQuery.error, address, meQuery.refresh, roundsQuery.refresh, show, d.toastClaimOk, d.toastClaimFail, decimals, lang],
   );
 
   const roundProgress = roundDetailQuery.data;
@@ -349,27 +352,30 @@ function MeDashboard({
       {chainMode ? <ChainMePanel address={address} demo={demo} /> : null}
       <RewardReferralPanel address={address} demo={demo} />
 
-      {meQuery.error && !meQuery.data ? <ErrorState error={meQuery.error} onRetry={meQuery.refresh} /> : null}
+      <QueryNotice query={meQuery} lang={lang} label={lang === 'zh' ? '账户' : 'Account'} />
+      <QueryNotice query={roundsQuery} lang={lang} label={lang === 'zh' ? '轮次' : 'Rounds'} />
+      <QueryNotice query={roundDetailQuery} lang={lang} label={lang === 'zh' ? '轮次进度' : 'Round progress'} />
+      <QueryNotice query={leaderboardQuery} lang={lang} label={lang === 'zh' ? '排名' : 'Rank'} />
 
       <div className="cards ap-sec">
         <Stat
           label={d.statMyStake}
-          value={`${myStake ? formatToken(myStake.amountRaw, decimals) : '0'} A9`}
+          value={meQuery.data && roundsQuery.data ? `${myStake ? formatToken(myStake.amountRaw, decimals) : '0'} A9` : '—'}
           hint={currentRound ? `${c.round} #${currentRound.roundId}` : undefined}
         />
         <Stat
           label={d.statClaimPrincipal}
-          value={`${formatToken(claimablePrincipal, decimals)} A9`}
-          hint={`${pendingCount} ${lang === 'zh' ? '项' : 'items'}`}
+          value={meQuery.data ? `${formatToken(claimablePrincipal, decimals)} A9` : '—'}
+          hint={meQuery.data ? `${pendingCount} ${lang === 'zh' ? '项' : 'items'}` : undefined}
         />
         <Stat
           label={d.statClaimReward}
-          value={`${formatToken(claimableReward, decimals)} A9`}
-          hint={lang === 'zh' ? '主动领取 · 幂等' : 'Pull claim · idempotent'}
+          value={meQuery.data ? `${formatToken(claimableReward, decimals)} A9` : '—'}
+          hint={lang === 'zh' ? '奖励选择前请查看50%早领规则' : 'Review 50% early-claim rules'}
         />
-        <Stat label={d.statTotalStaked} value={`${formatToken(totals.stakedRaw, decimals)} A9`} />
-        <Stat label={d.statTotalReward} value={`${formatToken(totals.rewardRaw, decimals)} A9`} />
-        <Stat label={d.statTotalClaimed} value={`${formatToken(totals.claimedRaw, decimals)} A9`} />
+        <Stat label={d.statTotalStaked} value={meQuery.data ? `${formatToken(totals.stakedRaw, decimals)} A9` : '—'} />
+        <Stat label={d.statTotalReward} value={meQuery.data ? `${formatToken(totals.rewardRaw, decimals)} A9` : '—'} />
+        <Stat label={d.statTotalClaimed} value={meQuery.data ? `${formatToken(totals.claimedRaw, decimals)} A9` : '—'} />
       </div>
 
       <div className="ap-split ap-sec">
@@ -388,7 +394,7 @@ function MeDashboard({
               {roundsQuery.error ? (
                 <ErrorState error={roundsQuery.error} onRetry={roundsQuery.refresh} />
               ) : !currentRound ? (
-                <Loading rows={3} />
+                roundsQuery.data ? <Empty title={lang === 'zh' ? '暂无轮次' : 'No rounds yet'} desc={lang === 'zh' ? '轮次发布后将在这里显示。' : 'Published rounds will appear here.'} /> : <Loading rows={3} />
               ) : (
                 <>
                   <div className="ap-round-meta">
@@ -429,7 +435,7 @@ function MeDashboard({
                       <div className="v">
                         {qualified}/{candleCount} <small className="ap-muted">/ {d.qualifiedTarget} {minQualified}</small>
                       </div>
-                      <div className="ap-bar" role="progressbar" aria-valuenow={qualified} aria-valuemin={0} aria-valuemax={candleCount}>
+                      <div className="ap-bar" role="progressbar" aria-label={d.qualifiedTarget} aria-valuenow={qualified} aria-valuemin={0} aria-valuemax={candleCount}>
                         <i
                           className={qualified >= minQualified ? 'pass' : ''}
                           style={{ width: `${Math.min(100, (qualified / Math.max(1, candleCount)) * 100)}%` }}
@@ -557,7 +563,7 @@ function MeDashboard({
                             <button
                               className="btn fire sm"
                               type="button"
-                              disabled={claiming !== null}
+                              disabled={claiming !== null || !demo || !!meQuery.error}
                               onClick={() => void claim(item.roundId, 'principal')}
                             >
                               {claiming === principalKey ? c.loading : d.claimPrincipal}
@@ -569,7 +575,7 @@ function MeDashboard({
                             <button
                               className="btn ghost sm"
                               type="button"
-                              disabled={claiming !== null}
+                              disabled={claiming !== null || !demo || !!meQuery.error}
                               onClick={() => void claim(item.roundId, 'reward')}
                             >
                               {claiming === rewardKey ? c.loading : d.claimReward}
@@ -597,7 +603,7 @@ function MeDashboard({
                 </div>
                 <div>
                   <dt>{d.totalsMode}</dt>
-                  <dd className="em">{demo ? d.walletDemo : d.walletTon}</dd>
+                  <dd className="em">{demo ? d.walletDemo : chainMode ? (lang === 'zh' ? 'TON钱包 · 链上' : 'TON wallet · on-chain') : d.walletTon}</dd>
                 </div>
                 <div>
                   <dt>{d.statTotalStaked}</dt>
@@ -646,12 +652,12 @@ export default function MePage() {
   const healthQuery = useQuery(() => api.health(), [], { enabled: !wallet.connected, intervalMs: 8000 });
   // 链上模式：/api/config 下发了 roundController 合约地址（为空则保持演示模式）
   const configQuery = useQuery(() => api.config(), [], { intervalMs: 0 });
-  const chainMode = Boolean(configQuery.data?.contracts?.roundController);
+  const chainMode = deriveChainConfig(configQuery.data).configured;
 
   return (
     <>
       <SiteHeader />
-      <main className="wrap page ap-page">
+      <main id="main-content" tabIndex={-1} className="wrap page ap-page ap-account">
         <PageHead
           lbl={d.lbl}
           title={d.title}
@@ -661,7 +667,7 @@ export default function MePage() {
               {wallet.connected ? (
                 <>
                   <span className="chip ok">
-                    {wallet.demo ? d.walletDemo : d.walletTon} · {shortAddress(wallet.address ?? '')}
+                    {wallet.demo ? d.walletDemo : chainMode ? (lang === 'zh' ? 'TON钱包 · 链上' : 'TON wallet · on-chain') : d.walletTon} · {shortAddress(wallet.address ?? '')}
                   </span>
                   <button className="btn ghost sm" type="button" onClick={() => disconnect()}>
                     {d.disconnect}

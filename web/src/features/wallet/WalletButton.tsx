@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { formatToken, shortAddress } from '../../lib/format';
 import { useLang } from '../../lib/lang';
 import { connect, connectDemo, disconnect, refreshBalances, resetDemoWallet } from './store';
@@ -42,10 +41,10 @@ const DICT: Record<'zh' | 'en', Dict> = {
     connect: '连接钱包',
     connecting: '连接中…',
     title: '钱包',
-    readOnly: '只读连接：不会发起任何交易，也不会请求签名。',
-    tonOption: 'TON 钱包（只读）',
+    readOnly: '连接仅共享地址；后续每笔链上操作均需单独确认签名。',
+    tonOption: '连接 TON 钱包',
     demoOption: '使用演示钱包',
-    demoHint: '演示钱包使用本地生成的 UQ 地址与演示资金，不涉及任何真实资产。',
+    demoHint: '演示账户可能采用公开榜单地址来展示记录；演示余额不是真实资产，无法签名。',
     address: '地址',
     network: '网络',
     mainnet: '主网',
@@ -54,26 +53,26 @@ const DICT: Record<'zh' | 'en', Dict> = {
     walletName: '钱包应用',
     tonBalance: 'TON 余额',
     fuseBalance: 'A9 余额',
-    notDeployed: '合约部署后开放',
+    notDeployed: '余额未知 · 请刷新',
     refresh: '刷新余额',
     disconnect: '断开连接',
     newDemo: '换一个演示地址',
     copy: '复制地址',
     copied: '已复制',
     demoTag: 'DEMO',
-    fallbackCancelled: '未完成 TON 连接，已切换为演示钱包',
-    fallbackUnavailable: '当前环境不支持 TON Connect，已切换为演示钱包',
-    fallbackFailed: 'TON 连接失败，已切换为演示钱包',
+    fallbackCancelled: '已取消连接，仍未连接钱包。可重试或主动选择演示。',
+    fallbackUnavailable: '当前无法使用 TON Connect。请重试，或主动选择演示。',
+    fallbackFailed: '连接失败，仍未连接钱包。请重试。',
     disconnectHint: '断开后地址与余额将被清空。',
   },
   en: {
     connect: 'Connect',
     connecting: 'Connecting…',
     title: 'Wallet',
-    readOnly: 'Read-only connection: no transactions are sent and no signature is requested.',
-    tonOption: 'TON Wallet (read-only)',
+    readOnly: 'Connecting shares your address. Each later transaction needs your separate approval.',
+    tonOption: 'Connect TON Wallet',
     demoOption: 'Use demo wallet',
-    demoHint: 'The demo wallet uses a locally generated UQ address and simulated funds. No real assets.',
+    demoHint: 'A demo account may use a public leaderboard address to show sample history. Simulated funds are not real assets and cannot sign.',
     address: 'Address',
     network: 'Network',
     mainnet: 'Mainnet',
@@ -82,16 +81,16 @@ const DICT: Record<'zh' | 'en', Dict> = {
     walletName: 'Wallet app',
     tonBalance: 'TON balance',
     fuseBalance: 'A9 balance',
-    notDeployed: 'Available after contract deployment',
+    notDeployed: 'Unknown · refresh to retry',
     refresh: 'Refresh balances',
     disconnect: 'Disconnect',
     newDemo: 'New demo address',
     copy: 'Copy address',
     copied: 'Copied',
     demoTag: 'DEMO',
-    fallbackCancelled: 'TON connection not completed — switched to demo wallet',
-    fallbackUnavailable: 'TON Connect unavailable here — switched to demo wallet',
-    fallbackFailed: 'TON connection failed — switched to demo wallet',
+    fallbackCancelled: 'Connection cancelled. No wallet connected. Retry or choose demo.',
+    fallbackUnavailable: 'TON Connect is unavailable. Retry or choose demo explicitly.',
+    fallbackFailed: 'Connection failed. No wallet connected. Please retry.',
     disconnectHint: 'Disconnecting clears the address and balances.',
   },
 };
@@ -103,38 +102,33 @@ function fallbackText(notice: string | null, d: Dict): string | null {
   return null;
 }
 
-/** 小屏时 SiteHeader 会隐藏 .nav-r .btn，钱包改为挂到 body 的悬浮入口。 */
-function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(
-    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches,
-  );
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const query = window.matchMedia('(max-width: 640px)');
-    const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
-    setIsMobile(query.matches);
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
-  return isMobile;
-}
-
 export function WalletButton() {
   const { lang } = useLang();
   const d = DICT[lang];
   const wallet = useWalletStore();
-  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    popRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
     const onPointerDown = (event: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') { event.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
+      if (event.key === 'Tab') {
+        const controls = popRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]');
+        if (!controls?.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); setOpen(false); triggerRef.current?.focus(); }
+        if (!event.shiftKey && document.activeElement === last) { setOpen(false); }
+      }
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -147,6 +141,10 @@ export function WalletButton() {
   useEffect(() => {
     if (!open) setCopied(false);
   }, [open]);
+
+  useEffect(() => {
+    if (wallet.notice) setOpen(true);
+  }, [wallet.notice]);
 
   // 连接成功/地址变化后自动收回弹层
   useEffect(() => {
@@ -187,10 +185,11 @@ export function WalletButton() {
   const notice = fallbackText(wallet.notice, d);
 
   const node = (
-    <div className={`wl${isMobile ? ' wl-floating' : ''}`} ref={rootRef}>
+    <div className="wl" ref={rootRef}>
       <button
         className={`btn ${connected ? 'ghost' : 'fire'} sm wl-trigger`}
         type="button"
+        ref={triggerRef}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${d.title}: ${label}`}
@@ -202,14 +201,15 @@ export function WalletButton() {
       </button>
 
       {open && (
-        <div className="wl-pop" role="dialog" aria-label={d.title}>
+        <div ref={popRef} className="wl-pop" role="dialog" aria-label={d.title}>
           <div className="wl-head">
             <span className="lbl">{d.title}</span>
-            <button className="wl-x" type="button" aria-label="close" onClick={() => setOpen(false)}>
+            <button className="wl-x" type="button" aria-label={lang === 'zh' ? '关闭钱包面板' : 'Close wallet panel'} onClick={() => { setOpen(false); triggerRef.current?.focus(); }}>
               ×
             </button>
           </div>
 
+          {notice && <div className="wl-notice" role="status">{notice}</div>}
           {!connected ? (
             <>
               <p className="wl-note">{d.readOnly}</p>
@@ -223,7 +223,7 @@ export function WalletButton() {
             </>
           ) : (
             <>
-              {notice && <div className="wl-notice">{notice}</div>}
+              {wallet.mode === 'demo' ? <div className="wl-notice">{d.demoHint}</div> : null}
               <div className="wl-kv">
                 <span>{d.address}</span>
                 <code title={wallet.address ?? ''}>{shortAddress(wallet.address ?? '', 8, 6)}</code>
@@ -250,8 +250,8 @@ export function WalletButton() {
                 <button className="btn ghost sm" type="button" onClick={() => void copyAddress()}>
                   {copied ? d.copied : d.copy}
                 </button>
-                <button className="btn ghost sm" type="button" onClick={() => refreshBalances()}>
-                  {d.refresh}
+                <button className="btn ghost sm" type="button" disabled={refreshing} onClick={() => { setRefreshing(true); void Promise.resolve(refreshBalances()).finally(() => setRefreshing(false)); }}>
+                  {refreshing ? (lang === 'zh' ? '刷新中…' : 'Refreshing…') : d.refresh}
                 </button>
               </div>
               {wallet.mode === 'demo' && (
@@ -277,6 +277,5 @@ export function WalletButton() {
     </div>
   );
 
-  if (isMobile && typeof document !== 'undefined') return createPortal(node, document.body);
   return node;
 }

@@ -26,6 +26,7 @@ interface Props {
 const PHASE_CLASS: Record<Phase, string> = {
   stake: 'stk',
   observe: 'obs',
+  settling: 'obs',
   done: 'obs',
   paused: 'obs',
   unopened: 'obs',
@@ -38,11 +39,14 @@ function phaseClass(board: BoardView): string {
   return PHASE_CLASS[board.phase] ?? 'obs';
 }
 
-function phaseText(board: BoardView, copy: LandingCopy): string {
+function phaseText(board: BoardView, copy: LandingCopy, lang: 'zh' | 'en'): string {
+  if (board.phase === 'settling') return lang === 'zh' ? '结算中' : 'Settling';
+  if (board.result === 'abort') return lang === 'zh' ? '技术中止' : 'Technical abort';
   if (board.result === 'win') return copy.board.phaseWin;
   if (board.result === 'lose') return copy.board.phaseLose;
   if (board.phase === 'paused') return copy.board.phasePaused;
   if (board.phase === 'unopened') return copy.board.phaseUnopened;
+  if (board.state === 'STAKING_CLOSED') return copy.cmd.btnNotOpen;
   if (board.phase === 'stake') return copy.board.phaseStake;
   return copy.board.phaseObserve;
 }
@@ -77,12 +81,11 @@ export function BattleBoard({
   const failAt = board.failAt;
   const missAllowance = board.missAllowance;
   const candleCount = board.candleCount;
-  const rewardHuman = tokenNum(board.rewardBudgetRaw, decimals);
-  const stakeHuman = tokenNum(board.totalStakeRaw, decimals);
   const myPosition = me && board.roundId !== null ? me.stakes.find((s) => s.roundId === board.roundId) ?? null : null;
   const myStakeRaw = myPosition?.amountRaw ?? null;
   const myStakeHuman = myStakeRaw ? tokenNum(myStakeRaw, decimals) : 0;
-  const myRewardHuman = myStakeHuman > 0 && stakeHuman > 0 ? (rewardHuman * myStakeHuman) / stakeHuman : 0;
+  const myReward = me?.rewards?.find((reward) => reward.roundId === board.roundId);
+  const myRewardText = myReward ? intFmt(tokenNum(myReward.amountRaw, decimals)) : '—';
   const twapRaw = board.live ? board.liveTwapUsdE8 : board.candles.length > 0 ? board.candles[board.candles.length - 1].twapPriceUsdE8 : null;
   const twap = usdNum(twapRaw);
   const twapAbove = twap !== null && target !== null ? twap >= target : false;
@@ -123,12 +126,22 @@ export function BattleBoard({
     margin: Math.max(0, failAt - miss),
   });
   const hitsLeft = Math.max(0, need - hits);
-  if (phase === 'stake') {
+  if (phase === 'settling') {
+    verdictTitle = lang === 'zh' ? '结算处理中' : 'Settlement in progress';
+    verdictSub = lang === 'zh' ? '已结束观察，等待结算最终确认。此时尚不可领取。' : 'Observation ended. Waiting for final settlement; claims are not available yet.';
+  } else if (board.result === 'abort') {
+    verdictTitle = copy.board.resultAbortTitle.replace('{round}', String(board.roundId ?? '—'));
+    verdictSub = copy.board.resultAbortBody;
+  } else if (phase === 'unopened') {
+    verdictTitle = copy.board.phaseUnopened;
+    verdictSub = copy.board.waitingRound;
+  } else if (phase === 'paused') {
+    verdictTitle = copy.board.phasePaused;
+    verdictSub = lang === 'zh' ? '暂停计分；预言机故障不等于价格失败。' : 'Scoring paused. Oracle outages are not price failures.';
+  } else if (phase === 'stake') {
     verdictKey = 'stake';
     verdictTitle = fill(copy.board.verdictStake, { target: target === null ? '—' : formatUsdE8(board.targetUsdE8) });
-    verdictSub = fill(copy.board.verdictStakeSub, {
-      pct: gap === null ? '—' : ((target !== null && price !== null ? Math.abs(target / price - 1) : 0) * 100).toFixed(1) + '%',
-    });
+    verdictSub = lang === 'zh' ? `报名结束后进入 ${cfg ? cfg.observationSeconds / 3600 : '—'} 小时观察。至少 ${need}/${candleCount} 根 TWAP 达标方可通过。` : `After staking closes, observe for ${cfg ? cfg.observationSeconds / 3600 : '—'}h. At least ${need}/${candleCount} TWAP candles must qualify.`;
   } else if (board.result === 'win') {
     verdictKey = 'win';
     verdictTitle = fill(copy.board.verdictWin, { hits, total: candleCount });
@@ -167,7 +180,7 @@ export function BattleBoard({
         </div>
         <span className={'pill ' + phaseClass(board)}>
           <i />
-          {phaseText(board, copy)}
+          {phaseText(board, copy, lang)}
         </span>
         <div className="b-clock">
           <span className="lbl">{clockLabel}</span>
@@ -179,7 +192,7 @@ export function BattleBoard({
               className="d"
               style={oracle && (oracle.paused || !oracle.online) ? { background: 'var(--fail)', boxShadow: '0 0 8px var(--fail)' } : undefined}
             />
-            {oracle === null ? '—' : oracle.paused ? copy.board.oraclePaused : copy.board.oracleOnline}
+            {oracle === null ? '—' : oracle.paused ? copy.board.oraclePaused : !oracle.online ? (lang === 'zh' ? '预言机离线' : 'Oracle offline') : copy.board.oracleOnline}
           </span>
           <span>
             {oracle === null
@@ -314,7 +327,7 @@ export function BattleBoard({
         <div className="mine">
           <span>{copy.board.mine}</span>
           <span>{fill(copy.board.myStake, { v: intFmt(myStakeHuman) })}</span>
-          <span>{fill(copy.board.myReward, { v: intFmt(myRewardHuman) })}</span>
+          <span>{fill(copy.board.myReward, { v: myRewardText })}</span>
           <span className="bad">{fill(copy.board.myLoss, { v: intFmt(myStakeHuman) })}</span>
         </div>
       ) : null}
@@ -334,7 +347,7 @@ export function BattleBoard({
                   ? ' ' +
                     fill(copy.board.resultWinMine, {
                       stake: intFmt(myStakeHuman),
-                      reward: intFmt(myRewardHuman),
+                      reward: myRewardText,
                     })
                   : ''}
               </p>

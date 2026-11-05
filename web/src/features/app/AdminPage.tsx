@@ -491,7 +491,7 @@ export default function AdminPage() {
   return (
     <>
       <SiteHeader />
-      <main className="wrap page ap-page">
+      <main id="main-content" tabIndex={-1} className="wrap page ap-page">
         <PageHead
           lbl={d.lbl}
           title={d.title}

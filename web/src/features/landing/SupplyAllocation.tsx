@@ -15,6 +15,8 @@ export function SupplyAllocation({ cfg, rounds, copy }: Props) {
     return ladderLetter(round?.state);
   });
 
+  if (!cfg) return <section className="sec" id="supply"><div className="wrap"><h2>{copy.supply.title}</h2><p>{copy.common.loading}</p></div></section>;
+
   return (
     <section className="sec" id="supply">
       <div className="wrap">

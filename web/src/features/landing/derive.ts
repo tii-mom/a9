@@ -11,17 +11,14 @@ const ACTIVE_STATES: RoundState[] = [
   'SETTLING_FAILURE',
 ];
 
-export type Phase = 'stake' | 'observe' | 'done' | 'paused' | 'unopened';
+export type Phase = 'stake' | 'observe' | 'settling' | 'done' | 'paused' | 'unopened';
 
 export function pickFocus(rounds: RoundSummary[] | null | undefined): RoundSummary | null {
   if (!rounds || rounds.length === 0) return null;
-  const active = rounds.find((r) => ACTIVE_STATES.indexOf(r.state) >= 0);
+  const ordered = [...rounds].sort((a, b) => b.roundId - a.roundId);
+  const active = ordered.find((r) => ACTIVE_STATES.includes(r.state));
   if (active) return active;
-  const settled = rounds.filter(
-    (r) => r.state === 'SUCCEEDED' || r.state === 'FAILED_PERMANENT' || r.state === 'TECHNICAL_ABORTED',
-  );
-  if (settled.length > 0) return settled[settled.length - 1];
-  return rounds[rounds.length - 1] ?? null;
+  return ordered.find((r) => r.state !== 'UNOPENED') ?? ordered[ordered.length - 1] ?? null;
 }
 
 export function phaseOf(state: RoundState | null | undefined): Phase {
@@ -35,6 +32,7 @@ export function phaseOf(state: RoundState | null | undefined): Phase {
       return 'paused';
     case 'SETTLING_SUCCESS':
     case 'SETTLING_FAILURE':
+      return 'settling';
     case 'SUCCEEDED':
     case 'FAILED_PERMANENT':
     case 'TECHNICAL_ABORTED':
@@ -86,6 +84,7 @@ export interface BoardView {
   observationStart: number | null;
   observationEnd: number | null;
   totalStakeRaw: string;
+  totalWeightRaw: string;
   stakerCount: number;
   rewardBudgetRaw: string;
   burnedRaw: string | null;
@@ -98,6 +97,8 @@ export function deriveBoard(
   detail: RoundDetail | null,
   rounds: RoundSummary[] | null | undefined = null,
 ): BoardView {
+  // A previous round's response must never override the newly selected round.
+  detail = detail?.roundId === focus?.roundId ? detail : null;
   const state = detail?.state ?? focus?.state ?? null;
   const phase = phaseOf(state);
   const roundId = detail?.roundId ?? focus?.roundId ?? null;
@@ -118,9 +119,9 @@ export function deriveBoard(
   const nextRound = roundById(rounds, nextRoundId);
   const priceUsdE8 = detail?.priceUsdE8 ?? null;
   const result: BoardView['result'] =
-    state === 'SUCCEEDED' || state === 'SETTLING_SUCCESS'
+    state === 'SUCCEEDED'
       ? 'win'
-      : state === 'FAILED_PERMANENT' || state === 'SETTLING_FAILURE'
+      : state === 'FAILED_PERMANENT'
         ? 'lose'
         : state === 'TECHNICAL_ABORTED'
           ? 'abort'
@@ -156,6 +157,7 @@ export function deriveBoard(
     observationStart: detail?.observationStart ?? focus?.observationStart ?? null,
     observationEnd: detail?.observationEnd ?? focus?.observationEnd ?? null,
     totalStakeRaw,
+    totalWeightRaw: detail?.totalWeightRaw ?? focus?.totalWeightRaw ?? '0',
     stakerCount: detail?.stakerCount ?? focus?.stakerCount ?? 0,
     rewardBudgetRaw: detail?.rewardBudgetRaw ?? focus?.rewardBudgetRaw ?? cfg?.roundRewardRaw ?? '0',
     burnedRaw: detail?.burnedRaw ?? focus?.burnedRaw ?? null,
@@ -163,17 +165,19 @@ export function deriveBoard(
   };
 }
 
-export type LadderLetter = 'S' | 'F' | 'O' | 'K' | 'U';
+export type LadderLetter = 'S' | 'F' | 'O' | 'K' | 'U' | 'P' | 'A';
 
 export function ladderLetter(state: RoundState | null | undefined): LadderLetter {
   switch (state) {
     case 'SUCCEEDED':
-    case 'SETTLING_SUCCESS':
       return 'S';
-    case 'FAILED_PERMANENT':
+    case 'SETTLING_SUCCESS':
     case 'SETTLING_FAILURE':
-    case 'TECHNICAL_ABORTED':
+      return 'P';
+    case 'FAILED_PERMANENT':
       return 'F';
+    case 'TECHNICAL_ABORTED':
+      return 'A';
     case 'OBSERVING':
     case 'ORACLE_PAUSED':
       return 'O';
@@ -194,7 +198,8 @@ export function candleHour(periodStart: number | null | undefined): string {
 }
 
 export function fallbackCandleHour(index: number, phase: Phase): string {
-  if (phase === 'stake' || phase === 'unopened') return pad2((8 + 4 * index) % 24) + ':00';
+  void index;
+  void phase;
   return '';
 }
 
@@ -206,7 +211,7 @@ export function clockText(seconds: number | null | undefined): string {
   const h = Math.floor((total % 86400) / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  if (d > 0) return d + '天 ' + pad2(h) + ':' + pad2(m) + ':' + pad2(s);
+  if (d > 0) return d + 'd ' + pad2(h) + ':' + pad2(m) + ':' + pad2(s);
   return pad2(h) + ':' + pad2(m) + ':' + pad2(s);
 }
 

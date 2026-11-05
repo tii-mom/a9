@@ -18,7 +18,8 @@ import {
   stateTone,
   TIMING_FALLBACKS,
 } from './common';
-import { Empty, ErrorState, Loading, PageHead, StatePill, Stat } from './ui';
+import { Empty, Loading, PageHead, StatePill, Stat } from './ui';
+import { QueryNotice } from '../chain/QueryNotice';
 import './pages.css';
 
 interface LbDict extends Record<string, unknown> {
@@ -170,14 +171,9 @@ function BoardSection({
           <h3>{d.tableTitle}</h3>
           <span className="ap-muted mono-sm">{d.tableDesc}</span>
         </div>
-        {query.error ? (
-          <div className="ap-pad">
-            <ErrorState error={query.error} onRetry={query.refresh} />
-          </div>
-        ) : query.loading && !query.data ? (
-          <div className="ap-pad">
-            <Loading rows={4} />
-          </div>
+        <div className="ap-pad"><QueryNotice query={query} lang={lang} label={d.tableTitle} /></div>
+        {!query.data ? (
+          query.loading && !query.error ? <div className="ap-pad"><Loading rows={4} /></div> : null
         ) : rows.length === 0 ? (
           <div className="ap-pad">
             <Empty title={d.emptyTitle} desc={d.emptyDesc} />
@@ -263,7 +259,7 @@ export default function LeaderboardPage() {
   return (
     <>
       <SiteHeader />
-      <main className="wrap page ap-page">
+      <main id="main-content" tabIndex={-1} className="wrap page ap-page">
         <PageHead
           lbl={d.lbl}
           title={d.title}
@@ -291,10 +287,10 @@ export default function LeaderboardPage() {
             <h2>{c.round}</h2>
             <p className="ap-sec-desc">{d.selectorHint}</p>
           </div>
-          {roundsQuery.error ? (
-            <ErrorState error={roundsQuery.error} onRetry={roundsQuery.refresh} />
-          ) : rounds.length === 0 ? (
-            <Loading rows={2} />
+          <QueryNotice query={roundsQuery} lang={lang} label={c.round} />
+          <QueryNotice query={configQuery} lang={lang} label={lang === 'zh' ? '规则配置' : 'Rules'} />
+          {roundsQuery.error && !roundsQuery.data ? null : rounds.length === 0 ? (
+            roundsQuery.data ? <Empty title={d.noRound} desc={d.emptyDesc} /> : <Loading rows={2} />
           ) : (
             <div className="ap-rounds" role="group" aria-label={d.selectorHint}>
               {rounds.map((item) => {
@@ -365,7 +361,7 @@ export default function LeaderboardPage() {
         ) : null}
 
         {selected === null ? (
-          <div className="ap-sec">{roundsQuery.error ? <ErrorState error={roundsQuery.error} onRetry={roundsQuery.refresh} /> : <Loading rows={3} />}</div>
+          <div className="ap-sec">{!roundsQuery.data && !roundsQuery.error ? <Loading rows={3} /> : null}</div>
         ) : !round ? (
           <Empty title={d.noRound} desc={d.emptyDesc} />
         ) : (

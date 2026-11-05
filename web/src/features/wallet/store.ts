@@ -244,7 +244,7 @@ function handleTonModalState(modal: TonModalStateLike): void {
   // 连接成功后 modal 也会 close，给 SDK 一点时间先触发 onStatusChange
   window.setTimeout(() => {
     if (state.status === 'connecting' && !(tonUI && tonUI.connected)) {
-      void fallbackToDemo('cancelled');
+      stopConnecting('cancelled');
     }
   }, 350);
 }
@@ -300,13 +300,10 @@ function adoptDemo(address: string, notice: string | null = null): void {
   });
 }
 
-async function fallbackToDemo(reason: 'cancelled' | 'unavailable' | 'failed'): Promise<void> {
-  try {
-    const address = await resolveDemoAddress();
-    adoptDemo(address, reason);
-  } catch {
-    adoptDemo(generateDemoAddress(), reason);
-  }
+function stopConnecting(reason: 'cancelled' | 'unavailable' | 'failed'): void {
+  clearWallet();
+  remove(MODE_KEY);
+  patch({ notice: reason, error: reason === 'cancelled' ? null : reason });
 }
 
 function clearWallet(): void {
@@ -366,7 +363,7 @@ async function doRefreshBalances(): Promise<void> {
   } catch {
     /* 后端不可用时不阻塞钱包 UI */
   }
-  if (state.address !== address) return; // 期间已切换地址，丢弃旧结果
+  if (state.address !== address || state.network !== network || state.mode !== 'ton' || state.status !== 'connected') return; // Discard responses from an old wallet or network.
   patch({ tonBalance: ton, fuseBalance: fuse });
 }
 
@@ -406,7 +403,7 @@ export function ensureWalletInit(): Promise<void> {
   return initPromise;
 }
 
-/** 连接钱包：优先 TON Connect（只读）；不可用/用户取消/失败 → 降级演示钱包。 */
+/** 连接 TON 钱包；取消或失败保持未连接，演示身份必须由用户主动选择。 */
 export function connect(): void {
   void (async () => {
     void ensureWalletInit();
@@ -415,13 +412,13 @@ export function connect(): void {
     if (!tonUI) tonLoad = null; // 允许重试
     const ui = await ensureTon();
     if (!ui) {
-      await fallbackToDemo('unavailable');
+      stopConnecting('unavailable');
       return;
     }
     try {
       await ui.openModal();
     } catch {
-      await fallbackToDemo('failed');
+      stopConnecting('failed');
     }
   })();
 }
@@ -457,8 +454,8 @@ export function disconnect(): void {
 }
 
 /** 重新拉取余额（TON 走 toncenter 只读查询，失败显示 —）。 */
-export function refreshBalances(): void {
-  void doRefreshBalances();
+export function refreshBalances(): Promise<void> {
+  return doRefreshBalances();
 }
 /* ------------------------------------------------------------------ */
 /* 链上交易（后续阶段新增，不影响既有只读契约）                         */

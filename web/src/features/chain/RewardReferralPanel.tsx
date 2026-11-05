@@ -37,6 +37,8 @@ import {
 import { TxStatusView } from './TxStatus';
 import { useChainTx } from './useChainTx';
 import type { WalletContext } from './transactions';
+import { ActionConfirm } from './ActionConfirm';
+import { QueryNotice } from './QueryNotice';
 import './chain.css';
 
 function fill(template: string, vars: Record<string, string | number>): string {
@@ -77,7 +79,7 @@ export interface RewardReferralPanelProps {
 export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps) {
   const { lang } = useLang();
   const d = CHAIN_I18N[lang];
-  const { chain } = useChainConfig();
+  const { chain, raw, error: configError } = useChainConfig();
   const walletStore = useWalletStore();
   const decimals = chain.tokenDecimals;
 
@@ -89,7 +91,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
     () => ({ address, demo, tonBalance: walletStore.tonBalance }),
     [address, demo, walletStore.tonBalance],
   );
-  const { state: txState, busy, submitRewardAction, submitSetReferrer, submitClaimUnlocked, reset } = useChainTx({
+  const { state: txState, busy, submitRewardAction, submitSetReferrer, submitClaimUnlocked, recheck, reset } = useChainTx({
     chain,
     wallet: walletContext,
     onSettled: () => meQuery.refresh(),
@@ -100,6 +102,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
   const [demoClaimedUnlock, setDemoClaimedUnlock] = useState(false);
   const [demoReferrer, setDemoReferrer] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<{ kind: 'roll'; row: RewardRowView } | { kind: 'early'; row: RewardRowView } | { kind: 'bind'; referrer: string } | { kind: 'unlock'; amountRaw: string } | null>(null);
   const [copied, setCopied] = useState<'code' | 'link' | null>(null);
   const [refInput, setRefInput] = useState('');
   const [pendingReferrer, setPendingReferrer] = useState<string | null>(() => readPendingReferrer());
@@ -159,8 +162,9 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
   const testnet = chain.network === 'testnet';
   const selfRaw = useMemo(() => parseInviteCode(address, testnet)?.raw ?? null, [address, testnet]);
 
-  const chained = chain.configured && !demo && walletStore.mode === 'ton';
-  const canAct = !busy;
+  const chained = chain.configured && raw?.dataSource === 'chain' && !configError && !demo && walletStore.mode === 'ton';
+  const networkMismatch = chained && walletStore.network !== chain.network;
+  const canAct = !busy && !networkMismatch && !!me && !!roundsQuery.data && !meQuery.error && !roundsQuery.error && (demo || chained);
   const unlockActive = unlock.active || demoClaimedUnlock;
   const unlockPct = (unlock.progressBps / 100).toFixed(1);
 
@@ -174,7 +178,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
     }
   }, []);
 
-  const handleRoll = useCallback(
+  const executeRoll = useCallback(
     (row: RewardRowView) => {
       if (chained) {
         void submitRewardAction({ kind: 'rollReward', roundId: row.roundId });
@@ -186,7 +190,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
     [chained, d.rewardDemoNote, submitRewardAction],
   );
 
-  const handleEarly = useCallback(
+  const executeEarly = useCallback(
     (row: RewardRowView) => {
       if (chained) {
         void submitRewardAction({ kind: 'claimRewardEarly', roundId: row.roundId });
@@ -198,7 +202,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
     [chained, d.rewardDemoNote, submitRewardAction],
   );
 
-  const handleBind = useCallback(
+  const executeBind = useCallback(
     (candidate: string) => {
       const parsed = parseInviteCode(candidate, testnet);
       if (!parsed) {
@@ -222,7 +226,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
     [chained, d.bindInvalid, d.bindSelf, d.rewardDemoBound, selfRaw, submitSetReferrer, testnet],
   );
 
-  const handleUnlockClaim = useCallback(() => {
+  const executeUnlockClaim = useCallback(() => {
     if (chained) {
       void submitClaimUnlocked();
       return;
@@ -231,7 +235,30 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
     setNotice(d.claimUnlockedDemo);
   }, [chained, d.claimUnlockedDemo, submitClaimUnlocked]);
 
-  const bindDisabled = busy || (!!boundReferrer && !demoReferrer);
+  const bindDisabled = !canAct || !!boundReferrer || (me?.stakes.length ?? 0) > 0;
+  const handleRoll = (row: RewardRowView) => { if (canAct) setConfirmation({ kind: 'roll', row }); };
+  const handleEarly = (row: RewardRowView) => { if (canAct) setConfirmation({ kind: 'early', row }); };
+  const handleBind = (candidate: string) => {
+    if (bindDisabled) return;
+    const parsed = parseInviteCode(candidate, testnet);
+    if (!parsed) { setNotice(d.bindInvalid); return; }
+    if (selfRaw && parsed.raw === selfRaw) { setNotice(d.bindSelf); return; }
+    setConfirmation({ kind: 'bind', referrer: parsed.friendly });
+  };
+  const handleUnlockClaim = () => { if (canAct) setConfirmation({ kind: 'unlock', amountRaw: unlock.claimableRaw }); };
+  const confirmAction = () => {
+    if (!confirmation || !canAct) return;
+    const action = confirmation;
+    setConfirmation(null);
+    if (action.kind === 'roll' || action.kind === 'early') {
+      const current = rows.find((row) => row.roundId === action.row.roundId);
+      if (!current || current.state !== 'PENDING' || current.amountRaw !== action.row.amountRaw || current.rollableRaw !== action.row.rollableRaw || current.earlyAmountRaw !== action.row.earlyAmountRaw) { setNotice(lang === 'zh' ? '权益已更新，请重新检查后选择。' : 'Rewards changed. Review the updated amounts.'); return; }
+      if (action.kind === 'roll') executeRoll(current); else executeEarly(current);
+    } else if (action.kind === 'bind') {
+      if (!bindDisabled) executeBind(action.referrer);
+    } else if (action.amountRaw === unlock.claimableRaw) executeUnlockClaim();
+    else setNotice(lang === 'zh' ? '金额已更新，请重新检查。' : 'Amount changed. Please review again.');
+  };
 
   return (
     <>
@@ -244,10 +271,13 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
           <div className="reward-warning" role="note">
             {d.rollWarning}
           </div>
-          {chained ? null : <p className="note chain-dim">{d.rewardDemoNote}</p>}
+          {demo ? <p className="note chain-dim">{d.rewardDemoNote}</p> : !chained ? <p className="chain-warn">{lang === 'zh' ? '当前仅展示数据；真实链上操作暂未启用。不会模拟执行。' : 'Data display only. Live transactions are unavailable; actions are not simulated.'}</p> : null}
+          {networkMismatch ? <div className="chain-warn">{d.walletNetMismatch}</div> : null}
+          <QueryNotice query={meQuery} lang={lang} label={lang === 'zh' ? '奖励与邀请' : 'Rewards & referrals'} />
+          <QueryNotice query={roundsQuery} lang={lang} label={lang === 'zh' ? '轮次' : 'Rounds'} />
           {chain.configured && !chained ? <p className="note chain-dim">{d.rewardWalletNote}</p> : null}
 
-          {rows.length === 0 ? (
+          {!me ? null : rows.length === 0 ? (
             <div className="chain-empty">
               {d.rewardEmpty} — {d.rewardEmptyDesc}
             </div>
@@ -328,7 +358,7 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
             </div>
             {unlockActive ? (
               <>
-                <div className="reward-bar" role="progressbar" aria-valuenow={Number(unlockPct)} aria-valuemin={0} aria-valuemax={100}>
+                <div className="reward-bar" role="progressbar" aria-label={d.unlockTitle} aria-valuenow={Number(unlockPct)} aria-valuemin={0} aria-valuemax={100}>
                   <i style={{ width: unlockPct + '%' }} />
                 </div>
                 <div className="reward-unlock-meta">
@@ -355,10 +385,27 @@ export function RewardReferralPanel({ address, demo }: RewardReferralPanelProps)
             </div>
           </div>
 
-          <TxStatusView state={txState} lang={lang} onRetry={undefined} onDismiss={reset} />
-          {notice ? <p className="note chain-dim">{notice}</p> : null}
+          <TxStatusView state={txState} lang={lang} onRetry={undefined} onRecheck={() => void recheck()} onDismiss={reset} />
+          {notice ? <p className="note chain-dim" role="status">{notice}</p> : null}
         </div>
       </section>
+
+      {confirmation ? <ActionConfirm confirmLabel={demo ? (lang === 'zh' ? '确认演示' : 'Confirm simulation') : undefined} title={confirmation.kind === 'roll' ? d.optRoll : confirmation.kind === 'early' ? d.optEarly : confirmation.kind === 'bind' ? d.bindAction : d.unlockAction} lang={lang} disabled={!canAct || (confirmation.kind === 'bind' && bindDisabled)} onCancel={() => setConfirmation(null)} onConfirm={confirmAction}>
+        <p>{demo ? (lang === 'zh' ? '演示操作 · 不签名、不涉及真实资产' : 'Demo simulation · no signature or real assets') : chain.network}</p>
+        {confirmation.kind === 'roll' || confirmation.kind === 'early' ? <>
+          <p>R#{confirmation.row.roundId} · {lang === 'zh' ? '奖励总额' : 'Total reward'} {formatRawAmount(confirmation.row.amountRaw, decimals, decimals)} A9</p>
+          <dl className="chain-confirm-values">
+            <div><dt>{lang === 'zh' ? '立即到账' : 'Paid now'}</dt><dd>{confirmation.kind === 'early' ? formatRawAmount(confirmation.row.earlyAmountRaw, decimals, decimals) : '0'} A9</dd></div>
+            <div><dt>{lang === 'zh' ? '继续锁定' : 'Remains locked'}</dt><dd>{formatRawAmount(BigInt(confirmation.row.amountRaw) - (confirmation.kind === 'early' ? BigInt(confirmation.row.earlyAmountRaw) : BigInt(confirmation.row.rollableRaw)), decimals, decimals)} A9</dd></div>
+            {confirmation.kind === 'roll' ? <div><dt>{lang === 'zh' ? '投入下一轮（有亏损风险）' : 'Rolled into next round (at risk)'}</dt><dd>{formatRawAmount(confirmation.row.rollableRaw, decimals, decimals)} A9</dd></div> : null}
+          </dl>
+          <p>{confirmation.kind === 'early' ? (lang === 'zh' ? '确认后不可改选滚存。50%奖励立即领取，剩余50%进入R10结束后12期解锁池，每期30天。' : 'This choice cannot be reversed or changed to roll. Receive 50% now; the other 50% unlocks in 12 periods of 30 days after R10.') : d.rollWarning}</p>
+        </> : confirmation.kind === 'bind' ? <>
+          <p>{lang === 'zh' ? '将永久绑定以下邀请人；绑定后不可更改。只能在首次质押前绑定。' : 'Permanently bind the referrer below. This cannot be changed and must happen before your first stake.'}</p>
+          <code>{confirmation.referrer}</code>
+        </> : <p>{lang === 'zh' ? '本次领取已解锁金额' : 'Unlocked amount to claim'}: {formatRawAmount(confirmation.amountRaw, decimals, decimals)} A9</p>}
+        {!demo ? <p>{lang === 'zh' ? '金额为接口估算，以合约执行为准；gas以钱包确认为准。' : 'Amounts are API estimates; contract execution is authoritative. Your wallet shows gas.'}</p> : null}
+      </ActionConfirm> : null}
 
       <section className="panel chain-panel referral-panel">
         <div className="ap-panel-h">
