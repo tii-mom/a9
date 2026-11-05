@@ -66,8 +66,8 @@ export function verifyRegistryStructure(registry) {
 export function verifyFundingPlan(params, options = {}) {
   const all = Boolean(options.all);
   const plan = [
-    { kind: 'roundRewards', label: '奖励金库（70 亿）', recipientKey: 'rewardVault', amountRaw: params.rounds.rewardPoolRaw, always: true },
-    { kind: 'team', label: 'TeamVault（12 亿）', recipientKey: 'teamVault', amountRaw: params.rounds.teamPoolRaw, always: true },
+    { kind: 'roundRewards', label: '奖励金库（70 亿，RC Jetton Wallet）', recipientKey: 'roundControllerJettonWallet', amountRaw: params.rounds.rewardPoolRaw, always: true },
+    { kind: 'team', label: 'TeamVault（12 亿）', recipientKey: 'teamVaultJettonWallet', amountRaw: params.rounds.teamPoolRaw, always: true },
     { kind: 'marketing', label: '营销钱包（5 亿）', recipientKey: 'marketingWallet', amountRaw: params.supply.allocations.marketing.raw, always: false },
     { kind: 'liquidity', label: '流动性钱包（5 亿）', recipientKey: 'liquidityWallet', amountRaw: params.supply.allocations.liquidity.raw, always: false },
     { kind: 'internalSale', label: '团队内盘管理钱包（8 亿）', recipientKey: 'teamInternalWallet', amountRaw: params.supply.allocations.internalSale.raw, always: false },

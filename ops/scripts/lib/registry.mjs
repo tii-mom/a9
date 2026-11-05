@@ -11,10 +11,9 @@ export const CONTRACT_KEYS = [
   'teamVault',
   'teamVaultJettonWallet',
   'roundController',
-  'stakingVault',
-  'stakingVaultJettonWallet',
-  'rewardVault',
-  'rewardVaultJettonWallet',
+  // V6.1 实现（contracts/README §3）：RC 只有一个 Jetton Wallet，同时托管质押本金 + 每轮 7 亿奖励；
+  // 不存在独立的 StakingVault / RewardVault 部署地址。
+  'roundControllerJettonWallet',
   'oracleAdapter',
 ];
 

@@ -153,7 +153,12 @@ export function validateParams(params) {
   const limits = p.stakeLimits;
   check(asBigInt(limits.minStakeTokens) === 10000n, '单笔最低质押必须为 10,000 A9');
   check(asBigInt(limits.minStakeRaw) === asBigInt(limits.minStakeTokens) * 10n ** 9n, 'minStakeRaw 不一致');
-  check(Number(limits.maxStakePerAddressBps) === 1000, '单地址上限必须为 10%（1000 bps）');
+  check(Number(limits.maxStakePerAddressBps) === 1000, '单地址上限 bps 必须为 1000');
+  check(
+    asBigInt(limits.maxStakePerAddressRaw) === 20000000000000000n,
+    '单地址固定硬顶必须为 20,000,000 A9（contracts/README §9.1 裁决）'
+  );
+  check(Number(limits.maxStakePerAddressTokens) === 20000000, 'maxStakePerAddressTokens 必须为 20,000,000');
   check(asBigInt(limits.maxTotalStakeTokens) === 200000000n, '本轮总质押上限必须为 2 亿 A9');
   check(asBigInt(limits.maxTotalStakeRaw) === asBigInt(limits.maxTotalStakeTokens) * 10n ** 9n, 'maxTotalStakeRaw 不一致');
   check(limits.cancelStakeAllowed === false, '不允许取消质押');
@@ -198,6 +203,8 @@ export function validateParams(params) {
 
   if (p.toolchain.pinned === false) warnings.push('工具链未 pin 版本：执行真实部署前必须锁定 Acton/Tolk 版本并回填 toolchain.pinned=true');
   if (p.toolchain.pinned === true && !p.toolchain.pinnedVersion) warnings.push('toolchain.pinnedVersion 为空：请记录实际 Acton/Tolk 版本');
+  if (Number(p.tonBalances.roundControllerMinTon) < 20) warnings.push('RC TON 余额目标低于 contracts/README 建议的 20 TON');
+  if (Number(p.tonBalances.teamVaultMinTon) < 10) warnings.push('TeamVault TON 余额目标低于 contracts/README 建议的 10 TON');
   if (Number(p.price.priceMultiplier) === 2) warnings.push('2× 已定档（D-33）：docs/13 的 EV 负值数据保留作为风险披露');
 
   return { errors, warnings };

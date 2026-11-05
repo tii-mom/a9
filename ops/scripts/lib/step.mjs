@@ -13,7 +13,9 @@ const DEP_TO_CONTRACT = {
   teamVault: 'teamVault',
   roundController: 'roundController',
   params: 'roundController',
-  roles: 'roundController',
+  jettonWallets: 'roundControllerJettonWallet',
+  roles: 'teamVault',
+  tonGas: 'roundController',
   funding: 'teamVault',
   register: 'roundController',
 };
