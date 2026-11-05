@@ -61,7 +61,7 @@ STAKING_CLOSED
    v
 OBSERVING
    |                         |
-   | 有效18根，达标>=12        | 有效18根，达标<=6
+   | 有效18根，达标>=12        | 有效18根，达标<=11（18 根齐备即判定，无中间态）
    v                         v
 SETTLING_SUCCESS       SETTLING_FAILURE
    |                         |
