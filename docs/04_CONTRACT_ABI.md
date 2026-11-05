@@ -375,5 +375,5 @@ RoundController 中实现要点：`ClaimRecord[roundId][owner][type] = claimed`�
 - **奖励领取确定 pull claim（D-25）**：新增 `ClaimAll`（0x5254000E）与 `get_claimable_all(owner)`；单次最多遍历 10 轮、逐轮幂等、合并为一笔转账、gas 由用户承担。方案 A 不采用。
 - **D-24 已确认不可升级**：RoundController 无升级代理；管理员仅保留开轮/关报名/暂停恢复/触发结算的最小权限。
 - **收款钱包**：团队/营销/流动性均为个人热钱包，地址不对外披露（部署前填入 config，至少向审计/交易所披露）；相应风险登记见 docs/10 §9。
-- **待决策**：报名窗口 72h 下的「现价已超目标价 → 无风险白拿」问题（方案 A/B/C）见 docs/00 §7，尚未定案，当前仍按 `FIXED_LADDER` 运行。
+- **待决策**：报名窗口 72h 下的「现价已超目标价 → 无风险白拿」问题（方案 A / **B+（Lead 推荐）** / C）见 docs/00 §7，尚未定案，当前仍按 `FIXED_LADDER` 运行。
 
