@@ -12,8 +12,8 @@
     "deploy": "npm run build && cd worker && ./node_modules/.bin/wrangler deploy",
     "db:migrate": "cd worker && ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote",
     "db:migrate:local": "cd worker && ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --local",
-    "db:seed": "cd worker && ./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./migrations/seed.sql",
-    "db:seed:local": "cd worker && ./node_modules/.bin/wrangler d1 execute fuse-protocol --local --file=./migrations/seed.sql",
+    "db:seed": "cd worker && ./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql",
+    "db:seed:local": "cd worker && ./node_modules/.bin/wrangler d1 execute fuse-protocol --local --file=./seed/seed.sql",
     "smoke": "node worker/scripts/smoke.mjs"
   }
 }
