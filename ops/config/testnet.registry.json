@@ -1,20 +1,21 @@
 {
   "network": "testnet",
   "chainId": -3,
-  "status": "not_deployed",
+  "status": "deployed_unfunded",
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
-  "createdAt": "2026-11-05T14:13:41.434Z",
-  "updatedAt": "2026-11-05T14:13:41.434Z",
+  "createdAt": "2026-11-05T14:13:41.427Z",
+  "updatedAt": "2026-11-05T15:21:14.646Z",
   "contracts": {
     "jettonMaster": {
-      "address": null,
-      "raw": null,
+      "address": "kQDTfnjo8ESfl5SBvVeOZwil_CFDT8t3-zcUoyNHuzqIfCtq",
+      "raw": "0:d37e78e8f0449f979481bd578e6708a5fc21434fcb77fb3714a32347bb3a887c",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-05T15:11:19.493Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "updatedAt": "2026-11-05T15:14:37.862Z"
     },
     "jettonMasterTreasuryWallet": {
       "address": null,
@@ -22,39 +23,44 @@
       "deployTxHash": null,
       "codeHash": null,
       "deployedAt": null,
-      "note": null
+      "note": "部署消息未落地（uninitialized）；等待 resume 脚本补部署",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "teamVault": {
-      "address": null,
-      "raw": null,
+      "address": "kQBzEOUQNyZRvjJf_R9CIhZfcVmrK_YPOhi0_6_mBTTwGNmI",
+      "raw": "0:7310e510372651be325ffd1f4222165f7159ab2bf60f3a18b4ffafe60534f018",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-05T15:11:19.493Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "teamVaultJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQBz6Xp9ffazwvkgHGBa36XEk6xaVjj0IIc6sfAE38FXrQYo",
+      "raw": "0:73e97a7d7df6b3c2f9201c605adfa5c493ac5a5638f420873ab1f004dfc157ad",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-05T15:11:19.494Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "roundController": {
-      "address": null,
-      "raw": null,
+      "address": "kQBXqfV0WY9h9n2qw0sb5ObfvEc04U5DBEKNiHpD2WdEFxiV",
+      "raw": "0:57a9f574598f61f67daac34b1be4e6dfbc4734e14e4304428d887a43d9674417",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-05T15:11:19.493Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "roundControllerJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQBXvCptv3Ht9-oPUC4Ai0W6V-vxatE1wPa27KHem0XapLi6",
+      "raw": "0:57bc2a6dbf71edf7ea0f502e008b45ba57ebf16ad135c0f6b6eca1de9b45daa4",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-05T15:11:19.494Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "teamWalletJettonWallet": {
       "address": null,
@@ -62,67 +68,53 @@
       "deployTxHash": null,
       "codeHash": null,
       "deployedAt": null,
-      "note": null
+      "note": "部署消息未落地（uninitialized）；等待 resume 脚本补部署",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     },
     "oracleAdapter": {
-      "address": null,
-      "raw": null,
+      "address": "kQDTI-P7JwQj6naQO9gLrRJ_iamF_VAZAxtW2Ber4qTiFymj",
+      "raw": "0:d323e3fb270423ea76903bd80bad127f89a985fd5019031b56d817abe2a4e217",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-05T15:11:19.494Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验",
+      "updatedAt": "2026-11-05T15:14:37.868Z"
     }
   },
   "wallets": {
     "adminOwner": {
-      "address": null,
-      "raw": null,
-      "testnet": null,
-      "public": false,
-      "note": null
+      "address": "kQDfQ68RY7pJ534OiwEt-dXRUmG1A7AajqJupq4hw35vWRuy",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.821Z"
     },
     "treasury": {
-      "address": null,
-      "raw": null,
-      "testnet": null,
-      "public": false,
-      "note": null
+      "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
     },
     "teamWallet": {
-      "address": null,
-      "raw": null,
-      "testnet": null,
-      "public": false,
-      "note": null
+      "address": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
     },
     "marketingWallet": {
-      "address": null,
-      "raw": null,
-      "testnet": null,
-      "public": false,
-      "note": null
+      "address": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
     },
     "liquidityWallet": {
-      "address": null,
-      "raw": null,
-      "testnet": null,
-      "public": false,
-      "note": null
+      "address": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
     },
     "teamInternalWallet": {
-      "address": null,
-      "raw": null,
-      "testnet": null,
-      "public": true,
-      "note": null
+      "address": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
     }
   },
   "bindings": {
-    "teamVaultAcceptsOnly": null,
-    "roundControllerJettonWalletOwner": null,
-    "teamVaultJettonWalletOwner": null,
-    "roundControllerUpgradeable": false,
-    "adminOwnerIsSingleKey": true
+    "teamVaultAcceptsOnly": "kQBXqfV0WY9h9n2qw0sb5ObfvEc04U5DBEKNiHpD2WdEFxiV"
   },
   "funding": [],
   "verification": {
@@ -131,7 +123,5 @@
     "checks": [],
     "digest": null
   },
-  "notes": [
-    "初始登记表：尚未部署。部署时由 10/15/20/30/65/70/50/60 脚本写入地址，60 脚本定稿并生成地址簿。"
-  ]
+  "notes": "2026-11-05 第二次事故：仅 JettonMaster 部署成功；OracleAdapter/TeamVault/RoundController 未激活，已按真实状态回滚。见 ops/records/incident-2026-11-05-deploy-partial-fake-success.md"
 }

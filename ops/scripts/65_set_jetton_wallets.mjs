@@ -7,6 +7,7 @@
  * 测试网唯一推荐路径：15 整体部署 → 65 --query-only（本脚本）→ 70 InitController → 55/50 → 60 → 90。
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { flag } from './lib/cli.mjs';
 import { resolvePath } from './lib/config.mjs';
@@ -83,13 +84,25 @@ let rcWallet = existingRc;
 let tvWallet = existingTv;
 let teamWalletWallet = existingTeam;
 if (execute) {
+  const resolveViaActon = (owner) => {
+    const scriptPath = resolvePath('ops/scripts/tolk/query_one_wallet.tolk');
+    const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton script --manifest-path Acton.toml --net testnet ' + scriptPath + ' ' + jettonMaster + ' ' + owner;
+    const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
+    const match = String(result.stdout || '').match(/JETTON_WALLET=(\S+)/);
+    return match ? match[1] : null;
+  };
   const resolveCanonical = async (owner, label, existing) => {
     const wallet = await findJettonWallet(params, jettonMaster, owner);
-    if (!wallet) throw new Error(label + '：Jetton Master 未返回 canonical Jetton Wallet');
-    if (existing && !addressEquals(existing, wallet.address)) {
-      throw new Error(label + '：登记表地址 ' + existing + ' 与链上 canonical ' + wallet.address + ' 不一致');
+    let resolved = wallet && wallet.address;
+    if (!resolved) {
+      warn(label + '：TON Center v3 未索引，改用 JettonMaster.get_wallet_address 直接查询');
+      resolved = resolveViaActon(owner);
     }
-    return wallet.address;
+    if (!resolved) throw new Error(label + '：Jetton Master 未返回 canonical Jetton Wallet');
+    if (existing && !addressEquals(existing, resolved)) {
+      throw new Error(label + '：登记表地址 ' + existing + ' 与链上 canonical ' + resolved + ' 不一致');
+    }
+    return resolved;
   };
   try {
     rcWallet = await resolveCanonical(roundController, 'RoundController', existingRc);

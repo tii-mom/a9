@@ -31,6 +31,8 @@ export function expectedProtocolConfig(params) {
     roundRewardRaw: params.rounds.roundRewardRaw,
     teamRoundRaw: params.rounds.teamRoundRaw,
     totalSupplyRaw: params.token.totalSupplyRaw,
+    riskDisclosureVersion: Number(params.risk.disclosureVersion),
+    configVersion: Number(params.meta.configVersion),
     initialTier: 1,
     cancelStakeSupported: false,
   };

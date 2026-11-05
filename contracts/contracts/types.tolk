@@ -663,3 +663,111 @@ struct (0x52540108) UnlockClaimed {
     owner: address
     amountRaw: uint128
 }
+
+
+// ===========================================================================
+// OracleAdapter (mainnet M-2): 3/5 ed25519 signed submissions -> RC forwarder.
+// ===========================================================================
+
+struct OracleSignerKeys {
+    s0: uint256
+    s1: uint256
+    s2: uint256
+    s3: uint256
+    s4: uint256
+    threshold: uint8
+}
+
+struct OracleAdapterConfig {
+    admin: address
+    controller: address?
+    chainId: uint32
+    configVersion: uint32
+    signers: Cell<OracleSignersPacked>
+}
+
+// Packed signer keys: inline s0,s1,s2 (768 bits) + one ref cell with s3,s4 + threshold.
+struct OracleSignersPacked {
+    s0: uint256
+    s1: uint256
+    s2: uint256
+    threshold: uint8
+    tail: Cell<OracleSignersTail>
+}
+
+struct OracleSignersTail {
+    s3: uint256
+    s4: uint256
+}
+
+struct OracleAdapterStorage {
+    config: Cell<OracleAdapterConfig>
+    usedMask: map<uint8, uint8>
+    lastCandle: map<uint8, uint8>
+}
+
+struct OracleConfigView {
+    admin: address
+    controller: address?
+    chainId: uint32
+    configVersion: uint32
+    threshold: uint8
+}
+
+struct OracleSignerSetView {
+    s0: uint256
+    s1: uint256
+    s2: uint256
+    s3: uint256
+    s4: uint256
+    threshold: uint8
+}
+
+struct OracleUsedActions {
+    openUsed: bool
+    closeUsed: bool
+    lastCandleIndex: uint8
+}
+
+struct (0x52540021) SetSignerSet {
+    signers: cell
+    threshold: uint8
+    chainId: uint32
+    configVersion: uint32
+}
+
+struct (0x52540022) SetOracleController {
+    controller: address
+}
+
+struct (0x52540023) SetOracleAdmin {
+    admin: address
+}
+
+struct (0x52540024) SubmitSignedOpenRound {
+    roundId: uint8
+    twap24hUsdE8: uint128
+    timestamp: uint64
+    sigCount: uint8
+    sigs: cell
+}
+
+struct (0x52540025) SubmitSignedCloseStaking {
+    roundId: uint8
+    twap1hUsdE8: uint128
+    timestamp: uint64
+    sigCount: uint8
+    sigs: cell
+}
+
+struct (0x52540026) SubmitSignedCandle {
+    roundId: uint8
+    candleIndex: uint8
+    periodStart: uint32
+    periodEnd: uint32
+    twapPriceUsdE8: uint128
+    dataDigest: uint256
+    timestamp: uint64
+    sigCount: uint8
+    sigs: cell
+}

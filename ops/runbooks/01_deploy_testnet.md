@@ -21,7 +21,7 @@ node ops/scripts/deploy_all.mjs
 
 # 2) 真实部署（推荐：整体 deploy-emulation；会部署 Jetton + mint + TV + RC + 绑定）
 export OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name>
-node ops/scripts/15_deploy_contracts.mjs --execute   # acton script scripts/deploy-emulation.tolk --net testnet
+node ops/scripts/15_deploy_contracts.mjs --execute   # acton script --net testnet scripts/deploy-emulation.tolk
 node ops/scripts/65_set_jetton_wallets.mjs --execute --query-only   # 只查询/登记三个 canonical 钱包（整体部署已内置 wiring）
 node ops/scripts/70_bind_roles.mjs --mark-bound-only                # 记录绑定并人工核对（15 已执行 InitController）
 node ops/scripts/40_init_params.mjs --execute --online
@@ -150,7 +150,7 @@ node ops/scripts/00_preflight.mjs
 
 ~~~bash
 node ops/scripts/15_deploy_contracts.mjs --execute
-# 等价：cd contracts && acton script scripts/deploy-emulation.tolk --net testnet
+# 等价：cd contracts && acton script --net testnet scripts/deploy-emulation.tolk
 ~~~
 
 - 顺序：JettonMaster → mint 100 亿（**mint-once：op 0x00000015，金额必须 1e19，同一笔交易内 admin 置 null**，二次 mint 报 MintClosed(75)）→ TeamVault → RoundController → get_wallet_address → SetJettonWallet → **SetJettonWalletCode（RC，0x5254001B）** → **SetTeamWalletJettonWallet（TV，0x5254001C）** → InitController（不带 teamWallet 参数）。
@@ -228,7 +228,7 @@ OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
 
 - contracts/deploy/params.testnet.json 要求 RC ≥20 TON、TV ≥10 TON；每条跨合约指令约 0.05 TON。
 - 余额不足时跨合约消息（release/burn/ack）会失败，轮次卡在 SETTLING。
-- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> acton script scripts/deploy/fund_ton.tolk <toAddress> <amountTon 整数> --net testnet`；amountTon 为整数 TON（20/10），脚本自动加 1 TON 缓冲。
+- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> acton script --net testnet scripts/deploy/fund_ton.tolk <toAddress> <amountTon 整数>`；amountTon 为整数 TON（20/10），脚本自动加 1 TON 缓冲。
 - 本地验证广播：加 OPS_ALLOW_EMULATION=true（不真实上链，可打印 trace hash）；真实网络必须 --net testnet。
 - 地址优先读登记表，缺失时回退 contracts/deploy/{round-controller,team-vault}.addr。
 
@@ -248,12 +248,13 @@ OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
 | 流动性 | 500,000,000 | 流动性热钱包 |
 | 营销 | 500,000,000 | 营销热钱包 |
 
-- TEP-74 转账目标是**接收者的 Jetton Wallet**，脚本会先解析再转；解析失败即终止（避免转错）。
+- TEP-74 转账的链上目标是**接收者的 Jetton Wallet**（由发送方钱包内部用 calcDeployedJettonWallet(owner) 推导）；脚本会先解析并逐笔核对余额。
 - 每笔成功后写 registry.funding，60 会核对五笔是否全部 CONFIRMED。
 - 可分步：先只做奖励 + 团队（不加 --all），确认后再补分配。
 - 流动性：5 亿 A9 全额转 liquidityWallet（不变）；冷启动池用其中 **2 亿 A9 + $232,000 USDT**（同价 $0.00116，占流动性额度 **40%**，剩余 **3 亿 A9** 后续加池）。
-- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> JETTON_MASTER_ADDRESS=<master> acton script scripts/deploy/fund_jetton.tolk <toJettonWallet> <amountRaw> --net testnet`。
-- master 也可由 contracts/deploy/jetton-master.addr 自动提供；toJettonWallet 是目标 Jetton Wallet（不是 owner 合约地址），脚本会先解析再转。
+- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> JETTON_MASTER_ADDRESS=<master> acton script --net testnet scripts/deploy/fund_jetton.tolk <recipientOwner> <amountRaw>`。**位置参数必须是接收 owner（RC/TV/热钱包地址），不是 Jetton Wallet 地址**；传钱包地址会被发送方再次推导成 wallet-of-wallet（2026-11-05 事故根因，见 ops/records/incident-2026-11-05-funding-misallocation.md）。
+- 首次向未部署的 Jetton Wallet 转账会由发送方附带 state init 部署该钱包；建议第一笔先用 1 raw 小额试探，确认 `get_wallet_data` 到账后再发全额。
+- master 也可由 contracts/deploy/jetton-master.addr 自动提供；脚本会校验 signer 的 A9 余额并在每笔后暂停核对接收钱包余额。
 - 广播前脚本校验 signer 的 A9 余额，不足会可读报错并 exit 1；每笔成功后写 registry.funding。
 
 ### Step 60 — 登记表定稿 + 地址簿
@@ -274,7 +275,7 @@ OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name> node ops/scri
 
 - contracts/README §3.2：R1 无 PREVIEW，OpenRound 交易中 stakeOpenAt = now，并锁定 target = max(P0×2^tier, 2×TWAP24h)。
 - 开轮前确认：TeamVault 绑定、SetJettonWallet、TON gas、奖励池/团队池已注资、公告已发、值班已就位。
-- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> ROUND_CONTROLLER_ADDRESS=<rc> acton script scripts/deploy/admin_op.tolk open-round 1 <twap24h> --net testnet`。
+- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> ROUND_CONTROLLER_ADDRESS=<rc> acton script --net testnet scripts/deploy/admin_op.tolk open-round 1 <twap24h>`。
 - op 映射：open-round(extra=twap24h)、close-staking(extra=twap1h)、start-observation(roundId)、finalize-round(roundId)、pause-oracle(extra=reason)、resume-oracle、abort-technical、retry-pending(roundId，无权限/任何人可触发，消息 value ≥0.3 TON)；set-jetton-wallet / set-jetton-wallet-code / set-team-wallet-jetton-wallet / init-controller 分别由 65/70 脚本调用（A9_TARGET_ADDRESS+A9_JETTON_WALLET_ADDRESS、A9_JETTON_WALLET_CODE_BOC64、A9_TEAM_WALLET_JETTON_WALLET、TEAM_VAULT_ADDRESS+A9_CONTROLLER_ADDRESS）。
 - RC 地址优先读登记表，缺失时回退 contracts/deploy/round-controller.addr。
 - 开轮后核对 TargetPriceSet 事件与 RoundView 时间字段。
@@ -356,6 +357,22 @@ ops/config/testnet.addresses.template.json   // 人工填写模板（说明用�
 9. **P0 修复 ReturnExcessesBack**：真实 TEP-74 退款由接收方钱包发出；RC 必须 SetJettonWalletCode(0x5254001B) 存 JettonWallet code，TV 必须通过 SetTeamWalletJettonWallet(0x5254001C) 存 teamWallet canonical 钱包；verify_deployment 用 get_jetton_wallet_code / get_team_wallet_jetton_wallet 硬校验，并检查 pendingQueryId 全 0。
 
 ---
+
+## 8.2 注资事故复盘与防呆检查清单（2026-11-05）
+
+2026-11-05 测试网注资时，70 亿 A9 被转入一个 owner 为 RC Jetton Wallet 地址的错误钱包（不可找回）。根因是 fund_jetton 的位置参数是 **接收 owner**，而 ops 把 **目标 Jetton Wallet 地址** 传了进去，发送方钱包于是又推导了一次（wallet-of-wallet）。完整记录见 ops/records/incident-2026-11-05-funding-misallocation.md。
+
+**注资前必须逐项打印并人工核对（四者必须一致）**：
+1. 接收 owner 地址（RC / TeamVault / 热钱包）
+2. 接收 owner → expected wallet（fund_jetton 脚本打印的推导值）
+3. JettonMaster.get_wallet_address(owner) 的链上返回值
+4. ops registry / ops/records/funding-recipients.json 里登记的 canonical wallet
+
+**强制流程**：
+- 第一笔必须 ≤ 1 A9 小额试探；链上确认 `get_wallet_data(dest).jettonBalance` 确实 +1 A9 后，才允许发大额。
+- 每笔转账后独立查询 `get_wallet_data(dest)`，与「转前余额 + 金额」精确比对；不一致立即停止。
+- **dry-run 不解析发送方推导，不能替代小额实盘验证**。
+- 真实注资命令必须带 `--probe`：`OPS_EXECUTE=1 OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all --probe`。
 
 ## 9. 回滚与重建策略（RC 不可升级）
 

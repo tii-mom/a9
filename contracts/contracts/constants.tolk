@@ -30,6 +30,19 @@ const OP_CLAIM_UNLOCKED: uint32 = 0x5254001A;
 // TEP-74 wallet -> owner excess return, also used as burn/claim completion signal
 const OP_RETURN_EXCESSES: uint32 = 0xd53276db;
 
+// OracleAdapter (mainnet M-2): 3/5 ed25519 signed submissions.
+const OP_SET_SIGNER_SET: uint32 = 0x52540021;
+const OP_SET_ORACLE_CONTROLLER: uint32 = 0x52540022;
+const OP_SET_ORACLE_ADMIN: uint32 = 0x52540023;
+const OP_SUBMIT_SIGNED_OPEN: uint32 = 0x52540024;
+const OP_SUBMIT_SIGNED_CLOSE: uint32 = 0x52540025;
+const OP_SUBMIT_SIGNED_CANDLE: uint32 = 0x52540026;
+
+const SIGNED_ACTION_OPEN: uint8 = 1;
+const SIGNED_ACTION_CLOSE: uint8 = 2;
+const SIGNED_ACTION_CANDLE: uint8 = 3;
+const SIGNED_TIMESTAMP_WINDOW: uint32 = 300;
+
 // Reserved (phase-2 OracleAdapter). RoundController has no handler for this yet;
 // only the ops dry-run script (scripts/deploy/admin_op.tolk) builds it for planning.
 const OP_ORACLE_CANDLE_VERIFIED: uint32 = 0x52540004;
@@ -185,4 +198,14 @@ enum Errors {
     UnknownBounce = 271,
     CounterOverflow = 272,
     BadBurnQuery = 273,
+
+    // OracleAdapter
+    NotEnoughSignatures = 300,
+    StaleSignature = 301,
+    ReplayAction = 302,
+    BadCandleOrder = 303,
+    BadSignerIndex = 304,
+    BadSignature = 305,
+    VersionTooOld = 306,
+    BadThreshold = 307,
 }

@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /** 90 — 测试网部署验收：离线不变量 + 链上只读核对（--offline 跳过网络）。 */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress, resolveWalletAddress } from './lib/step.mjs';
-import { findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, parseAddress, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { addressFromStackItem, findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, parseAddress, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { CHECK_STATUS, check, verifyAllocationInvariant, verifyFundingPlan, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, summary } from './lib/log.mjs';
@@ -42,6 +43,13 @@ function hexFromCodeHashField(info) {
     const hex = Buffer.from(text, 'base64').toString('hex');
     return /^[0-9a-fA-F]{64}$/.test(hex) ? hex.toLowerCase() : null;
   } catch { return null; }
+}
+
+function codeHashViaActon(address) {
+  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton rpc info ' + address + ' --net testnet';
+  const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
+  const match = String(result.stdout || '').match(/Code Hash:\s+0x([0-9a-fA-F]{64})/);
+  return match ? match[1].toLowerCase() : null;
 }
 
 function expectedJettonWalletCodeHash() {
@@ -92,16 +100,8 @@ if (!offline) {
   }
 
   const addressHashFromSlice = (item) => {
-    if (!item || !item.value) return null;
-    try {
-      const bytes = Buffer.from(String(item.value), 'base64');
-      let bits = '';
-      for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
-      if (bits.length < 267 || bits.slice(0, 2) !== '10') return null;
-      let hex = '';
-      for (let offset = 0; offset < 256; offset += 4) hex += parseInt(bits.slice(11 + offset, 15 + offset), 2).toString(16);
-      return hex;
-    } catch { return null; }
+    const parsed = addressFromStackItem(item);
+    return parsed ? parsed.hashHex : null;
   };
   const tryGetMethod = async (address, methods) => {
     for (const method of methods) {
@@ -134,7 +134,7 @@ if (!offline) {
     if (!address) continue;
     await netCheck(key + '.code_hash', async () => {
       const info = await getAddressInformation(params, address);
-      const actual = hexFromCodeHashField(info);
+      const actual = hexFromCodeHashField(info) || codeHashViaActon(address);
       const expected = loadBuildCodeHash(buildName);
       add(check(key + '.code_hash', actual && expected && actual === expected ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, '链上 ' + (actual || '?') + ' vs build ' + (expected || '?')));
     });

@@ -124,10 +124,14 @@ fun buildFundTon(to: address, amountNano: coins): OutMessage {
     });
 }
 
+// IMPORTANT (TEP-74): transferRecipient MUST be the jetton OWNER address, not the
+// owner's Jetton Wallet address. The source wallet derives the destination wallet
+// via calcDeployedJettonWallet(transferRecipient) internally. Passing a jetton
+// wallet address here creates a wallet owned by that wallet contract (unspendable).
 fun buildFundJetton(
     sourceWallet: address,
     sourceOwner: address,
-    toJettonWallet: address,
+    toOwner: address,
     amountRaw: coins,
 ): OutMessage {
     return createMessage({
@@ -137,7 +141,7 @@ fun buildFundJetton(
         body: AskToTransfer {
             queryId: 0,
             jettonAmount: amountRaw,
-            transferRecipient: toJettonWallet,
+            transferRecipient: toOwner,
             sendExcessesTo: sourceOwner,
             customPayload: null,
             forwardTonAmount: 0,

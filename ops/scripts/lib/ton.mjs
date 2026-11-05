@@ -110,11 +110,19 @@ function toncenterApiKey(params) {
   return envName ? process.env[envName] || null : null;
 }
 
+let lastToncenterCallAt = 0;
+async function throttleToncenter(minIntervalMs = 1100) {
+  const wait = Math.max(0, minIntervalMs - (Date.now() - lastToncenterCallAt));
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastToncenterCallAt = Date.now();
+}
+
 async function httpJson(url, options = {}) {
   const headers = { 'content-type': 'application/json', ...(options.headers || {}) };
   if (options.apiKey) headers['X-API-Key'] = options.apiKey;
   const responses = [];
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await throttleToncenter();
     try {
       const response = await fetch(url, {
         method: options.method || 'GET',
@@ -128,10 +136,11 @@ async function httpJson(url, options = {}) {
       if (response.ok) return json;
       responses.push('HTTP ' + response.status + ': ' + text.slice(0, 300));
       if (response.status < 500 && response.status !== 429) break;
+      if (response.status === 429) await new Promise((resolve) => setTimeout(resolve, 2500 * (attempt + 1)));
     } catch (error) {
       responses.push(String(error && error.message ? error.message : error));
     }
-    await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
   }
   throw new Error('TON Center 请求失败（' + url + '）：' + responses.join(' | '));
 }
@@ -161,15 +170,54 @@ export async function runGetMethod(params, address, method, numericStack = []) {
   return json.result;
 }
 
+function normalizeStackItem(item) {
+  if (Array.isArray(item)) return { type: item[0], payload: item[1] };
+  return { type: item && item.type, payload: item };
+}
+
 export function stackItemToBigInt(item) {
   if (!item) return null;
-  const raw = item.value !== undefined ? item.value : item;
+  const normalized = normalizeStackItem(item);
+  if (normalized.type === 'null') return null;
+  const raw = normalized.payload && normalized.payload.value !== undefined ? normalized.payload.value : normalized.payload;
   if (raw === null || raw === undefined) return null;
   const text = String(raw).trim();
   if (text.startsWith('-0x')) return -BigInt('0x' + text.slice(3));
   if (text.startsWith('0x')) return BigInt(text);
   if (text === '') return null;
   try { return BigInt(text); } catch { return null; }
+}
+
+function stackItemB64(item) {
+  const normalized = normalizeStackItem(item);
+  const payload = normalized.payload;
+  if (!payload) return null;
+  if (typeof payload === 'string') return payload;
+  if (payload.object && payload.object.data && payload.object.data.b64) return payload.object.data.b64;
+  if (payload.value && typeof payload.value === 'string') return payload.value;
+  return null;
+}
+
+/** 从 get-method 的 slice/cell 地址槽解出 { wc, hashHex }；非地址（含 null address）返回 null。 */
+export function addressFromStackItem(item) {
+  if (!item) return null;
+  const normalized = normalizeStackItem(item);
+  if (normalized.type !== 'slice' && normalized.type !== 'cell') return null;
+  const b64 = stackItemB64(item);
+  if (!b64) return null;
+  try {
+    const bytes = Buffer.from(b64, 'base64');
+    let bits = '';
+    for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
+    if (bits.length < 3 || bits.slice(0, 2) !== '10') return null;
+    const wcRaw = parseInt(bits.slice(3, 11), 2);
+    const wc = wcRaw === 255 ? -1 : wcRaw;
+    let hashHex = '';
+    for (let offset = 0; offset < 256; offset += 4) hashHex += parseInt(bits.slice(11 + offset, 15 + offset), 2).toString(16);
+    return { wc, hashHex };
+  } catch {
+    return null;
+  }
 }
 
 /** 读取 TEP-74 get_jetton_data：total_supply, mintable, admin, content, wallet_code。 */
@@ -183,6 +231,7 @@ export async function getJettonData(params, masterAddress) {
     totalSupplyRaw: totalSupply === null ? null : totalSupply.toString(),
     mintable: mintable === null ? null : mintable !== 0n,
     admin,
+    adminAddress: addressFromStackItem(admin),
     adminNull: isNullAddressStackItem(admin),
     walletCode: stack[4] || null,
     raw: stack,
@@ -218,18 +267,18 @@ export async function getTonBalance(params, address) {
 /** 判断 get-method 返回的地址槽是否为 null（未设置）：null 类型或空/近空 slice。 */
 export function isNullAddressStackItem(item) {
   if (!item) return true;
-  if (item.type === 'null') return true;
-  const value = item.value;
-  if (value === null || value === undefined || value === '') return true;
-  if (typeof value === 'string') {
-    try {
-      const bytes = Buffer.from(value, 'base64');
-      return bytes.length <= 1;
-    } catch {
-      return false;
-    }
+  const normalized = normalizeStackItem(item);
+  if (normalized.type === 'null') return true;
+  const b64 = stackItemB64(item);
+  if (!b64) return true;
+  try {
+    const bytes = Buffer.from(b64, 'base64');
+    let bits = '';
+    for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
+    return bits.length < 3 || bits.slice(0, 2) !== '10';
+  } catch {
+    return true;
   }
-  return false;
 }
 
 /** 读取 Jetton Master 的元数据（TON Center v3）。decimals 可能是字符串。 */

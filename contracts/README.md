@@ -10,10 +10,11 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **132 passed / 13 files**（65 + V8 22 + P0 9 + TeamVault 1 + 审计 F-01~F-06 10 + 审计 F-07~F-09 7 + 架构 M-1/S-3 7 + P0 v2/P1/P2 9 + ops getter 2 个用例，含 3 个真 Jetton 合约集成测试）。
+- **测试**：acton test → **144 passed / 14 files**（65 + V8 22 + P0 9 + TeamVault 1 + 审计 F-01~F-06 10 + 审计 F-07~F-09 7 + 架构 M-1/S-3 7 + P0 v2/P1/P2 9 + ops getter 2 + OracleAdapter 12 个用例，含 3 个真 Jetton 合约集成测试）。
 - **合约代码哈希**（clean rebuild，Tolk code cell）：
     - RoundController：0x7120E5FE1966B9C8B3DFF092D45441B6F896EF5041D36416BC5CD5B4C6893ED1（1,924 行，ops getter 后）
     - TeamVault：0x14BA576796DF2489A17E00F5CC4FDFE1FD9DB11A3F692DB0F4A0CB5FA8F4EA41
+    - OracleAdapter：0x6600DE52C43B54845130B1E2EB17B9D287E8EF5E02ED894D680CBFA974A6F1CE（387 行，主网 M-2）
     - TeamVault：0xDDFEE8CA14B5104B7C73FBBC075953FDD729286E5CB67F90DB08DB5E502B09DD
     - JettonMaster：0xAA7BC0B3429880FCE965C6FF5FC8E7A0A4F63445F1BA2602EBF37A079DBE740C
     - JettonWallet：0x068E64CF94ABC5B514A65CC32A6B8415E8E963FAD9C016E0BC815AB68C447D53
@@ -52,7 +53,7 @@
     cd contracts
     acton build              # 产出 build/*.json 与 build/abi/*.json
     acton check              # 0 warning
-    acton test               # 132 passed
+    acton test               # 144 passed
     acton build --info       # 打印 code hash
 
 ### 1.3 官方安装方式（新机器）
@@ -411,7 +412,7 @@ SETTLING_FAILURE 时 RC 发出：
 0. 部署 **A9 JettonMaster**（Tolk 复刻 TEP-74）：admin=treasury、total_supply=0、wallet code 内嵌。
 1. 用 mint-once（op 0x15）铸造 **100 亿 A9** 到 treasury；同一笔交易把 admin 置空，**mint 永久关闭**。
 2. 部署 **TeamVault**：jettonWallet 用占位地址（建议 admin），controller = null。
-3. 部署 **RoundController**：teamVault = TV 地址，stakingJettonWallet 用占位地址。
+3. 部署 **OracleAdapter**（主网；测试网可选）→ 部署 **RoundController** 时把 oracle 填为 OracleAdapter 地址 → 调 OracleAdapter.SetOracleController(rc)。
 4. 用 Jetton Master get_wallet_address(roundController) 得到 RC 的 canonical Jetton Wallet → admin 调 RC.SetJettonWallet(wallet)。
 5. 同法得到 TV 的 Jetton Wallet → admin 调 TV.SetJettonWallet(wallet)。
 6. admin 调 TV.InitController(roundController)（**一次性，之后不可改**）。
@@ -419,6 +420,29 @@ SETTLING_FAILURE 时 RC 发出：
 8. 给 RC ≥ 20 TON、TV ≥ 10 TON 作为 gas/存储；admin 调 OpenRound(round=1, twap24h) 开首轮。
 
 > 3~6 步的 JettonMaster 地址与两个 Jetton Wallet 地址现在由脚本自动解析（get_wallet_address）并写入，不再使用人工占位。
+
+> **测试网最小足迹部署**：deploy-emulation 的 4 笔部署 TON 可用环境变量下调（默认值即主网/常规值，保持不变）：
+> A9_DEPLOY_TON_JETTON_MASTER（默认 5）、A9_DEPLOY_TON_ORACLE_ADAPTER（默认 5）、
+> A9_DEPLOY_TON_TEAM_VAULT（默认 1）、A9_DEPLOY_TON_ROUND_CONTROLLER（默认 5）。
+> 例如 TON 不足时：A9_DEPLOY_TON_JETTON_MASTER=1 A9_DEPLOY_TON_ORACLE_ADAPTER=1
+> A9_DEPLOY_TON_TEAM_VAULT=1 A9_DEPLOY_TON_ROUND_CONTROLLER=1 acton script scripts/deploy-emulation.tolk。
+> 脚本启动时会打印 Deploy TON: ... 便于核对；**主网请使用默认值**，不要为省 TON 降低部署余额。
+
+> **TON 覆盖值解析**：4 个环境变量接受十进制字符串（如 5、0.6、1.25，单位 TON），脚本内部转成 nano；
+> 解析失败/非正数会立即 fail，不会静默回退默认值。启动打印会标注 [env] 或 [default]。
+>
+> **部署失败即停**：每笔部署（JettonMaster / OracleAdapter / TeamVault / RoundController）后都会校验
+> 账户 state == active 且 code hash == build 产物；不满足立即 fail，并打印合约名、地址、deployer 余额、
+> 本笔所需 nano。wiring 完成后还会用 getter 校验 SetJettonWallet / SetJettonWalletCode /
+> SetTeamWalletJettonWallet / SetOracleController / InitController 是否真的写入。
+>
+> **Resume 模式（方案 A）**：A9_RESUME_JETTON_MASTER_ADDRESS=<已存在的 master 地址> 时跳过
+> JettonMaster 部署与 mint，只部署 OracleAdapter → TeamVault → RoundController 并完成全部 wiring；
+> resume master 必须已 mint 100 亿（脚本用 get_jetton_data 校验）。本地验证可对测试网状态 fork：
+>
+>     A9_RESUME_JETTON_MASTER_ADDRESS=<master> acton script scripts/deploy-emulation.tolk --fork-net testnet
+>
+> 真实测试网广播时同样传该 env 并加 --net testnet；全量模式不设该 env 即保持原行为。
 
 ### 7.3 脚本
 
@@ -534,23 +558,29 @@ submit-candle 额外打印全部 K 线字段（roundId/candleIndex/periodStart/p
 
 #### 7.6.1 fund_jetton — A9 注资（标准 TEP-74 transfer）
 
-    acton script scripts/deploy/fund_jetton.tolk <to_jetton_wallet> <amount_raw>
+    acton script scripts/deploy/fund_jetton.tolk <to_owner> <amount_raw>
 
 | 参数 | 说明 |
 | --- | --- |
-| to_jetton_wallet | 目标 Jetton Wallet 地址（不是 owner 合约地址） |
+| to_owner | 目标 Jetton 的 owner 地址（如 RoundController / TeamVault 合约地址、或普通钱包 owner 地址），不是该 owner 的 Jetton Wallet 地址 |
 | amount_raw | raw 单位（9 decimals）；必须是正整数，广播前校验 signer 的 A9 余额 |
+
+**TEP-74 语义（重要）**：AskToTransfer.transferRecipient 必须是 owner；发送方钱包会用
+calcDeployedJettonWallet(owner) 自行推导目标钱包。若把 Jetton Wallet 地址当参数传，
+会生成一个 owner=该钱包合约 的新钱包（无密钥、不可转出）→ 资金永久锁死。
+脚本会在广播/dry-run 前打印 owner -> expected wallet，并（广播时）用
+master.get_wallet_address(owner) 与本地 build("JettonWallet") 推导值做硬校验（不一致直接 fail）。
 
 示例（数字按 tokenomics）：
 
-    # 70 亿 → RC Jetton Wallet
-    acton script scripts/deploy/fund_jetton.tolk kQCxE-xHBrh9EwnXcxbtMKzlRxQm-dJqkj8eSDIFewCrOJUP 700000000000000000
-    # 12 亿 → TeamVault Jetton Wallet
-    acton script scripts/deploy/fund_jetton.tolk kQBG6q-8WwikdS1t0uufY5-bFCyywENljW3k_-N0El88hPWa 120000000000000000
-    # 8 亿 / 5 亿 / 5 亿 → 内盘/流动性/营销钱包（先用 JettonMaster.get_wallet_address 解析）
-    acton script scripts/deploy/fund_jetton.tolk <internalWallet> 800000000000000000
-    acton script scripts/deploy/fund_jetton.tolk <liquidityWallet> 500000000000000000
-    acton script scripts/deploy/fund_jetton.tolk <marketingWallet> 500000000000000000
+    # 70 亿 → RoundController（owner = RC 合约地址；脚本自己推导 RC 的 Jetton Wallet）
+    acton script scripts/deploy/fund_jetton.tolk <ROUND_CONTROLLER_ADDRESS> 700000000000000000
+    # 12 亿 → TeamVault（owner = TV 合约地址）
+    acton script scripts/deploy/fund_jetton.tolk <TEAM_VAULT_ADDRESS> 120000000000000000
+    # 8 亿 / 5 亿 / 5 亿 → 内盘/流动性/营销（owner = 对应钱包 owner 地址）
+    acton script scripts/deploy/fund_jetton.tolk <internalOwner> 800000000000000000
+    acton script scripts/deploy/fund_jetton.tolk <liquidityOwner> 500000000000000000
+    acton script scripts/deploy/fund_jetton.tolk <marketingOwner> 500000000000000000
 
 广播：OPS_EXECUTE=1 OPS_CONFIRM=YES acton script ... --net testnet。
 
@@ -632,13 +662,13 @@ dry-run（fund_ton <to> 20）：
 - 参数错误 / 未知 op / 缺地址 / 余额不足：打印可读错误，exit code = 1（不会静默广播）。
 - OPS_EXECUTE=1 但未加 --net：报错 exit 1，提示本地开发可设 OPS_ALLOW_EMULATION=true。
 - OPS_CONFIRM 不是 YES：拒绝广播。
-- fund_jetton 广播前用 get_wallet_data 校验源钱包 A9 余额；fund_ton 校验 signer TON 余额（含 0.05 TON 余量）。
+- fund_jetton 广播前用 get_wallet_data 校验源钱包 A9 余额，并打印 owner -> expected wallet（get_wallet_address 与本地推导双校验）；fund_ton 校验 signer TON 余额（含 0.05 TON 余量）。
 
 #### 7.6.6 ops 调用形式（供 testnet-ops 接线）
 
 | ops 脚本 | 调用 |
 | --- | --- |
-| 50_fund_vaults.mjs | cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> JETTON_MASTER_ADDRESS=<master> acton script scripts/deploy/fund_jetton.tolk <toJettonWallet> <amountRaw> --net testnet |
+| 50_fund_vaults.mjs | cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> JETTON_MASTER_ADDRESS=<master> acton script scripts/deploy/fund_jetton.tolk <toOwner> <amountRaw> --net testnet |
 | 55_fund_ton.mjs | cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> acton script scripts/deploy/fund_ton.tolk <to> <amountTon> --net testnet |
 | 80_admin_ops.mjs | cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> ROUND_CONTROLLER_ADDRESS=<rc> acton script scripts/deploy/admin_op.tolk <op> <roundId> <extra> --net testnet |
 | 80_admin_ops.mjs（K 线） | 在上一行基础上追加 A9_CANDLE_INDEX=<i> A9_PERIOD_START=<unix> A9_PERIOD_END=<unix> A9_TWAP_E8=<usd_e8> A9_DIGEST=<64hex>，op=submit-candle，extra=0 |
@@ -650,13 +680,13 @@ dry-run（fund_ton <to> 20）：
 ## 8. 测试
 
     cd contracts
-    acton test                    # 132 passed in 13 files
+    acton test                    # 144 passed in 14 files
     acton test tests/jetton.test.tolk
     acton test tests/settlement.test.tolk
     acton test -f 'technical abort'   # 按名字过滤
     acton check                   # lint：0 warning
 
-### 8.1 覆盖矩阵（132 个用例）
+### 8.1 覆盖矩阵（144 个用例）
 
 | 需求 | 用例（文件） |
 | --- | --- |
@@ -691,6 +721,7 @@ dry-run（fund_ton <to> 20）：
 | P0 v2 真合约集成 | 真 JettonMaster/JettonWallet：成功轮 release ack→SUCCEEDED、ClaimPrincipal/ClaimRewardEarly pending 清零；失败轮三笔销毁确认→FAILED_PERMANENT；10 轮后 ClaimUnlocked 真 ReturnExcesses 结算 |
 | P0 v2 / P1 / P2 单测 | 非 owner 钱包的 ReturnExcesses 不能清 pending；retry 无权限且 <0.3 TON 拒绝；每轮仅 1 次 pause；pending release 与 burn 冲突；transfer value 0.1 TON |
 | ops getters | RC get_jetton_wallet_code_hash 写入前返回 0、写入后等于 code hash；TV get_team_wallet_jetton_wallet 写入前后值正确 |
+| OracleAdapter | 3/5 验签 Open/Close/Candle 转发字段逐字段一致；2/5、重复 signer、错链 chainId、过期 timestamp、重放、candleIndex 非单调均拒绝；SetSignerSet 权限/版本、SetController 一次性、SetAdmin、getter |
 
 ### 8.3 V8 gas 实测（Acton emulation，gas units；按主网 gas price 400 nanotons/unit 估算）
 
@@ -800,7 +831,7 @@ P0 v2 / P1 / P2（task-27，delta 复审）——用真 Jetton 合约补集成�
     acton --version                  # 1.1.0
     acton build                      # 0 error
     acton check                      # 0 warning
-    acton test                       # 132 passed in 13 files
+    acton test                       # 144 passed in 14 files
     acton build --info               # 对照 §0 的 code hash
     acton script scripts/deploy-emulation.tolk   # 打印部署顺序与地址
     cat deploy/params.testnet.json   # V6.1 参数模板
@@ -808,3 +839,71 @@ P0 v2 / P1 / P2（task-27，delta 复审）——用真 Jetton 合约补集成�
     jq '.abi[] | select(.name|test("get_")) | .name' deploy/abi/JettonMaster.json
 
 > 本目录不修改 web/、worker/、shared/、docs/；ABI 变更以本 README + deploy/abi/*.json 为准，前端以 docs/04 §19 与本 README 对齐。
+
+
+---
+
+## 12. OracleAdapter（主网 M-2，独立新合约）
+
+用途：把 **3/5 ed25519 多源签名**验证通过的 OpenRound / CloseStaking / SubmitCandle 原样转发给 RoundController。**RC 不改一行**：部署 RC 时把 config.addresses.oracle 指向 OracleAdapter 即可（RC 的 requireAdminOrOracle 认该地址）。
+
+### 12.1 ABI
+
+| Opcode | 消息 | 发送者 | 接收者 | Body |
+| --- | --- | --- | --- | --- |
+| 0x52540021 | SetSignerSet | admin | OracleAdapter | signers:cell, threshold:u8, chainId:u32, configVersion:u32 |
+| 0x52540022 | SetOracleController | admin | OracleAdapter | controller:address（一次性） |
+| 0x52540023 | SetOracleAdmin | admin | OracleAdapter | admin:address |
+| 0x52540024 | SubmitSignedOpenRound | 任意提交者 | OracleAdapter | roundId:u8, twap24hUsdE8:u128, timestamp:u64, sigCount:u8, sigs:cell |
+| 0x52540025 | SubmitSignedCloseStaking | 任意提交者 | OracleAdapter | roundId:u8, twap1hUsdE8:u128, timestamp:u64, sigCount:u8, sigs:cell |
+| 0x52540026 | SubmitSignedCandle | 任意提交者 | OracleAdapter | roundId:u8, candleIndex:u8, periodStart:u32, periodEnd:u32, twapPriceUsdE8:u128, dataDigest:u256, timestamp:u64, sigCount:u8, sigs:cell |
+
+- signers:cell：inline s0,s1,s2:u256 + threshold:u8，并 ref 一个 cell(s3:u256, s4:u256)。
+- sigs:cell：链式 node，每个 node = signerIndex:u8 + signatureHi:u256 + signatureLo:u256（+ ref 下一个 node）；最多 5 个，sigCount 指定实际数量（需 >= threshold）。Ed25519 signature 512 bits 由 hi/lo 还原。
+- 转发消息与 ABI 表完全一致：OpenRound(0x52540001)、CloseStaking(0x52540002)、SubmitCandle(0x52540003)。
+
+### 12.2 验签消息格式
+
+hash = sha256( cell(
+    domain = sha256("A9_ORACLE_ADAPTER_V1") : u256,
+    chainId : u32,
+    controller : address,
+    action : u8,            // 1=OPEN, 2=CLOSE, 3=CANDLE
+    roundId : u8,
+    candleIndex : u8,       // Open/Close 为 0
+    periodStart : u32,      // Open/Close 为 0
+    periodEnd : u32,        // Open/Close 为 0
+    twapUsdE8 : u128,
+    ref cell(dataDigest : u256, timestamp : u64)
+).hash() )
+
+- 签名用 TVM isSignatureValid(hash, signature, publicKey)（CHKSIGNU），不自行实现 Ed25519。
+- timestamp 必须落在 now +/- 300s。
+- 防重放：每个 (roundId, OPEN/CLOSE) 只能成功一次；candleIndex 按 roundId 严格单调递增。
+
+### 12.3 Storage
+
+OracleAdapterStorage {
+  config: Cell<OracleAdapterConfig { admin, controller: address?, chainId:u32,
+                                     configVersion:u32, signers: Cell<OracleSignersPacked> }>
+  usedMask: map<u8, u8>      // bit1=OPEN, bit2=CLOSE, bit3=CANDLE
+  lastCandle: map<u8, u8>    // roundId -> last accepted candleIndex
+}
+
+### 12.4 Get methods
+
+| 方法 | 返回 |
+| --- | --- |
+| get_config() | OracleConfigView{admin, controller, chainId, configVersion, threshold} |
+| get_signer_set() | OracleSignerSetView{s0..s4, threshold} |
+| get_used_actions(round_id) | OracleUsedActions{openUsed, closeUsed, lastCandleIndex} |
+
+### 12.5 部署顺序
+
+1. 部署 JettonMaster + TeamVault（不变）。
+2. **先部署 OracleAdapter**（admin、chainId、初始 5 个 signer 公钥 + threshold；生产用 SetSignerSet 轮换）。
+3. 部署 RoundController 时 oracle = OracleAdapter 地址（RC 代码不变）。
+4. OracleAdapter.SetOracleController(rc)（一次性）。
+5. 其余 wiring 不变（SetJettonWallet/SetJettonWalletCode/SetTeamWalletJettonWallet/InitController）。
+
+> 测试网可用 admin/oracle 手动模式继续；主网必须走 OracleAdapter。deploy-emulation 已按上述顺序部署（RC oracle 指向 adapter），并写入 deploy/oracle-adapter.addr。

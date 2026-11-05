@@ -16,6 +16,9 @@
 //      TON gas balances (RC >= 20 TON, TeamVault >= 10 TON).
 
 import "@stdlib/strings"
+import "@acton/env"
+import "@acton/testing/assert"
+import "@acton/types/transaction"
 import "@acton/build"
 import "@acton/emulation/network"
 import "@acton/io"
@@ -32,10 +35,116 @@ const PARAM_TEAM_ROUND: uint128 = 120000000000000000;
 const PARAM_MIN_STAKE: uint128 = 10000000000000;
 const PARAM_MAX_TOTAL_STAKE: uint128 = 200000000000000000;
 
+// Deployment TON budget, overridable for low-balance testnet runs. Values are TON.
+fun tonCoins(amountTon: int): coins {
+    return (amountTon * 1000000000) as coins;
+}
+
+// Parse a TON decimal string ("5", "0.6", "1.25") into nanotons. Invalid => fail.
+fun parseTonString(raw: string, envName: string): coins {
+    var s = raw.beginParse();
+    var nano: int = 0;
+    var fracDigits: int = 0;
+    var seenDot: bool = false;
+    var digits: int = 0;
+    while (s.remainingBitsCount() >= 8) {
+        val ch = s.loadUint(8);
+        if (ch == 46) {
+            if (seenDot) {
+                Assert.fail(format("invalid {}={}: multiple decimal points", envName, raw));
+            }
+            seenDot = true;
+        } else if (ch >= 48 && ch <= 57) {
+            val d = ch - 48;
+            if (!seenDot) {
+                nano = nano * 10 + d;
+            } else {
+                if (fracDigits >= 9) {
+                    Assert.fail(format("invalid {}={}: more than 9 decimal places", envName, raw));
+                }
+                nano = nano * 10 + d;
+                fracDigits += 1;
+            }
+            digits += 1;
+        } else {
+            Assert.fail(format("invalid {}={}: expected decimal TON amount", envName, raw));
+        }
+    }
+    if (digits == 0) {
+        Assert.fail(format("invalid {}={}: empty amount", envName, raw));
+    }
+    if (seenDot) {
+        while (fracDigits < 9) {
+            nano = nano * 10;
+            fracDigits += 1;
+        }
+    } else {
+        nano = nano * 1000000000;
+    }
+    if (nano <= 0) {
+        Assert.fail(format("invalid {}={}: amount must be > 0", envName, raw));
+    }
+    return nano as coins;
+}
+
+fun deployTon(envName: string, defaultTon: int): coins {
+    val raw = env<string>(envName);
+    if (raw == null) {
+        return tonCoins(defaultTon);
+    }
+    return parseTonString(raw!, envName);
+}
+
+fun tonSource(envName: string): string {
+    return env<string>(envName) == null ? "default" : "env";
+}
+
+fun requireActive(addr: address, name: string, expectedCode: cell, needed: coins) {
+    if (!scripts.isContractDeployed(addr)) {
+        Assert.fail(
+            format(
+                "{} not active after deploy (addr={}, deployer balance={} nano, needed={} nano)",
+                name, addr, scripts.fetchAccountBalance(scripts.wallet("deployer").address), needed,
+            ),
+        );
+    }
+    val acct = scripts.fetchAccountState(addr);
+    if (acct == null) {
+        Assert.fail(format("{} state missing after deploy (addr={})", name, addr));
+    }
+    var codeHash: uint256? = null;
+    match (acct!.storage.state) {
+        TlbAccountStateActive => {
+            val init = acct!.storage.state.stateInit;
+            if (init.code != null) {
+                codeHash = init.code!.hash();
+            }
+        }
+        TlbAccountStateUninit => {}
+        TlbAccountStateFrozen => {}
+    }
+    if (codeHash == null || codeHash! != expectedCode.hash()) {
+        Assert.fail(format("{} code hash mismatch after deploy (addr={})", name, addr));
+    }
+}
+
 fun main() {
+    val masterTon = deployTon("A9_DEPLOY_TON_JETTON_MASTER", 5);
+    val adapterTon = deployTon("A9_DEPLOY_TON_ORACLE_ADAPTER", 5);
+    val tvTon = deployTon("A9_DEPLOY_TON_TEAM_VAULT", 1);
+    val rcTon = deployTon("A9_DEPLOY_TON_ROUND_CONTROLLER", 5);
+    println(
+        "Deploy TON: JettonMaster={} nano [{}] OracleAdapter={} nano [{}]",
+        masterTon, tonSource("A9_DEPLOY_TON_JETTON_MASTER"),
+        adapterTon, tonSource("A9_DEPLOY_TON_ORACLE_ADAPTER"),
+    );
+    println(
+        "Deploy TON: TeamVault={} nano [{}] RoundController={} nano [{}]",
+        tvTon, tonSource("A9_DEPLOY_TON_TEAM_VAULT"),
+        rcTon, tonSource("A9_DEPLOY_TON_ROUND_CONTROLLER"),
+    );
     val deployer = scripts.wallet("deployer");
     val admin = scripts.wallet("admin");
-    val oracle = scripts.wallet("oracle");
     val teamWallet = scripts.wallet("team-wallet");
 
     println("A9 deploy params:");
@@ -47,6 +156,11 @@ fun main() {
     println("  minStakeRaw        = {}", PARAM_MIN_STAKE);
     println("  maxTotalStakeRaw   = {}", PARAM_MAX_TOTAL_STAKE);
 
+    // Resume mode (env): reuse an already-deployed JettonMaster and only deploy
+    // OracleAdapter + TeamVault + RoundController + wiring. Never deploy/mint again.
+    val resumeMaster = env<address>("A9_RESUME_JETTON_MASTER_ADDRESS");
+    var masterAddress: address;
+    if (resumeMaster == null) {
     // --- 1. JettonMaster ----------------------------------------------------
     var metadata: OnchainMetadataReply = { contentDict: [] };
     metadata.contentDict.set("uri".sha256(), "https://a9.lat/a9.json".prefixWith00());
@@ -57,11 +171,11 @@ fun main() {
         metadata: metadata.toCell(),
     };
     val masterInit = ContractState { code: build("JettonMaster"), data: masterStorage.toCell() };
-    val masterAddress = AutoDeployAddress { stateInit: masterInit }.calculateAddress();
+    masterAddress = AutoDeployAddress { stateInit: masterInit }.calculateAddress();
     fs.writeString("deploy/jetton-master.addr", format("{}\n", masterAddress));
     net.send(deployer.address, createMessage({
         bounce: false,
-        value: ton("5"),
+        value: masterTon,
         dest: { stateInit: masterInit },
         body: TopUpTons {},
     })).waitForTrace();
@@ -84,6 +198,17 @@ fun main() {
         body: mintBody,
     })).waitForTrace();
     println("JettonMaster minted 100e9 A9 to admin; mint is now permanently closed");
+    requireActive(masterAddress, "JettonMaster", build("JettonMaster"), masterTon);
+    } else {
+        masterAddress = resumeMaster!;
+        println("reusing JettonMaster at {}", masterAddress);
+        requireActive(masterAddress, "JettonMaster(resume)", build("JettonMaster"), 0 as coins);
+        fs.writeString("deploy/jetton-master.addr", format("{}\n", masterAddress));
+        val masterData = net.runGetMethod<JettonDataReply>(masterAddress, "get_jetton_data");
+        if (masterData.totalSupply != PARAM_TOTAL_SUPPLY) {
+            Assert.fail("resume master totalSupply mismatch: expected 100e9 A9 already minted");
+        }
+    }
 
     // --- 3. TeamVault -------------------------------------------------------
     val tvStorage = TeamVaultStorage {
@@ -107,15 +232,49 @@ fun main() {
         releasedCount: 0,
         burnedCount: 0,
     };
+    // OracleAdapter (mainnet M-2): deploy first, then RC is configured with it as oracle.
+    val zeroTail = OracleSignersTail { s3: 0 as uint256, s4: 0 as uint256 }.toCell();
+    val zeroSigners = OracleSignersPacked {
+        s0: 0 as uint256,
+        s1: 0 as uint256,
+        s2: 0 as uint256,
+        threshold: 3,
+        tail: zeroTail,
+    }.toCell();
+    val adapterCfg = OracleAdapterConfig {
+        admin: admin.address,
+        controller: null,
+        chainId: 1,
+        configVersion: 1,
+        signers: zeroSigners,
+    };
+    val adapterStorage = OracleAdapterStorage {
+        config: adapterCfg.toCell(),
+        usedMask: [],
+        lastCandle: [],
+    };
+    val adapterInit = ContractState { code: build("OracleAdapter"), data: adapterStorage.toCell() };
+    val adapterAddress = AutoDeployAddress { stateInit: adapterInit }.calculateAddress();
+    fs.writeString("deploy/oracle-adapter.addr", format("{}\n", adapterAddress));
+    net.send(deployer.address, createMessage({
+        bounce: false,
+        value: adapterTon,
+        dest: { stateInit: adapterInit },
+        body: TopUpTons {},
+    })).waitForTrace();
+    requireActive(adapterAddress, "OracleAdapter", build("OracleAdapter"), adapterTon);
+    println("OracleAdapter deployed at {} (RC oracle will point here)", adapterAddress);
+
     val tvInit = ContractState { code: build("TeamVault"), data: tvStorage.toCell() };
     val tvAddress = AutoDeployAddress { stateInit: tvInit }.calculateAddress();
     fs.writeString("deploy/team-vault.addr", format("{}\n", tvAddress));
     net.send(deployer.address, createMessage({
         bounce: false,
-        value: ton("1"),
+        value: tvTon,
         dest: { stateInit: tvInit },
         body: TopUpTons {},
     })).waitForTrace();
+    requireActive(tvAddress, "TeamVault", build("TeamVault"), tvTon);
     println("TeamVault deployed at {}", tvAddress);
 
     // --- 4. RoundController (with the real JettonMaster) --------------------
@@ -143,7 +302,7 @@ fun main() {
     val cfg = ProtocolConfig {
         addresses: ProtocolAddresses {
             admin: admin.address,
-            oracle: oracle.address,
+            oracle: adapterAddress,
             jettonMaster: masterAddress,
         }.toCell(),
         vaults: ProtocolVaults {
@@ -170,11 +329,24 @@ fun main() {
     fs.writeString("deploy/round-controller.addr", format("{}\n", rcAddress));
     net.send(deployer.address, createMessage({
         bounce: false,
-        value: ton("5"),
+        value: rcTon,
         dest: { stateInit: rcInit },
         body: TopUpTons {},
     })).waitForTrace();
+    requireActive(rcAddress, "RoundController", build("RoundController"), rcTon);
     println("RoundController deployed at {}", rcAddress);
+    // wire the adapter to this RC (one-time)
+    net.send(admin.address, createMessage({
+        bounce: true,
+        value: ton("0.2"),
+        dest: adapterAddress,
+        body: SetOracleController { controller: rcAddress },
+    })).waitForTrace();
+    val adapterCfgAfter = net.runGetMethod<OracleConfigView>(adapterAddress, "get_config");
+    if (adapterCfgAfter.controller == null || adapterCfgAfter.controller! != rcAddress) {
+        Assert.fail("OracleAdapter controller wiring failed");
+    }
+    println("OracleAdapter.SetOracleController -> RoundController");
 
     // --- 5. Resolve + wire the real Jetton Wallet addresses ----------------
     val rcJettonWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [rcAddress]);
@@ -207,7 +379,23 @@ fun main() {
         dest: tvAddress,
         body: SetTeamWalletJettonWallet { wallet: teamWalletJettonWallet },
     })).waitForTrace();
+    val rcCfg = net.runGetMethod<ProtocolConfigView>(rcAddress, "get_protocol_config");
+    if (rcCfg.stakingJettonWallet != rcJettonWallet) {
+        Assert.fail("RC SetJettonWallet wiring failed");
+    }
+    val codeHash = net.runGetMethod<uint256>(rcAddress, "get_jetton_wallet_code_hash");
+    if (codeHash != build("JettonWallet").hash()) {
+        Assert.fail("RC SetJettonWalletCode wiring failed (code hash mismatch)");
+    }
     println("SetJettonWallet + SetJettonWalletCode wired on RoundController");
+    val tvState = net.runGetMethod<TeamVaultState>(tvAddress, "get_team_vault_state");
+    if (tvState.jettonWallet != tvJettonWallet) {
+        Assert.fail("TeamVault SetJettonWallet wiring failed");
+    }
+    val tvTeamWallet = net.runGetMethod<address>(tvAddress, "get_team_wallet_jetton_wallet");
+    if (tvTeamWallet != teamWalletJettonWallet) {
+        Assert.fail("TeamVault SetTeamWalletJettonWallet wiring failed");
+    }
     println("SetJettonWallet + SetTeamWalletJettonWallet wired on TeamVault");
 
     // --- 6. TeamVault controller (one-time) ---------------------------------
@@ -217,6 +405,10 @@ fun main() {
         dest: tvAddress,
         body: InitController { controller: rcAddress },
     })).waitForTrace();
+    val tvCfg = net.runGetMethod<TeamVaultConfig>(tvAddress, "get_config");
+    if (tvCfg.controller == null || tvCfg.controller! != rcAddress) {
+        Assert.fail("TeamVault.InitController wiring failed");
+    }
     println("TeamVault.InitController -> {}", rcAddress);
 
     println("TODO (ops): transfer 7,000,000,000 A9 to the RC Jetton Wallet and");

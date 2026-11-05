@@ -27,6 +27,16 @@ display-name = "RoundController"
 src = "contracts/RoundController.tolk"
 depends = ["TeamVault"]
 
+[contracts.OracleAdapter]
+display-name = "OracleAdapter"
+src = "contracts/OracleAdapter.tolk"
+depends = []
+
+[contracts.MockOracleReceiver]
+display-name = "MockOracleReceiver"
+src = "contracts/mocks/MockOracleReceiver.tolk"
+depends = []
+
 [contracts.MockJettonWallet]
 display-name = "MockJettonWallet"
 src = "contracts/mocks/MockJettonWallet.tolk"

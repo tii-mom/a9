@@ -1,0 +1,604 @@
+{
+  "abi_schema_version": "1.0",
+  "contract_name": "OracleAdapter",
+  "author": "A9 Protocol",
+  "version": "1.0.0",
+  "description": "3/5 ed25519 multi-source oracle adapter forwarding signed actions to RoundController.",
+  "unique_types": [
+    {
+      "kind": "void"
+    },
+    {
+      "kind": "int"
+    },
+    {
+      "kind": "slice"
+    },
+    {
+      "kind": "cell"
+    },
+    {
+      "kind": "builder"
+    },
+    {
+      "kind": "bool"
+    },
+    {
+      "kind": "coins"
+    },
+    {
+      "kind": "address"
+    },
+    {
+      "kind": "intN",
+      "n": 32
+    },
+    {
+      "kind": "uintN",
+      "n": 32
+    },
+    {
+      "kind": "intN",
+      "n": 64
+    },
+    {
+      "kind": "uintN",
+      "n": 64
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SetSignerSet"
+    },
+    {
+      "kind": "uintN",
+      "n": 8
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SetOracleController"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SetOracleAdmin"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SubmitSignedOpenRound"
+    },
+    {
+      "kind": "uintN",
+      "n": 128
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SubmitSignedCloseStaking"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SubmitSignedCandle"
+    },
+    {
+      "kind": "uintN",
+      "n": 256
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TopUpTons"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleAdapterStorage"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleAdapterConfig"
+    },
+    {
+      "kind": "addressOpt"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleSignersPacked"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleSignersTail"
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 26
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 25
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 23
+    },
+    {
+      "kind": "mapKV",
+      "key_ty_idx": 13,
+      "value_ty_idx": 13
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleConfigView"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleSignerSetView"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "OracleUsedActions"
+    }
+  ],
+  "struct_instantiations": [],
+  "alias_instantiations": [],
+  "declarations": [
+    {
+      "kind": "struct",
+      "name": "TopUpTons",
+      "ty_idx": 21,
+      "prefix": {
+        "prefix_num": 3547469196,
+        "prefix_len": 32
+      },
+      "fields": []
+    },
+    {
+      "kind": "struct",
+      "name": "OracleAdapterConfig",
+      "ty_idx": 23,
+      "fields": [
+        {
+          "name": "admin",
+          "ty_idx": 7
+        },
+        {
+          "name": "controller",
+          "ty_idx": 24
+        },
+        {
+          "name": "chainId",
+          "ty_idx": 9
+        },
+        {
+          "name": "configVersion",
+          "ty_idx": 9
+        },
+        {
+          "name": "signers",
+          "ty_idx": 28
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OracleSignersPacked",
+      "ty_idx": 25,
+      "fields": [
+        {
+          "name": "s0",
+          "ty_idx": 20
+        },
+        {
+          "name": "s1",
+          "ty_idx": 20
+        },
+        {
+          "name": "s2",
+          "ty_idx": 20
+        },
+        {
+          "name": "threshold",
+          "ty_idx": 13
+        },
+        {
+          "name": "tail",
+          "ty_idx": 27
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OracleSignersTail",
+      "ty_idx": 26,
+      "fields": [
+        {
+          "name": "s3",
+          "ty_idx": 20
+        },
+        {
+          "name": "s4",
+          "ty_idx": 20
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OracleAdapterStorage",
+      "ty_idx": 22,
+      "fields": [
+        {
+          "name": "config",
+          "ty_idx": 29
+        },
+        {
+          "name": "usedMask",
+          "ty_idx": 30
+        },
+        {
+          "name": "lastCandle",
+          "ty_idx": 30
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OracleConfigView",
+      "ty_idx": 31,
+      "fields": [
+        {
+          "name": "admin",
+          "ty_idx": 7
+        },
+        {
+          "name": "controller",
+          "ty_idx": 24
+        },
+        {
+          "name": "chainId",
+          "ty_idx": 9
+        },
+        {
+          "name": "configVersion",
+          "ty_idx": 9
+        },
+        {
+          "name": "threshold",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OracleSignerSetView",
+      "ty_idx": 32,
+      "fields": [
+        {
+          "name": "s0",
+          "ty_idx": 20
+        },
+        {
+          "name": "s1",
+          "ty_idx": 20
+        },
+        {
+          "name": "s2",
+          "ty_idx": 20
+        },
+        {
+          "name": "s3",
+          "ty_idx": 20
+        },
+        {
+          "name": "s4",
+          "ty_idx": 20
+        },
+        {
+          "name": "threshold",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "OracleUsedActions",
+      "ty_idx": 33,
+      "fields": [
+        {
+          "name": "openUsed",
+          "ty_idx": 5
+        },
+        {
+          "name": "closeUsed",
+          "ty_idx": 5
+        },
+        {
+          "name": "lastCandleIndex",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SetSignerSet",
+      "ty_idx": 12,
+      "prefix": {
+        "prefix_num": 1381236769,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "signers",
+          "ty_idx": 3
+        },
+        {
+          "name": "threshold",
+          "ty_idx": 13
+        },
+        {
+          "name": "chainId",
+          "ty_idx": 9
+        },
+        {
+          "name": "configVersion",
+          "ty_idx": 9
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SetOracleController",
+      "ty_idx": 14,
+      "prefix": {
+        "prefix_num": 1381236770,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "controller",
+          "ty_idx": 7
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SetOracleAdmin",
+      "ty_idx": 15,
+      "prefix": {
+        "prefix_num": 1381236771,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "admin",
+          "ty_idx": 7
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SubmitSignedOpenRound",
+      "ty_idx": 16,
+      "prefix": {
+        "prefix_num": 1381236772,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "roundId",
+          "ty_idx": 13
+        },
+        {
+          "name": "twap24hUsdE8",
+          "ty_idx": 17
+        },
+        {
+          "name": "timestamp",
+          "ty_idx": 11
+        },
+        {
+          "name": "sigCount",
+          "ty_idx": 13
+        },
+        {
+          "name": "sigs",
+          "ty_idx": 3
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SubmitSignedCloseStaking",
+      "ty_idx": 18,
+      "prefix": {
+        "prefix_num": 1381236773,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "roundId",
+          "ty_idx": 13
+        },
+        {
+          "name": "twap1hUsdE8",
+          "ty_idx": 17
+        },
+        {
+          "name": "timestamp",
+          "ty_idx": 11
+        },
+        {
+          "name": "sigCount",
+          "ty_idx": 13
+        },
+        {
+          "name": "sigs",
+          "ty_idx": 3
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SubmitSignedCandle",
+      "ty_idx": 19,
+      "prefix": {
+        "prefix_num": 1381236774,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "roundId",
+          "ty_idx": 13
+        },
+        {
+          "name": "candleIndex",
+          "ty_idx": 13
+        },
+        {
+          "name": "periodStart",
+          "ty_idx": 9
+        },
+        {
+          "name": "periodEnd",
+          "ty_idx": 9
+        },
+        {
+          "name": "twapPriceUsdE8",
+          "ty_idx": 17
+        },
+        {
+          "name": "dataDigest",
+          "ty_idx": 20
+        },
+        {
+          "name": "timestamp",
+          "ty_idx": 11
+        },
+        {
+          "name": "sigCount",
+          "ty_idx": 13
+        },
+        {
+          "name": "sigs",
+          "ty_idx": 3
+        }
+      ]
+    }
+  ],
+  "incoming_messages": [
+    {
+      "body_ty_idx": 12
+    },
+    {
+      "body_ty_idx": 14
+    },
+    {
+      "body_ty_idx": 15
+    },
+    {
+      "body_ty_idx": 16
+    },
+    {
+      "body_ty_idx": 18
+    },
+    {
+      "body_ty_idx": 19
+    },
+    {
+      "body_ty_idx": 21
+    }
+  ],
+  "incoming_external": [],
+  "outgoing_messages": [
+    {
+      "body_ty_idx": 3
+    }
+  ],
+  "emitted_events": [],
+  "storage": {
+    "storage_ty_idx": 22
+  },
+  "get_methods": [
+    {
+      "tvm_method_id": 103798,
+      "name": "get_config",
+      "parameters": [],
+      "return_ty_idx": 31
+    },
+    {
+      "tvm_method_id": 119399,
+      "name": "get_signer_set",
+      "parameters": [],
+      "return_ty_idx": 32
+    },
+    {
+      "tvm_method_id": 123835,
+      "name": "get_used_actions",
+      "parameters": [
+        {
+          "name": "roundId",
+          "ty_idx": 13
+        }
+      ],
+      "return_ty_idx": 33
+    }
+  ],
+  "thrown_errors": [
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotAdmin",
+      "err_code": 100
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.UnknownMessage",
+      "err_code": 106
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotInitialized",
+      "err_code": 107
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.AlreadyInitialized",
+      "err_code": 108
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadConfig",
+      "err_code": 250
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotEnoughSignatures",
+      "err_code": 300
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.StaleSignature",
+      "err_code": 301
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.ReplayAction",
+      "err_code": 302
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadCandleOrder",
+      "err_code": 303
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadSignerIndex",
+      "err_code": 304
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.VersionTooOld",
+      "err_code": 306
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadThreshold",
+      "err_code": 307
+    }
+  ],
+  "compiler_name": "tolk",
+  "compiler_version": "1.4.1"
+}

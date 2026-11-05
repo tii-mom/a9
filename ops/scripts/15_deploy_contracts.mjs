@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** 15 — 整体部署（contracts/scripts/deploy-emulation.tolk）：JettonMaster + mint + TeamVault + RoundController + SetJettonWallet + InitController。 */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { str } from './lib/cli.mjs';
@@ -8,7 +9,7 @@ import { BAM_ROOT, RECORDS_DIR, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { setContract, writeRegistry } from './lib/registry.mjs';
-import { getJettonData, parseAddress } from './lib/ton.mjs';
+import { getTonBalance, getJettonData, parseAddress } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
 
 const { args, execute, params, digest, registry, toolchain } = bootstrap({
@@ -90,8 +91,24 @@ function cleanToken(token) {
   return out;
 }
 
+function loadBuildHash(contractName) {
+  const file = resolvePath(params.toolchain.buildDir + '/' + contractName + '.json');
+  if (!existsSync(file)) return null;
+  try {
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    return json.hash && /^[0-9a-fA-F]{64}$/.test(json.hash) ? json.hash.toLowerCase() : null;
+  } catch { return null; }
+}
+
+function codeHashViaActon(address) {
+  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton rpc info ' + address + ' --net testnet';
+  const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
+  const match = String(result.stdout || '').match(/Code Hash:\s+0x([0-9a-fA-F]{64})/);
+  return match ? match[1].toLowerCase() : null;
+}
+
 function parseAddresses(text) {
-  const found = { jettonMaster: null, teamVault: null, roundController: null, roundControllerJettonWallet: null, teamVaultJettonWallet: null };
+  const found = { jettonMaster: null, oracleAdapter: null, teamVault: null, roundController: null, roundControllerJettonWallet: null, teamVaultJettonWallet: null };
   const others = [];
   const lines = String(text).split(String.fromCharCode(10));
   for (const line of lines) {
@@ -100,11 +117,12 @@ function parseAddresses(text) {
     if (!addresses.length) continue;
     const lower = line.toLowerCase();
     const first = addresses[0];
-    if (lower.includes('jettonmaster') || lower.includes('jetton master')) found.jettonMaster = found.jettonMaster || first;
-    else if (lower.includes('teamvault') && lower.includes('wallet')) found.teamVaultJettonWallet = found.teamVaultJettonWallet || first;
-    else if (lower.includes('roundcontroller') && lower.includes('wallet')) found.roundControllerJettonWallet = found.roundControllerJettonWallet || first;
-    else if (lower.includes('teamvault')) found.teamVault = found.teamVault || first;
-    else if (lower.includes('roundcontroller')) found.roundController = found.roundController || first;
+    if (lower.includes('oracleadapter') || lower.includes('oracle adapter')) found.oracleAdapter = found.oracleAdapter || first;
+    else if (lower.includes('jettonmaster') || lower.includes('jetton master')) found.jettonMaster = found.jettonMaster || first;
+    else if (lower.includes('jetton wallet') && (lower.includes('teamvault') || lower.includes('team vault') || lower.includes('tv jetton'))) found.teamVaultJettonWallet = found.teamVaultJettonWallet || first;
+    else if (lower.includes('jetton wallet') && (lower.includes('roundcontroller') || lower.includes('round controller') || lower.includes('rc jetton'))) found.roundControllerJettonWallet = found.roundControllerJettonWallet || first;
+    else if (lower.includes('teamvault') || lower.includes('team vault')) found.teamVault = found.teamVault || first;
+    else if (lower.includes('roundcontroller') || lower.includes('round controller')) found.roundController = found.roundController || first;
     else others.push(first);
   }
   const remaining = others.filter((address) => Object.values(found).includes(address) === false);
@@ -122,29 +140,68 @@ async function registerFromText(text, logPath) {
     roundController: 'RoundController',
     roundControllerJettonWallet: 'RC Jetton Wallet',
     teamVaultJettonWallet: 'TV Jetton Wallet',
+    oracleAdapter: 'OracleAdapter',
   };
   section('解析部署地址');
+  const buildNameByKey = {
+    jettonMaster: 'JettonMaster',
+    oracleAdapter: 'OracleAdapter',
+    teamVault: 'TeamVault',
+    roundController: 'RoundController',
+  };
   const rows = [];
+  const inactive = [];
+  const codeHashBad = [];
   for (const [key, label] of Object.entries(labels)) {
-    const address = parsed.found[key];
-    rows.push([label, address || '（未解析）', address ? '登记' : '需 --adopt/覆盖']);
-    if (address) {
-      try { setContract(registry, key, address, { note: 'deploy-emulation 输出解析' }); }
-      catch (error) { warn(label + ' 登记失败：' + String(error.message || error)); }
+      const address = parsed.found[key];
+      if (!address) { rows.push([label, '（未解析）', '需 --adopt/覆盖']); continue; }
+      if (key.endsWith('JettonWallet')) {
+        rows.push([label, address, '待首次转账时部署（Jetton Wallet 无需预先 active）']);
+        continue;
+      }
+      let status = '未检查';
+      try {
+        const info = await getTonBalance(params, address);
+        const balanceTon = (Number(BigInt(info.balanceNano)) / 1e9).toFixed(3);
+        const active = info.state === 'active';
+        const expected = buildNameByKey[key] ? loadBuildHash(buildNameByKey[key]) : null;
+        const actual = active ? codeHashViaActon(address) : null;
+        const codeOk = !expected || (actual !== null && actual === expected);
+        if (!active) inactive.push(label);
+        if (active && !codeOk) codeHashBad.push(label + '（链上 ' + (actual || '未读取') + ' vs build ' + (expected || '无') + '）');
+        status = (active ? 'active' : '未激活') + ' / ' + balanceTon + ' TON' + (active ? (codeOk ? ' / code hash OK' : ' / CODE HASH MISMATCH') : '');
+      } catch (error) {
+        status = '检查失败：' + String(error.message || error).slice(0, 80);
+        inactive.push(label);
+      }
+      rows.push([label, address, status]);
     }
-  }
-  table(['对象', '地址', '状态'], rows);
-  if (parsed.found.roundController) {
-    registry.bindings.teamVaultAcceptsOnly = parsed.found.roundController;
-  }
-  writeRegistry(registry);
-  const missing = Object.entries(labels).filter(([key]) => !parsed.found[key]).map(([, label]) => label);
-  if (missing.length) {
-    warn('以下地址未解析：' + missing.join('、'));
-    detail('可用 --from-log ' + logPath + ' 重试；或用 10/20/30 脚本 adopt 模式分别登记，再执行 65/70 的核对模式。');
-    info('其余地址已登记；请先补齐后再执行 40/55/50/60。');
-  } else {
-    ok('整体部署地址已全部登记到 ops/config/testnet.registry.json');
+    table(['对象', '地址', '状态'], rows);
+    if (inactive.length) {
+      fail('以下部署地址链上未激活：' + inactive.join('、') + '；不登记（Acton waitForTrace 成功不等于账户已部署）');
+      detail('原因通常是部署发送钱包 TON 不足或部署消息被 bounce；先修复 TON/参数再重跑。');
+      process.exit(finish({ 结果: 'INACTIVE_CONTRACTS', 未激活: inactive.join(',') }));
+    }
+    if (codeHashBad.length) {
+      fail('合约 code hash 与 build 不一致：' + codeHashBad.join('；'));
+      process.exit(finish({ 结果: 'CODE_HASH_MISMATCH' }));
+    }
+    for (const key of Object.keys(labels)) {
+      const address = parsed.found[key];
+      if (address) {
+        try { setContract(registry, key, address, { note: 'deploy-emulation 输出解析 + 链上 active/code hash 校验' }); }
+        catch (error) { warn(labels[key] + ' 登记失败：' + String(error.message || error)); }
+      }
+    }
+    if (parsed.found.roundController) registry.bindings.teamVaultAcceptsOnly = parsed.found.roundController;
+    writeRegistry(registry);
+    const missing = Object.entries(labels).filter(([key]) => !parsed.found[key]).map(([, label]) => label);
+    if (missing.length) {
+      warn('以下地址未解析：' + missing.join('、'));
+      detail('可用 --from-log ' + logPath + ' 重试；或用 10/20/30 脚本 adopt 模式分别登记，再执行 65/70 的核对模式。');
+      info('其余地址已登记；请先补齐后再执行 40/55/50/60。');
+    } else {
+      ok('整体部署地址已全部登记（链上 active + code hash 校验通过）');
   }
   if (parsed.others.length) detail('日志中其他地址（可能包含 admin/treasury/用户钱包）：' + parsed.others.join(', '));
   if (parsed.found.jettonMaster) {

@@ -219,15 +219,15 @@
         "walletNameEnv": "TON_DEPLOYER_WALLET",
         "commands": {
           "buildAll": "cd {contractsDir} && acton build",
-          "deployAllContracts": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet",
-          "deployJettonMaster": "cd {contractsDir} && acton script scripts/deploy/deploy_jetton_master.tolk {treasury} {totalSupplyRaw}",
-          "mintAndLockJetton": "cd {contractsDir} && acton script scripts/deploy/mint_and_lock_jetton.tolk {master} {treasury} {totalSupplyRaw}",
-          "fundVault": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} JETTON_MASTER_ADDRESS={jettonMaster} acton script scripts/deploy/fund_jetton.tolk {recipient} {amount} --net testnet",
-          "fundTon": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} acton script scripts/deploy/fund_ton.tolk {recipient} {amountTon} --net testnet",
-          "adminOp": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} acton script scripts/deploy/admin_op.tolk {op} {roundId} {extra} --net testnet",
-          "submitCandle": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_CANDLE_INDEX={candleIndex} A9_PERIOD_START={periodStart} A9_PERIOD_END={periodEnd} A9_TWAP_E8={twapUsdE8} A9_DIGEST={digest} acton script scripts/deploy/admin_op.tolk submit-candle {roundId} 0 --net testnet",
-          "setJettonWallet": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} A9_TARGET_ADDRESS={targetContract} A9_JETTON_WALLET_ADDRESS={walletAddress} acton script scripts/deploy/admin_op.tolk set-jetton-wallet 0 --net testnet",
-          "bindRoles": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} TEAM_VAULT_ADDRESS={teamVault} A9_CONTROLLER_ADDRESS={roundController} acton script scripts/deploy/admin_op.tolk init-controller 0 --net testnet"
+          "deployAllContracts": "cd {contractsDir} && acton script --net testnet scripts/deploy-emulation.tolk",
+          "deployJettonMaster": "cd {contractsDir} && acton script --net testnet scripts/deploy/deploy_jetton_master.tolk {treasury} {totalSupplyRaw}",
+          "mintAndLockJetton": "cd {contractsDir} && acton script --net testnet scripts/deploy/mint_and_lock_jetton.tolk {master} {treasury} {totalSupplyRaw}",
+          "fundVault": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} JETTON_MASTER_ADDRESS={jettonMaster} acton script --net testnet scripts/deploy/fund_jetton.tolk {recipient} {amount}",
+          "fundTon": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} acton script --net testnet scripts/deploy/fund_ton.tolk {recipient} {amountTon}",
+          "adminOp": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} acton script --net testnet scripts/deploy/admin_op.tolk {op} {roundId} {extra}",
+          "submitCandle": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_CANDLE_INDEX={candleIndex} A9_PERIOD_START={periodStart} A9_PERIOD_END={periodEnd} A9_TWAP_E8={twapUsdE8} A9_DIGEST={digest} acton script --net testnet scripts/deploy/admin_op.tolk submit-candle {roundId} 0",
+          "setJettonWallet": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} A9_TARGET_ADDRESS={targetContract} A9_JETTON_WALLET_ADDRESS={walletAddress} acton script --net testnet scripts/deploy/admin_op.tolk set-jetton-wallet 0",
+          "bindRoles": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} TEAM_VAULT_ADDRESS={teamVault} A9_CONTROLLER_ADDRESS={roundController} acton script --net testnet scripts/deploy/admin_op.tolk init-controller 0"
         },
         "note": "Acton script 只接受位置参数（按 main() 参数顺序），不支持 flag；广播脚本默认 dry-run，OPS_EXECUTE=1 才广播、OPS_CONFIRM=YES 二次确认、A9_SIGNER_WALLET 指定签名钱包；真实网络必须带 --net testnet；本地验证广播可加 OPS_ALLOW_EMULATION=true。deploy-emulation.tolk 是整体顺序部署（无子命令）；分步只保留 Jetton 两步。地址文件 contracts/deploy/{jetton-master,round-controller,team-vault}.addr 可直接读取。ABI v8.4-audit-fixed：SetJettonWalletCode=0x5254001B（code:cell，RC，仅 currentRoundId==0）、SetTeamWalletJettonWallet=0x5254001C（wallet:address，TV，admin 一次性）；TV 不通过 InitController 传 teamWallet 钱包。注意：admin_op 不提供这两个一次性 op（contract-dev 确认不补），因此测试网只走整体部署路径：15（内置 wiring）→ 65 --query-only → 70。",
         "stepwiseDeployment": {
