@@ -43,6 +43,8 @@ export {
   MIN_CLAIM_TON_BALANCE,
   nextDepositNonce,
   nextQueryId,
+  EVENT_OPCODES,
+  GET_METHODS,
 } from './protocol';
 
 export { buildStakePayloadCell, buildJettonTransferCell, buildClaimPayloadCell } from './payload';

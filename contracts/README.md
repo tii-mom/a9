@@ -403,7 +403,7 @@ SETTLING_FAILURE 时 RC 发出：
 
 ## 9. 与文档的差异 / 工程裁决（需 reviewer 知悉）
 
-1. **单地址限额**：docs/00 V6.1 原文“单地址 ≤ 本轮总质押 10%”对**首个存款人不可实现**（他必然 100%）。经 lead 裁决，实现为**固定硬顶 20,000,000 A9**（= maxTotalStakeRaw × maxStakePerAddressBps / 10000），同时保留本轮总上限 200,000,000 A9；docs 已同步为固定硬顶口径。
+1. **单地址限额**：docs/00 V6.1 原文“单地址 ≤ 本轮总质押 10%”对**首个存款人不可实现**（他必然 100%）。经 lead 裁决，实现为**固定硬顶 20,000,000 A9**（= maxTotalStakeRaw × maxStakePerAddressBps / 10000），同时保留本轮总上限 200,000,000 A9；docs 已同步为固定硬顶口径。ABI 中的 maxStakePerAddressBps=1000 仅作为该硬顶的推导参数保留；合约**不做** min(20,000,000, 本轮当前总质押×10%) 的动态校验（首个存款人可为 100%，已有测试覆盖）。
 2. **7~11 根达标**：旧口径只写 >=12 成功 / <=6 失败，中间态会永久卡住。经 lead 裁决 **18 根齐备后 <12 即失败（无中间态）**，docs 已修正；实现与测试按此。
 3. **StakeDeposit 位宽**：最终采用 lead 定稿 acceptFullPrincipalBurn: uint8（136 bit），不是早期讨论的 1 bit；docs/04 §19 已同步。
 4. **Vault 合并**：docs/04 的 StakingVault / RewardVault 是**逻辑模块**，不是独立部署地址；V6.1 自研面只有 RC + TV。ClaimPrincipal/ClaimReward/ClaimAll 均发给 RC，质押 transfer 的 owner/recipient 也是 RC。

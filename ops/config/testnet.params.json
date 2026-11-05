@@ -106,7 +106,9 @@
     "minStakeTokens": 10000,
     "minStakeRaw": "10000000000000",
     "maxStakePerAddressBps": 1000,
-    "maxStakePerAddressNote": "单地址累计 ≤ 本轮总质押 10%",
+    "maxStakePerAddressRaw": "20000000000000000",
+    "maxStakePerAddressTokens": 20000000,
+    "maxStakePerAddressNote": "固定硬顶 20,000,000 A9（= 200,000,000 × 1000/10000，contracts/README §9.1 裁决）；首个存款人不再被 10% 动态规则卡死",
     "maxTotalStakeTokens": 200000000,
     "maxTotalStakeRaw": "200000000000000000",
     "cancelStakeAllowed": false
@@ -173,6 +175,7 @@
       "BurnTeamQuota": "0x5254000D",
       "ClaimAll": "0x5254000E",
       "StakeDeposit": "0x5254000F",
+      "SetJettonWallet": "0x52540016",
       "AbortTechnical": "0x52540010",
       "StartObservation": "0x52540011",
       "InitController": "0x52540012",
@@ -210,14 +213,16 @@
           "buildAll": "cd {contractsDir} && acton build",
           "deployJettonMaster": "cd {contractsDir} && acton script scripts/deploy/deploy_jetton_master.tolk --treasury {treasury} --amount {totalSupplyRaw}",
           "mintAndLockJetton": "cd {contractsDir} && acton script scripts/deploy/mint_and_lock_jetton.tolk --treasury {treasury} --amount {totalSupplyRaw}",
-          "deployTeamVault": "cd {contractsDir} && acton script scripts/deploy/deploy_team_vault.tolk --admin {adminOwner} --team-wallet {teamWallet} --team-round {teamRoundRaw}",
-          "deployRoundController": "cd {contractsDir} && acton script scripts/deploy/deploy_round_controller.tolk --config {initDataFile}",
-          "bindRoles": "cd {contractsDir} && acton script scripts/ops/init_controller.tolk --team-vault {teamVault} --controller {roundController}",
-          "initParams": "cd {contractsDir} && acton script scripts/ops/verify_params.tolk --config {initDataFile}",
-          "fundVault": "cd {contractsDir} && acton script scripts/ops/fund_vault.tolk --to {recipient} --amount {amount}",
-          "adminOp": "cd {contractsDir} && acton script scripts/ops/admin_op.tolk --controller {roundController} --op {op} --round {roundId} {extra}"
+          "deployTeamVault": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only team-vault",
+          "deployRoundController": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only round-controller --team-vault {teamVault}",
+          "setJettonWallet": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only set-jetton-wallet --target {targetContract} --wallet {walletAddress}",
+          "bindRoles": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only init-controller --team-vault {teamVault} --controller {roundController}",
+          "initParams": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only verify-params --config {initDataFile}",
+          "fundVault": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only fund-jetton --to {recipient} --amount {amount}",
+          "fundTon": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only fund-ton --to {recipient} --amount {amountTon}",
+          "adminOp": "cd {contractsDir} && acton script scripts/deploy-emulation.tolk --net testnet --only admin-op --controller {roundController} --op {op} --round {roundId} {extra}"
         },
-        "note": "命令模板必须与本仓库锁定的 Acton 版本核对后再执行；pinned=false 时 preflight 要求 OPS_ALLOW_UNPINNED_TOOLCHAIN=1。"
+        "note": "命令模板以 contracts/scripts/deploy-emulation.tolk 的子命令约定编写（--net testnet / --only ...）；contracts/README §7.3 目前只保证整体部署 acton script scripts/deploy-emulation.tolk --net testnet。若 --only 子命令不存在：改用整体部署 + --adopt 登记地址，并在 contracts/scripts 增加对应子命令后再回填模板。"
       },
       "manual": {
         "bin": null,
@@ -232,10 +237,27 @@
     { "id": "teamVault", "step": 20, "script": "20_deploy_teamvault.mjs", "dependsOn": ["jettonMint"] },
     { "id": "roundController", "step": 30, "script": "30_deploy_round_controller.mjs", "dependsOn": ["teamVault"] },
     { "id": "params", "step": 40, "script": "40_init_params.mjs", "dependsOn": ["roundController"] },
-    { "id": "roles", "step": 70, "script": "70_bind_roles.mjs", "dependsOn": ["params"] },
-    { "id": "funding", "step": 50, "script": "50_fund_vaults.mjs", "dependsOn": ["roles"] },
+    { "id": "jettonWallets", "step": 65, "script": "65_set_jetton_wallets.mjs", "dependsOn": ["roundController"] },
+    { "id": "roles", "step": 70, "script": "70_bind_roles.mjs", "dependsOn": ["jettonWallets", "params"] },
+    { "id": "tonGas", "step": 55, "script": "55_fund_ton.mjs", "dependsOn": ["roles"] },
+    { "id": "funding", "step": 50, "script": "50_fund_vaults.mjs", "dependsOn": ["tonGas"] },
     { "id": "register", "step": 60, "script": "60_verify_and_register.mjs", "dependsOn": ["funding"] },
     { "id": "verify", "step": 90, "script": "verify_deployment.mjs", "dependsOn": ["register"] }
+  ],
+  "tonBalances": {
+    "roundControllerMinTon": 20,
+    "teamVaultMinTon": 10,
+    "note": "contracts/deploy/params.testnet.json：RC ≥20 TON、TV ≥10 TON 作为 gas/存储；每条跨合约指令约 0.05 TON。"
+  },
+  "deployOrder": [
+    "1. 部署 Jetton Master，铸造 100 亿，关闭 mint 权限",
+    "2. 部署 TeamVault：jettonWallet 用占位地址（admin），controller = null",
+    "3. 部署 RoundController：teamVault = TV 地址，stakingJettonWallet 用占位地址",
+    "4. Jetton Master get_wallet_address(RC) → admin RC.SetJettonWallet(0x52540016)",
+    "5. Jetton Master get_wallet_address(TV) → admin TV.SetJettonWallet(0x52540016)",
+    "6. admin TV.InitController(roundController)（一次性）",
+    "7. 给 RC Jetton Wallet 打 70 亿 A9；给 TV Jetton Wallet 打 12 亿 A9；其余按 8/5/5 分配",
+    "8. 给 RC ≥20 TON、TV ≥10 TON；admin OpenRound(round=1, twap24h) 开首轮（R1 无 PREVIEW）"
   ],
   "monitoring": {
     "workerBaseUrlEnv": "OPS_WORKER_BASE_URL",

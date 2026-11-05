@@ -57,6 +57,45 @@ export const DEFAULT_MAX_STAKE_PER_ADDRESS_TOKENS = 20_000_000n;
 /** 轮次上限（claimAll 有界循环上界） */
 export const ROUND_COUNT_MAX = 10;
 
+/**
+ * 事件 opcode（external-out logs，供索引器/日志解析；前端当前不直接消费）。
+ * 定稿来源：contracts/README.md §4.5。
+ */
+export const EVENT_OPCODES = {
+  TARGET_PRICE_SET: 0x52540101,
+  ROUND_SETTLED: 0x52540102,
+  DEPOSIT_ACCEPTED: 0x52540103,
+  TECHNICAL_ABORTED: 0x52540104,
+  TEAM_RELEASED: 0x52540201,
+  TEAM_BURNED: 0x52540202,
+} as const;
+
+/**
+ * 合约 get methods 名称（定稿来源：contracts/deploy/abi/*.json + contracts/README.md §4.6）。
+ * 注意：get_round_target_price 在 PREVIEW / UNOPENED 期间返回 0，UI 应显示「待开窗锁定」。
+ * 当前前端轮次数据仍走 worker API；接链读取时按下表调用。
+ */
+export const GET_METHODS = {
+  roundController: {
+    protocolConfig: 'get_protocol_config',
+    currentRound: 'get_current_round',
+    successCount: 'get_success_count',
+    round: 'get_round',
+    roundStatus: 'get_round_status',
+    roundTargetPrice: 'get_round_target_price',
+    roundCandle: 'get_round_candle',
+    userStake: 'get_user_stake',
+    roundTotalStake: 'get_round_total_stake',
+    userRewardEstimate: 'get_user_reward_estimate',
+    claimableAll: 'get_claimable_all',
+    roundBurnStatus: 'get_round_burn_status',
+  },
+  teamVault: {
+    teamVaultState: 'get_team_vault_state',
+    roundState: 'get_round_state',
+  },
+} as const;
+
 /** 生成 uint64 查询 id（回执关联用，合约不做唯一性强制）。 */
 export function nextQueryId(now: number = Date.now()): bigint {
   const random = Math.floor(Math.random() * 1024);

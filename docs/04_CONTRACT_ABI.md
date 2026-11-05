@@ -275,6 +275,12 @@ ABI 文档。
 
   `ClaimAll`                        `0x5254000E` 用户                     RoundController（多轮奖励合并领取，≤10 轮）
   `StakeDeposit`                    `0x5254000F` 用户 Jetton Wallet（forward payload） RoundController / 质押钱包（TEP-74 transfer 携带）
+  `AbortTechnical`                  `0x52540010` 任何人（超时后）           RoundController（暂停 14 天 / 观察超时 7 天）
+  `StartObservation`                `0x52540011` 任意 keeper              RoundController（关窗后进入观察）
+  `TeamReleasedAck`                 `0x52540013` TeamVault                RoundController
+  `TeamBurnedAck`                   `0x52540014` TeamVault                RoundController
+  `RetryPendingActions`             `0x52540015` 任何人                    RoundController（重试未完成的 burn/转账）
+  `SetJettonWallet`                 `0x52540016` 部署时一次性               RoundController（绑定 Jetton Wallet）
 
   `CancelStake`                      **无此消息**                          ——（V5.3 已确认：不支持取消质押）
   --------------------------------------------------------------------------------------------------
@@ -491,3 +497,17 @@ ClaimPayload {
 - 每个 (roundId, owner, kind) 幂等标记，重复领取返回已领取结果，不重复转账。
 
 > 以上为 V6.2 前端与合约的临时约定；contract-dev 若在实现中调整，需同步更新本节与 contracts/README，前端以最终 ABI 为准。
+
+
+### 19.3 事件 opcode（V6.2 实现定稿）
+
+| 事件 | opcode | 发出方 |
+| --- | --- | --- |
+| RoundOpened / StakingClosed / ObservationStarted | 0x52540101 ~ 0x52540103 | RoundController |
+| TargetPriceSet(roundId, tier, targetPriceUsdE8, twap24hUsdE8) | 0x52540104 | RoundController |
+| RoundSucceeded / RoundFailedPermanent | 0x52540105 / 0x52540106 | RoundController |
+| TeamReleased / TeamBurned | 0x52540107 / 0x52540108 | TeamVault |
+| TechnicalAborted | 0x52540109 | RoundController |
+| Claimed(owner, roundId, kind, amount) | 0x5254010A | RoundController |
+
+> opcode 以 contracts/README.md 与实现为准；前端常量见 web/src/features/chain/protocol.ts。

@@ -22,8 +22,9 @@ chain/
 └─ chain.css           # 面板样式（沿用 fuse.css 变量与 .panel/.btn 体系）
 `@
 
-## 1. 消息 ABI（V6.2，与 contract-dev 定稿 / docs/04 §19 一致）
+## 1. 消息 ABI（V6.2 定稿，与 contracts/README.md §4 + contracts/deploy/abi/*.json 对齐）
 
+> **ABI 定稿来源**：`contracts/README.md` §4 与 `contracts/deploy/abi/RoundController.json` / `TeamVault.json`（contract-dev，2026-11-05，47 个测试通过）；`docs/04_CONTRACT_ABI.md` §19 已对齐。本模块常量与之逐字段一致，并用 BOC/ton-core 对照做过字节级验证。
 > 自研合约只有 **RoundController + TeamVault**：没有独立的 StakingVault / RewardVault 地址。
 > 质押 Jetton 的 owner、三种领取消息的接收方都是 **RoundController**。
 
@@ -63,6 +64,12 @@ ClaimPayload（104 bit）
 
 消息附带 0.10 TON。三种领取均幂等；ClaimAll 把本金 + 奖励合并为一笔 Jetton 转账。
 
+### 1.3 事件与 get methods（本模块已登记常量，当前读取仍走后端）
+
+- 事件 opcode（external-out，供索引器解析）：@@TargetPriceSet 0x52540101@@、@@RoundSettled 0x52540102@@、@@DepositAccepted 0x52540103@@、@@TechnicalAborted 0x52540104@@、@@TeamReleased 0x52540201@@、@@TeamBurned 0x52540202@@（见 @@EVENT_OPCODES@@）。
+- get methods（见 @@GET_METHODS@@）：RC @@get_protocol_config / get_current_round / get_success_count / get_round / get_round_status / get_round_target_price / get_round_candle / get_user_stake / get_round_total_stake / get_user_reward_estimate / get_claimable_all / get_round_burn_status@@；TV @@get_team_vault_state / get_round_state@@。
+- **目标价读取约定**：@@get_round_target_price@@ 在 PREVIEW / UNOPENED 期间返回 0，UI 必须显示「待开窗锁定」，不能当成 $0 目标价。
+- 当前轮次/可领取金额仍走后端 API（见 §6 限制）；后续接链读取时按上述方法名与 ABI 返回结构实现。
 ## 2. 交易构造与发送
 
 - **Jetton Wallet 解析**（`rpc.ts`）：本地缓存 → tonapi `/v2/accounts/{owner}/jettons` → toncenter
