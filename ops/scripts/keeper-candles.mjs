@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-/** keeper-candles.mjs — 快测 RC 的 keeper：自动开轮/关窗/提交 24 根 K 线/结算/开下一轮。
+/** keeper-candles.mjs — v10 keeper 循环：OpenRound → （到期）CloseStaking → 24 根 SubmitCandle（第 24 根即判定）
+ * → 结算动作被退回（SettlementBounced / *Confirmed=false）时自动 RetrySettlement → 预告结束后开下一轮。
  *
  * 用法：
- *   OPS_EXECUTE=1 node ops/scripts/keeper-candles.mjs --rc <fastRc> --signer a9-fast-admin --rounds 1 --mode success
+ *   OPS_EXECUTE=1 node ops/scripts/keeper-candles.mjs --rc <RC> --signer a9-keeper --rounds 1 --mode success
  *   --mode success|failure|mixed；mixed 默认模式 S,F,S,S,S,F,S,S,F,S
  *   --dry-run（不带 OPS_EXECUTE）只打印动作不广播
  */
@@ -11,12 +12,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
 import { flag, parseArgs, str } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, loadParams, networkName, resolvePath } from './lib/config.mjs';
-import { runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { decodeRoundView, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { pendingSettlementActions } from './lib/ledger.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const params = loadParams();
 const rc = str(args, 'rc') || process.env.A9_FAST_RC;
-const signer = str(args, 'signer') || 'a9-fast-admin';
+const signer = str(args, 'signer') || process.env.A9_KEEPER_WALLET || 'a9-keeper';
 const rounds = Number(str(args, 'rounds') || 1);
 const mode = str(args, 'mode') || 'mixed';
 const execute = process.env.OPS_EXECUTE === '1' && !flag(args, 'dry-run');
@@ -29,7 +31,7 @@ const patternArg = str(args, 'modes');
 const pattern = patternArg ? patternArg.split(',').map((x) => x.trim().toUpperCase()) : ['S','F','S','S','S','F','S','S','F','S'];
 if (!rc) { console.error('缺少 --rc <fastRC>'); process.exit(2); }
 
-const STATUS = { 0:'UNOPENED',1:'PREVIEW',2:'STAKING_OPEN',3:'STAKING_CLOSED',4:'OBSERVING',5:'ORACLE_PAUSED',6:'SETTLING_SUCCESS',7:'SETTLING_FAILURE',8:'SUCCEEDED',9:'FAILED_PERMANENT',10:'TECHNICAL_ABORTED' };
+const STATUS = { 0:'UNOPENED',1:'PREVIEW',2:'STAKING_OPEN',4:'OBSERVING',8:'SUCCEEDED',9:'FAILED_PERMANENT',10:'TECHNICAL_ABORTED' };
 const TERMINAL = new Set([8,9,10]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let candleSeconds = 10n;
@@ -54,6 +56,7 @@ async function round(roundId) {
     stakeOpenAt: Number(n(7)), stakeCloseAt: Number(n(8)),
     obsStart: Number(n(9)), obsEnd: Number(n(10)),
     candlesSeen: Number(n(11)), qualified: Number(n(12)),
+    view: decodeRoundView(s),
   };
 }
 async function readTiming() {
@@ -126,8 +129,20 @@ function modeFor(roundId) {
 }
 
 async function ensureOpen(roundId) {
-  await runAdmin('open-round', [String(roundId), openTwap], {}, 'open-round(' + roundId + ')');
+  // OpenRound 不带 roundId：合约自动开「当前已判定轮的下一轮」（R1 时 currentRound = 0）
+  await runAdmin('open-round', ['0', openTwap], {}, 'open-round(' + roundId + ')');
   await sleep(1500);
+}
+
+/** 已判定轮的结算动作被退回（SettlementBounced）时调用 RetrySettlement；返回是否仍待确认。 */
+async function retrySettlementIfNeeded(roundId) {
+  const rd = await round(roundId);
+  const pending = pendingSettlementActions(rd.view);
+  if (!pending || pending.length === 0) return false;
+  log({ event: 'settlement-pending', roundId, pending });
+  try { await runAdmin('retry-settlement', [String(roundId), '0'], {}, 'retry-settlement(' + roundId + ')'); }
+  catch (error) { log({ event: 'retry-settlement-failed', roundId, error: String(error.message).slice(0, 200) }); }
+  return true;
 }
 
 function candleTwap(modeChar, target) {
@@ -145,7 +160,7 @@ async function submitCandles(roundId) {
     const periodEnd = periodStart + Number(candleSeconds);
     while (nowSec() < periodEnd) await sleep(500);
     const rdNow = await round(roundId);
-    if (rdNow.status === 6 || rdNow.status === 7 || TERMINAL.has(rdNow.status)) break;
+    if (TERMINAL.has(rdNow.status)) break;
     const twap = candleTwap(modeChar, rdNow.target);
     let landed = false;
     const waits = [3000, 5000, 8000, 12000, 15000, 15000, 15000, 15000, 15000, 15000];
@@ -169,19 +184,6 @@ async function submitCandles(roundId) {
     }
   }
   log({ event: 'candles-done', roundId, candlesSeen: rd.candlesSeen, qualified: rd.qualified, status: STATUS[rd.status] });
-}
-
-async function finalizeWhenReady(roundId) {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const rd = await round(roundId);
-    if (TERMINAL.has(rd.status)) return rd;
-    if (rd.status === 6 || rd.status === 7) {
-      try { await runAdmin('finalize-round', [String(roundId), '0'], {}, 'finalize(' + roundId + ')'); }
-      catch (error) { log({ event: 'finalize-retry', roundId, error: String(error.message).slice(0, 200) }); }
-    }
-    await sleep(3000);
-  }
-  throw new Error('round ' + roundId + ' 未在超时内终态');
 }
 
 async function main() {
@@ -216,27 +218,16 @@ async function main() {
       } else await sleep(1500);
       continue;
     }
-    if (rd.status === 3 || rd.status === 4) { // closed/observing
+    if (rd.status === 4) { // observing（第 24 根 K 线提交即判定）
       if (rd.obsStart === 0) { await sleep(1000); continue; }
       await submitCandles(cur);
       continue;
     }
-    if (rd.status === 6 || rd.status === 7) {
-      const finalRd = await finalizeWhenReady(cur);
-      if (cur !== lastCountedRound) {
-        lastCountedRound = cur;
-        log({ event: 'round-settled', roundId: cur, status: STATUS[finalRd.status], qualified: finalRd.qualified, candlesSeen: finalRd.candlesSeen, metrics: { ...metrics } });
-        settled += 1;
-        if (settled >= rounds) break;
-        if (settleWaitMs > 0) await sleep(settleWaitMs);
-      }
-      await sleep(1000);
-      continue;
-    }
     if (TERMINAL.has(rd.status)) {
+      if (await retrySettlementIfNeeded(cur)) { await sleep(5000); continue; }
       if (cur !== lastCountedRound) {
         lastCountedRound = cur;
-        log({ event: 'round-terminal', roundId: cur, status: STATUS[rd.status] });
+        log({ event: 'round-terminal', roundId: cur, status: STATUS[rd.status], qualified: rd.qualified, candlesSeen: rd.candlesSeen, metrics: { ...metrics } });
         settled += 1;
         if (settled >= rounds) break;
         if (settleWaitMs > 0) await sleep(settleWaitMs);

@@ -1,31 +1,32 @@
-/** 测试网地址登记表：唯一事实来源（地址 + 部署交易 + 配置哈希）。 */
+/** 地址登记表（v10）：唯一事实来源（地址 + 部署交易 + 配置哈希）。 */
 
 import { createHash } from 'node:crypto';
 import { existsSync, renameSync } from 'node:fs';
 import { DEFAULT_REGISTRY, OPS_ROOT, TEMPLATE_REGISTRY, readJSON, writeJSON } from './config.mjs';
 import { parseAddress, validateTestnetAddress } from './ton.mjs';
 
+// v10（D-42）：只有 JettonMaster + 标准 JettonWallet + 一个 RoundController。
+// RC 的 Jetton Wallet 同时托管 70 亿奖励 + 12 亿团队额度 + 质押本金。
 export const CONTRACT_KEYS = [
   'jettonMaster',
   'jettonMasterTreasuryWallet',
-  'teamVault',
-  'teamVaultJettonWallet',
   'roundController',
-  // V6.1 实现（contracts/README §3）：RC 只有一个 Jetton Wallet，同时托管质押本金 + 每轮 7 亿奖励；
-  // 不存在独立的 StakingVault / RewardVault 部署地址。
   'roundControllerJettonWallet',
   'teamWalletJettonWallet',
-  'oracleAdapter',
 ];
 
+// 没有 admin：keeper 是唯一的运营热钱包（OpenRound / SubmitCandle）。
 export const WALLET_KEYS = [
-  'adminOwner',
+  'keeper',
   'treasury',
   'teamWallet',
   'marketingWallet',
   'liquidityWallet',
   'teamInternalWallet',
 ];
+
+/** 注资种类：RC 82 亿（奖励 + 团队，forward 0）+ 内盘 / 流动性 / 营销。 */
+export const FUNDING_KINDS = ['roundController', 'internalSale', 'liquidity', 'marketing'];
 
 function nowIso() {
   return new Date().toISOString();
@@ -45,6 +46,7 @@ export function emptyRegistry() {
     network: 'testnet',
     chainId: -3,
     status: 'not_deployed',
+    contractsVersion: 'v10',
     configVersion: 1,
     paramsDigest: null,
     codeHashes: {},
@@ -53,11 +55,11 @@ export function emptyRegistry() {
     contracts,
     wallets,
     bindings: {
-      teamVaultAcceptsOnly: null,
       roundControllerJettonWalletOwner: null,
-      teamVaultJettonWalletOwner: null,
+      roundControllerKeeper: null,
+      roundControllerTeamWallet: null,
       roundControllerUpgradeable: false,
-      adminOwnerIsSingleKey: true,
+      hasAdmin: false,
     },
     funding: [],
     verification: { lastRunAt: null, healthy: null, checks: [], digest: null },
@@ -132,13 +134,13 @@ export function getAddress(registry, key) {
 }
 
 export function refreshStatus(registry) {
-  const required = ['jettonMaster', 'teamVault', 'roundController'];
+  const required = ['jettonMaster', 'roundController'];
   const deployed = required.filter((key) => registry.contracts[key] && registry.contracts[key].address);
-  const funded = (registry.funding || []).filter((item) => item.confirmed === true).length;
+  const confirmedKinds = new Set((registry.funding || []).filter((item) => item.confirmed === true).map((item) => item.kind));
   if (deployed.length === 0) registry.status = 'not_deployed';
   else if (deployed.length < required.length) registry.status = 'partially_deployed';
-  else if (funded === 0) registry.status = 'deployed_unfunded';
-  else if (funded >= 5) registry.status = 'funded';
+  else if (confirmedKinds.size === 0) registry.status = 'deployed_unfunded';
+  else if (FUNDING_KINDS.every((kind) => confirmedKinds.has(kind))) registry.status = 'funded';
   else registry.status = 'deployed_funded_partial';
   registry.paramsDigest = registry.paramsDigest || null;
   return registry.status;

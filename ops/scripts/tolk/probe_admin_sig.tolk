@@ -9,7 +9,7 @@ import "@acton/fmt"
 import "@contracts/types"
 
 fun main() {
-    val signer = scripts.wallet(env<string>("A9_SIGNER_WALLET") ?? "a9-01-admin");
+    val signer = scripts.wallet(env<string>("A9_SIGNER_WALLET") ?? "a9-keeper");
     net.send(signer.address, createMessage({
         bounce: false,
         value: ton("0.01"),

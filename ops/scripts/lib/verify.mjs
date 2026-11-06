@@ -26,8 +26,9 @@ export function expectedProtocolConfig(params) {
     minStakeRaw: params.stakeLimits.minStakeRaw,
     maxStakePerAddressBps: Number(params.stakeLimits.maxStakePerAddressBps),
     maxTotalStakeRaw: params.stakeLimits.maxTotalStakeRaw,
-    techAbortPauseSeconds: Number(params.techAbort.pauseSeconds),
-    techAbortObservationTimeout: Number(params.techAbort.observationTimeoutSeconds),
+    // v10 get_protocol_config 两个超时槽位都返回同一个 abortTimeoutSeconds（7 天）
+    techAbortPauseSeconds: Number(params.techAbort.abortTimeoutSeconds),
+    techAbortObservationTimeout: Number(params.techAbort.abortTimeoutSeconds),
     roundRewardRaw: params.rounds.roundRewardRaw,
     teamRoundRaw: params.rounds.teamRoundRaw,
     totalSupplyRaw: params.token.totalSupplyRaw,
@@ -40,7 +41,7 @@ export function expectedProtocolConfig(params) {
 
 export function verifyRegistryStructure(registry) {
   const checks = [];
-  const contractKeys = ['jettonMaster', 'teamVault', 'roundController'];
+  const contractKeys = ['jettonMaster', 'roundController'];
   for (const key of contractKeys) {
     const value = registry.contracts[key] && registry.contracts[key].address;
     if (!value) {
@@ -52,7 +53,7 @@ export function verifyRegistryStructure(registry) {
     else if (parsed.testnet === false) checks.push(check('contract.' + key, CHECK_STATUS.FAIL, '不是测试网地址'));
     else checks.push(check('contract.' + key, CHECK_STATUS.PASS, value));
   }
-  const walletKeys = ['adminOwner', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'];
+  const walletKeys = ['keeper', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'];
   for (const key of walletKeys) {
     const value = registry.wallets[key] && registry.wallets[key].address;
     checks.push(value ? check('wallet.' + key, CHECK_STATUS.PASS, value) : check('wallet.' + key, CHECK_STATUS.WARN, '未登记（部署前必须提供）'));
@@ -62,14 +63,19 @@ export function verifyRegistryStructure(registry) {
       ? check('bindings.roundControllerUpgradeable', CHECK_STATUS.PASS, '不可升级（D-24）')
       : check('bindings.roundControllerUpgradeable', CHECK_STATUS.FAIL, '登记表应为不可升级')
   );
+  checks.push(
+    registry.bindings.hasAdmin === false
+      ? check('bindings.hasAdmin', CHECK_STATUS.PASS, '无 admin（D-42）')
+      : check('bindings.hasAdmin', CHECK_STATUS.FAIL, '登记表应为 hasAdmin=false（v10 无 admin）')
+  );
   return checks;
 }
 
 export function verifyFundingPlan(params, options = {}) {
   const all = Boolean(options.all);
   const plan = [
-    { kind: 'roundRewards', label: '奖励金库（70 亿，RC Jetton Wallet）', recipientKey: 'roundControllerJettonWallet', amountRaw: params.rounds.rewardPoolRaw, always: true },
-    { kind: 'team', label: 'TeamVault（12 亿）', recipientKey: 'teamVaultJettonWallet', amountRaw: params.rounds.teamPoolRaw, always: true },
+    // v10：70 亿奖励 + 12 亿团队一次性转入 RC，forward_ton_amount 必须为 0
+    { kind: 'roundController', label: 'RoundController（70 亿奖励 + 12 亿团队 = 82 亿，forward 0）', recipientKey: 'roundControllerJettonWallet', amountRaw: params.rounds.rcFundingRaw, forwardTonNano: '0', always: true },
     { kind: 'marketing', label: '营销钱包（5 亿）', recipientKey: 'marketingWallet', amountRaw: params.supply.allocations.marketing.raw, always: false },
     { kind: 'liquidity', label: '流动性钱包（5 亿）', recipientKey: 'liquidityWallet', amountRaw: params.supply.allocations.liquidity.raw, always: false },
     { kind: 'internalSale', label: '团队内盘管理钱包（8 亿）', recipientKey: 'teamInternalWallet', amountRaw: params.supply.allocations.internalSale.raw, always: false },

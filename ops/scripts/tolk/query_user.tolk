@@ -1,6 +1,6 @@
-// Query user getters on a RoundController.
+// Query user getters on a v10 RoundController.
 // Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/query_user.tolk <cmd> <owner> <roundId>
-// cmd: stake|weight|reward|claimable|referral|streak|unlock
+// cmd: stake|reward|claimable
 import "@stdlib/strings"
 import "@acton/env"
 import "@acton/emulation/network"
@@ -13,14 +13,8 @@ fun main(cmd: string, owner: address, roundId: int) {
     if (rc == null) { throw 400; }
     val op = format("{}", cmd);
     if (op.equalTo("stake")) {
-        val v = net.runGetMethod<StakePosition>(rc!, "get_user_stake", [roundId as uint8, owner]);
-        println("stake amount={} weight={} nonce={}", v.amountRaw, v.weight, v.lastDepositNonce);
-        println("stake principalClaimed={} rewardClaimed={} rewardState={}", v.principalClaimed, v.rewardClaimed, v.rewardState);
-        return;
-    }
-    if (op.equalTo("weight")) {
-        val w = net.runGetMethod<uint128>(rc!, "get_user_weight", [roundId as uint8, owner]);
-        println("weight {}", w);
+        val v = net.runGetMethod<StakePositionView>(rc!, "get_user_stake", [roundId as uint8, owner]);
+        println("stake amount={} nonce={} claimed={}", v.amountRaw, v.lastDepositNonce, v.principalClaimed);
         return;
     }
     if (op.equalTo("reward")) {
@@ -29,23 +23,9 @@ fun main(cmd: string, owner: address, roundId: int) {
         return;
     }
     if (op.equalTo("claimable")) {
+        // rewardRaw is the full reward; roundsMask bit r-1 = round r, bit 15 = refund ledger
         val c = net.runGetMethod<Claimable>(rc!, "get_claimable_all", [owner]);
         println("claimable principal={} reward={} mask={}", c.principalRaw, c.rewardRaw, c.roundsMask);
-        return;
-    }
-    if (op.equalTo("referral")) {
-        val r = net.runGetMethod<ReferralInfo>(rc!, "get_referral", [owner]);
-        println("referral referrer={} referredStake={} bonus={}", r.referrer, r.referredStakeThisRound, r.bonusThisRound);
-        return;
-    }
-    if (op.equalTo("streak")) {
-        val s = net.runGetMethod<StreakInfo>(rc!, "get_streak", [owner]);
-        println("streak lastRound={} count={}", s.lastRound, s.count);
-        return;
-    }
-    if (op.equalTo("unlock")) {
-        val u = net.runGetMethod<UnlockInfo>(rc!, "get_unlock_info", [owner]);
-        println("unlock start={} totalLocked={}", u.unlockStart, u.totalLockedRaw);
         return;
     }
     throw 400;

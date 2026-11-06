@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-/** 50 — 金库注资与初始分配：70 亿奖励 + 12 亿团队（--all 时含内盘 8 亿 / 流动性 5 亿 / 营销 5 亿）。 */
+/**
+ * 50 — 注资与初始分配（v10）：RC 82 亿（70 亿奖励 + 12 亿团队，forward_ton_amount = 0）；
+ * --all 时再分配内盘 8 亿 / 流动性 5 亿 / 营销 5 亿。
+ * deploy-emulation 通常已完成 RC 注资：RC 钱包余额已达 82 亿时只核对登记、不重复转账。
+ */
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -14,8 +18,8 @@ import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs'
 
 const { args, execute, params, registry } = bootstrap({
   id: '50',
-  title: '金库注资与初始分配',
-  dependsOn: ['roles'],
+  title: '注资与初始分配（RC 82 亿 + 8/5/5）',
+  dependsOn: ['roundController'],
 });
 
 const all = flag(args, 'all');
@@ -23,7 +27,6 @@ const probe = flag(args, 'probe');
 const resume = flag(args, 'resume');
 const jettonMaster = resolveAddress(registry, params, 'jettonMaster', 'jetton-master.addr');
 const roundController = resolveAddress(registry, params, 'roundController', 'round-controller.addr');
-const teamVault = resolveAddress(registry, params, 'teamVault', 'team-vault.addr');
 const signer = signerWallet(params);
 const treasury = resolveWalletAddress(registry, 'treasury') || process.env[params.network.deployer.treasuryAddressEnv] || '';
 
@@ -36,20 +39,19 @@ function resolveSignerAddress(name) {
 }
 const signerAddress = resolveSignerAddress(signer);
 const plan = verifyFundingPlan(params, { all });
-const ORDER = ['roundRewards', 'team', 'internalSale', 'liquidity', 'marketing'];
+const ORDER = ['roundController', 'internalSale', 'liquidity', 'marketing'];
 plan.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind));
 const recipientsPath = RECORDS_DIR + '/funding-recipients.json';
 const recipients = existsSync(recipientsPath) ? readJSON(recipientsPath) : null;
 
 const OWNER_BY_KIND = {
-  roundRewards: { owner: roundController, ownerLabel: 'RoundController（RC Jetton Wallet owner，托管本金+奖励）', walletKey: 'roundControllerJettonWallet' },
-  team: { owner: teamVault, ownerLabel: 'TeamVault（其 Jetton Wallet owner）', walletKey: 'teamVaultJettonWallet' },
+  roundController: { owner: roundController, ownerLabel: 'RoundController（RC Jetton Wallet owner：奖励 + 团队 + 本金）', walletKey: 'roundControllerJettonWallet' },
   marketing: { owner: resolveWalletAddress(registry, 'marketingWallet'), ownerLabel: '营销热钱包', walletKey: null },
   liquidity: { owner: resolveWalletAddress(registry, 'liquidityWallet'), ownerLabel: '流动性热钱包', walletKey: null },
   internalSale: { owner: resolveWalletAddress(registry, 'teamInternalWallet'), ownerLabel: '团队内盘管理钱包（公开可查）', walletKey: null },
 };
 
-section('注资计划' + (all ? '（全部分配）' : '（仅奖励 + 团队；加 --all 做完整分配）'));
+section('注资计划' + (all ? '（全部分配）' : '（仅 RC 82 亿；加 --all 做完整分配）'));
 kv('签名钱包（A9_SIGNER_WALLET）', signer);
 kv('treasury（A9 来源）', treasury || '（未提供，脚本会校验 signer 余额）');
 kv('Jetton Master', jettonMaster || '（未登记）');
@@ -78,7 +80,7 @@ if (all) {
   if (totalRaw === supply) ok('全部分配合计 = 100 亿 A9');
   else fail('全部分配合计不等于 100 亿：' + totalRaw);
 } else {
-  info('仅注资奖励+团队 = 82 亿；剩余 18 亿按 8/5/5 分配（--all）。');
+  info('仅注资 RC 82 亿（70 亿奖励 + 12 亿团队）；剩余 18 亿按 8/5/5 分配（--all）。');
 }
 for (const item of plan) {
   const mapping = OWNER_BY_KIND[item.kind];
@@ -93,7 +95,9 @@ if (!execute) {
   detail('将发送 ' + plan.length + ' 笔 fund_jetton（TEP-74 0x0f8a7ea5）：签名钱包=' + signer + '，master=' + (jettonMaster || '<JETTON_MASTER>'));
   detail('真实执行时：先用 TON Center v3 / jetton master get_wallet_address 解析每个 owner 的 Jetton Wallet 地址，');
   detail('再把 signer 钱包中的 A9 按上表逐笔转入对应 Jetton Wallet；每笔记录 funding 并核对余额。');
-  detail('注意：TEP-74 转账目标是「接收者的 Jetton Wallet 地址」，不是 owner 合约/钱包地址。');
+  detail('注意：fund_jetton 的参数是接收 owner（RC 合约地址），由源钱包推导目标 Jetton Wallet；不要传钱包地址。');
+  detail('RC 注资 forward_ton_amount 必须为 0（fund_jetton.tolk 固定为 0）：否则 RC 会把这笔转账当作质押并退回。');
+  detail('RC 钱包余额已 = 82 亿（deploy-emulation 已注资）时，执行模式只登记、不重复转账。');
   detail('执行开关：OPS_EXECUTE=1 + OPS_CONFIRM=YES；真实网络由参数文件 network.net / OPS_NETWORK 决定（testnet 或 mainnet），脚本模板不再硬编码。');
   printNextSteps(['下一步：node scripts/60_verify_and_register.mjs（登记表定稿 + 地址簿）']);
   process.exit(finish({ 模式: 'DRY-RUN', 计划笔数: plan.length, 合计raw: totalRaw.toString() }));
@@ -177,6 +181,7 @@ async function sendFund(item, mapping, recipientWallet, amountRaw, label) {
   return txHashes;
 }
 
+let probed = false;
 for (let index = 0; index < plan.length; index++) {
   const item = plan[index];
   const mapping = OWNER_BY_KIND[item.kind];
@@ -202,10 +207,15 @@ for (let index = 0; index < plan.length; index++) {
   const isActive = walletInfo.state === 'active';
   const currentBalance = isActive ? ((await jettonBalance(recipientWallet)) ?? 0n) : 0n;
   let txHashes = [];
-  if (resume && currentBalance >= amountRaw) {
-    info(item.kind + '：resume 检测到余额已达标（' + formatTokens(currentBalance.toString()) + ' A9），跳过转账');
+  const alreadyFunded = (resume || item.kind === 'roundController') && currentBalance >= amountRaw;
+  if (item.kind === 'roundController' && currentBalance > 0n && currentBalance < amountRaw && !resume) {
+    fail('RC 钱包已有 ' + currentBalance + ' raw 但不足 82 亿：可能是部分注资或已有质押，先人工核对（确认后加 --resume 只补差额以外的分配）');
+    process.exit(finish());
+  }
+  if (alreadyFunded) {
+    info(item.kind + '：余额已达标（' + formatTokens(currentBalance.toString()) + ' A9），跳过转账' + (item.kind === 'roundController' ? '（deploy-emulation 已注资）' : '（resume）'));
     if (!registry.funding.some((entry) => entry.kind === item.kind && entry.confirmed)) {
-      recordFunding(registry, { kind: item.kind, recipient: recipientWallet, recipientOwner: mapping.owner, amountRaw: item.amountRaw, confirmed: true, txHash: null, note: '50_fund_vaults resume 识别已到账' });
+      recordFunding(registry, { kind: item.kind, recipient: recipientWallet, recipientOwner: mapping.owner, amountRaw: item.amountRaw, forwardTonNano: item.forwardTonNano || null, confirmed: true, txHash: null, note: '50_fund_vaults 识别已到账' });
       writeRegistry(registry);
     }
     if (mapping.walletKey) {
@@ -214,7 +224,9 @@ for (let index = 0; index < plan.length; index++) {
     continue;
   }
   const preBalance = currentBalance;
-  if (index === 0) {
+  const probeThis = !probed;
+  if (probeThis) {
+    probed = true;
     if (amountRaw <= PROBE_RAW) {
       fail('第一笔金额必须大于 1 A9 才能做小额试探');
       process.exit(finish());
@@ -256,7 +268,8 @@ for (let index = 0; index < plan.length; index++) {
     amountRaw: item.amountRaw,
     confirmed: true,
     txHash: txHashes[txHashes.length - 1] || str(args, 'tx-' + item.kind) || null,
-    note: '50_fund_vaults ' + (all ? '--all' : '') + (index === 0 ? '；首笔 1 A9 试探' : ''),
+    forwardTonNano: item.forwardTonNano || null,
+    note: '50_fund_vaults ' + (all ? '--all' : '') + (probeThis ? '；首笔 1 A9 试探' : ''),
   });
   if (mapping.walletKey) {
     try { setContract(registry, mapping.walletKey, recipientWallet, { note: '由 50 注资步骤解析登记' }); } catch (error) { warn(String(error.message || error)); }

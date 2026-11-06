@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-/** 15 — 整体部署（contracts/scripts/deploy-emulation.tolk）：JettonMaster + mint + TeamVault + RoundController + SetJettonWallet + InitController。 */
+/**
+ * 15 — 整体部署（contracts/scripts/deploy-emulation.tolk，v10 / D-42）：
+ * JettonMaster + mint-once → RoundController（keeper / teamWallet / 参数写入初始数据，无 admin、无 wiring）
+ * → 核对 RC 钱包推导 → treasury 向 RC 注资 82 亿（forward_ton_amount = 0）。
+ */
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,29 +12,59 @@ import { str } from './lib/cli.mjs';
 import { BAM_ROOT, RECORDS_DIR, networkName, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
-import { setContract, writeRegistry } from './lib/registry.mjs';
-import { getTonBalance, getJettonData, parseAddress } from './lib/ton.mjs';
+import { recordFunding, setContract, writeRegistry } from './lib/registry.mjs';
+import { getJettonData, getJettonWalletBalance, getTonBalance, parseAddress } from './lib/ton.mjs';
+import { resolveWalletAddress } from './lib/step.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
 
 const { args, execute, params, digest, registry, toolchain } = bootstrap({
   id: '15',
-  title: '整体部署（deploy-emulation：Jetton + TeamVault + RoundController + 绑定）',
+  title: '整体部署（deploy-emulation v10：Jetton + RoundController + 82 亿注资）',
 });
+
+// keeper / teamWallet 写入 RC 初始数据，部署后永久不可改：优先登记表，其次环境变量。
+const keeper = str(args, 'keeper') || resolveWalletAddress(registry, 'keeper') || process.env[params.roles.keeper.env] || '';
+const teamWallet = str(args, 'team-wallet') || resolveWalletAddress(registry, 'teamWallet') || process.env[params.roles.teamWallet.env] || '';
+
+// 时间与限额参数默认取 params（显式环境变量优先），保证链上初始数据与参数文件一致。
+const deployEnvDefaults = {
+  A9_TIMING_PREVIEW_SECONDS: params.timeline.previewSeconds,
+  A9_TIMING_STAKE_SECONDS: params.timeline.stakeDurationSeconds,
+  A9_TIMING_CANDLE_SECONDS: params.timeline.candleSeconds,
+  A9_TIMING_CANDLE_COUNT: params.timeline.candleCount,
+  A9_TIMING_MIN_QUALIFIED: params.timeline.minQualifiedCandles,
+  A9_DEPLOY_ROUND_REWARD_RAW: params.rounds.roundRewardRaw,
+  A9_DEPLOY_TEAM_ROUND_RAW: params.rounds.teamRoundRaw,
+  A9_DEPLOY_MIN_STAKE_RAW: params.stakeLimits.minStakeRaw,
+};
+for (const [key, value] of Object.entries(deployEnvDefaults)) {
+  if (process.env[key] === undefined) process.env[key] = String(value);
+}
 
 const fromLog = str(args, 'from-log');
 const overrides = {
   jettonMaster: str(args, 'jetton-master'),
-  teamVault: str(args, 'team-vault'),
   roundController: str(args, 'round-controller'),
   roundControllerJettonWallet: str(args, 'rc-wallet'),
-  teamVaultJettonWallet: str(args, 'tv-wallet'),
 };
 
-section('部署范围（contracts/scripts/deploy-emulation.tolk）');
-detail('顺序：部署 JettonMaster → mint 100 亿（mint-once，admin 同笔置 null）→ 部署 TeamVault → 部署 RoundController → 解析 RC/TV canonical Jetton Wallet → SetJettonWallet → InitController。');
-detail('命令使用位置参数/整体模式；该脚本没有分步子命令。分步部署只保留 Jetton 两步（10/11）。');
+function renderDeployCommand() {
+  return substitute(commandTemplate(params, 'deployAllContracts'), {
+    contractsDir: params.toolchain.contractsDir,
+    keeper: keeper || '<KEEPER>',
+    teamWallet: teamWallet || '<TEAM_WALLET>',
+  });
+}
+
+section('部署范围（contracts/scripts/deploy-emulation.tolk，v10）');
+detail('顺序：部署 JettonMaster → mint 100 亿到 treasury（mint-once，同笔关闭铸造）→ 部署 RoundController（keeper/teamWallet/参数/JettonWallet 代码写入初始数据）→ 核对 RC 钱包推导 → 注资 82 亿（forward_ton_amount = 0）。');
+detail('v10 没有 admin，也没有任何钱包绑定 / 角色绑定步骤（RC 在链上自行推导 Jetton Wallet）；分步部署只保留 Jetton 两步（10/11）。');
+kv('keeper', keeper || '（未提供：登记表 wallets.keeper 或 ' + params.roles.keeper.env + '）');
+kv('teamWallet', teamWallet || '（未提供：登记表 wallets.teamWallet 或 ' + params.roles.teamWallet.env + '）');
+kv('时间参数', ['A9_TIMING_PREVIEW_SECONDS', 'A9_TIMING_STAKE_SECONDS', 'A9_TIMING_CANDLE_SECONDS', 'A9_TIMING_CANDLE_COUNT', 'A9_TIMING_MIN_QUALIFIED'].map((key) => process.env[key]).join(' / '));
+kv('最低质押 raw', process.env.A9_DEPLOY_MIN_STAKE_RAW);
 kv('Acton 版本', toolchain.pinnedVersion || toolchain.version || '（未知）');
-kv('命令', hasCommand(params, 'deployAllContracts') ? substitute(commandTemplate(params, 'deployAllContracts'), { contractsDir: params.toolchain.contractsDir }) : '（模板缺失）');
+kv('命令', hasCommand(params, 'deployAllContracts') ? renderDeployCommand() : '（模板缺失）');
 kv('现有登记', resolveContractAddress(registry, 'jettonMaster') ? 'JettonMaster=' + resolveContractAddress(registry, 'jettonMaster') : '（未部署）');
 kv('配置哈希', digest);
 
@@ -44,11 +78,12 @@ if (fromLog) {
 
 if (!execute) {
   detail('dry-run：不执行部署。真实执行：OPS_EXECUTE=1 node scripts/15_deploy_contracts.mjs --execute');
-  detail('执行后脚本会解析 deploy-emulation 输出中的 JettonMaster / TeamVault / RoundController / RC Wallet / TV Wallet 并登记；');
-  detail('解析失败时可用 --from-log <日志> 重试，或分别用 10/20/30 脚本的 adopt 模式登记。');
+  detail('执行后脚本会解析 deploy-emulation 输出中的 JettonMaster / RoundController / RC Jetton Wallet 并登记，');
+  detail('并根据「Funded RC Jetton Wallet」行与链上余额登记 RC 82 亿注资；解析失败时可用 --from-log <日志> 重试，或用 10/30 的 --adopt 登记。');
+  if (!keeper || !teamWallet) warn('keeper / teamWallet 未确定：EXECUTE 会被拒绝（两者写入 RC 初始数据，部署后不可改）');
   printNextSteps([
     '后续：node scripts/40_init_params.mjs --execute --online（链上参数校验）',
-    '然后：node scripts/55_fund_ton.mjs --execute → node scripts/50_fund_vaults.mjs --execute --all',
+    '然后：node scripts/55_fund_ton.mjs --execute → node scripts/50_fund_vaults.mjs --execute --probe --all',
     '最后：node scripts/60_verify_and_register.mjs --execute → verify_deployment.mjs --online → 开 R1',
   ]);
   process.exit(finish({ 模式: 'DRY-RUN' }));
@@ -63,9 +98,14 @@ if (!toolchain.available) {
   process.exit(finish());
 }
 
-const command = substitute(commandTemplate(params, 'deployAllContracts'), {
-  contractsDir: params.toolchain.contractsDir,
-});
+if (!keeper || !teamWallet) {
+  fail('keeper / teamWallet 必须在部署前确定（写入 RC 初始数据，永久不可改）：先登记 wallets.keeper / wallets.teamWallet，或设置 ' + params.roles.keeper.env + ' / ' + params.roles.teamWallet.env);
+  process.exit(finish());
+}
+for (const [label, address] of [['keeper', keeper], ['teamWallet', teamWallet]]) {
+  if (!parseAddress(address).ok) { fail(label + ' 地址非法：' + address); process.exit(finish()); }
+}
+const command = renderDeployCommand();
 section('执行整体部署');
 detail('命令：' + command);
 const result = runCommand(command, { execute: true, timeoutMs: 600000 });
@@ -108,7 +148,7 @@ function codeHashViaActon(address) {
 }
 
 function parseAddresses(text) {
-  const found = { jettonMaster: null, oracleAdapter: null, teamVault: null, roundController: null, roundControllerJettonWallet: null, teamVaultJettonWallet: null };
+  const found = { jettonMaster: null, roundController: null, roundControllerJettonWallet: null };
   const others = [];
   const lines = String(text).split(String.fromCharCode(10));
   for (const line of lines) {
@@ -117,11 +157,9 @@ function parseAddresses(text) {
     if (!addresses.length) continue;
     const lower = line.toLowerCase();
     const first = addresses[0];
-    if (lower.includes('oracleadapter') || lower.includes('oracle adapter')) found.oracleAdapter = found.oracleAdapter || first;
+    if (lower.includes('funded rc jetton wallet')) continue; // 注资行不含地址
+    if (lower.includes('rc jetton wallet') || (lower.includes('jetton wallet') && (lower.includes('roundcontroller') || lower.includes('round controller')))) found.roundControllerJettonWallet = found.roundControllerJettonWallet || first;
     else if (lower.includes('jettonmaster') || lower.includes('jetton master')) found.jettonMaster = found.jettonMaster || first;
-    else if (lower.includes('jetton wallet') && (lower.includes('teamvault') || lower.includes('team vault') || lower.includes('tv jetton'))) found.teamVaultJettonWallet = found.teamVaultJettonWallet || first;
-    else if (lower.includes('jetton wallet') && (lower.includes('roundcontroller') || lower.includes('round controller') || lower.includes('rc jetton'))) found.roundControllerJettonWallet = found.roundControllerJettonWallet || first;
-    else if (lower.includes('teamvault') || lower.includes('team vault')) found.teamVault = found.teamVault || first;
     else if (lower.includes('roundcontroller') || lower.includes('round controller')) found.roundController = found.roundController || first;
     else others.push(first);
   }
@@ -136,17 +174,12 @@ async function registerFromText(text, logPath) {
   const parsed = parseAddresses(text);
   const labels = {
     jettonMaster: 'JettonMaster',
-    teamVault: 'TeamVault',
     roundController: 'RoundController',
     roundControllerJettonWallet: 'RC Jetton Wallet',
-    teamVaultJettonWallet: 'TV Jetton Wallet',
-    oracleAdapter: 'OracleAdapter',
   };
   section('解析部署地址');
   const buildNameByKey = {
     jettonMaster: 'JettonMaster',
-    oracleAdapter: 'OracleAdapter',
-    teamVault: 'TeamVault',
     roundController: 'RoundController',
   };
   const rows = [];
@@ -156,7 +189,7 @@ async function registerFromText(text, logPath) {
       const address = parsed.found[key];
       if (!address) { rows.push([label, '（未解析）', '需 --adopt/覆盖']); continue; }
       if (key.endsWith('JettonWallet')) {
-        rows.push([label, address, '待首次转账时部署（Jetton Wallet 无需预先 active）']);
+        rows.push([label, address, 'deploy-emulation 已核对 RC.get_jetton_wallet_address == master.get_wallet_address(RC)']);
         continue;
       }
       let status = '未检查';
@@ -193,12 +226,18 @@ async function registerFromText(text, logPath) {
         catch (error) { warn(labels[key] + ' 登记失败：' + String(error.message || error)); }
       }
     }
-    if (parsed.found.roundController) registry.bindings.teamVaultAcceptsOnly = parsed.found.roundController;
+    if (parsed.found.roundController) {
+      registry.bindings.roundControllerKeeper = keeper || null;
+      registry.bindings.roundControllerTeamWallet = teamWallet || null;
+      registry.bindings.roundControllerJettonWalletOwner = parsed.found.roundController;
+      registry.bindings.hasAdmin = false;
+    }
+    await registerRcFunding(text, parsed.found);
     writeRegistry(registry);
     const missing = Object.entries(labels).filter(([key]) => !parsed.found[key]).map(([, label]) => label);
     if (missing.length) {
       warn('以下地址未解析：' + missing.join('、'));
-      detail('可用 --from-log ' + logPath + ' 重试；或用 10/20/30 脚本 adopt 模式分别登记，再执行 65/70 的核对模式。');
+      detail('可用 --from-log ' + logPath + ' 重试；或用 10/30 脚本 --adopt 分别登记。');
       info('其余地址已登记；请先补齐后再执行 40/55/50/60。');
     } else {
       ok('整体部署地址已全部登记（链上 active + code hash 校验通过）');
@@ -211,7 +250,7 @@ async function registerFromText(text, logPath) {
       kv('total_supply', data.totalSupplyRaw || '（未读取）');
       kv('mintable', String(data.mintable));
       kv('admin = null', String(data.adminNull));
-      if (data.totalSupplyRaw === params.token.totalSupplyRaw && data.mintable === false && data.adminNull === true) ok('Jetton mint-once 校验通过（100 亿、mint 关闭、admin=null）');
+      if (data.totalSupplyRaw === params.token.totalSupplyRaw && data.mintable === false) ok('Jetton mint-once 校验通过（100 亿、mint 关闭）');
       else warn('Jetton 校验未完全通过，请执行 verify_deployment.mjs --online 进一步核对');
     } catch (error) {
       warn('Jetton 复核失败：' + String(error.message || error));
@@ -219,9 +258,25 @@ async function registerFromText(text, logPath) {
   }
   printNextSteps([
     '下一步：node scripts/40_init_params.mjs --execute --online',
-    '然后：node scripts/55_fund_ton.mjs --execute → node scripts/50_fund_vaults.mjs --execute --all',
-    '最后：node scripts/60_verify_and_register.mjs --execute → verify_deployment.mjs --online → 80_admin_ops open-round R1',
+    '然后：node scripts/55_fund_ton.mjs --execute → node scripts/50_fund_vaults.mjs --execute --probe --all（RC 82 亿已由部署注资时自动识别）',
+    '最后：node scripts/60_verify_and_register.mjs --execute → verify_deployment.mjs --online → 80_admin_ops --action open-round --round 1',
   ]);
+}
+
+/** deploy-emulation 已向 RC 注资 82 亿（forward 0）：以链上余额为准登记 funding。 */
+async function registerRcFunding(text, found) {
+  const match = String(text).match(/Funded RC Jetton Wallet with (\d+) raw A9/);
+  const expected = params.rounds.rcFundingRaw;
+  if (!match) { warn('日志中没有「Funded RC Jetton Wallet」：RC 尚未注资，请执行 50_fund_vaults.mjs'); return; }
+  if (match[1] !== expected) { fail('部署日志注资额 ' + match[1] + ' != 期望 82 亿 ' + expected); return; }
+  if (!found.roundControllerJettonWallet) return;
+  const balance = await getJettonWalletBalance(params, found.roundControllerJettonWallet);
+  if (balance === null || balance.toString() !== expected) {
+    warn('RC Jetton Wallet 链上余额 ' + (balance === null ? '未读取' : balance.toString()) + ' != ' + expected + '：不登记注资，稍后用 50_fund_vaults.mjs --resume 核对');
+    return;
+  }
+  recordFunding(registry, { kind: 'roundController', recipient: found.roundControllerJettonWallet, recipientOwner: found.roundController, amountRaw: expected, forwardTonNano: '0', confirmed: true, txHash: null, note: 'deploy-emulation 注资（forward_ton_amount = 0），链上余额核对一致' });
+  ok('RC 82 亿注资已登记（链上余额 = ' + expected + '）');
 }
 
 process.exit(finish({ 模式: 'EXECUTE', 日志: logFile }));

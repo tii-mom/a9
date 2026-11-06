@@ -1,4 +1,4 @@
-/** 参数加载、V7 不变量校验、原始单位换算、配置哈希。 */
+/** 参数加载、V7 时间 + v10 合约（D-42）不变量校验、原始单位换算、配置哈希。 */
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -117,6 +117,37 @@ export function expectedLadder(params) {
   return ladder;
 }
 
+/** v10 入站 opcode（contracts/README §4.1）+ 标准 Jetton opcode。 */
+export const V10_OPCODES = {
+  OpenRound: '0x52540001',
+  CloseStaking: '0x52540002',
+  SubmitCandle: '0x52540003',
+  Claim: '0x52540006',
+  ClaimAll: '0x5254000E',
+  StakeDeposit: '0x5254000F',
+  AbortTechnical: '0x52540010',
+  RetrySettlement: '0x52540015',
+  JettonTransferNotification: '0x7362D09C',
+  TopUpTons: '0xD372158C',
+};
+
+/** v10 事件（contracts/README §4.3）。 */
+export const V10_EVENTS = {
+  TargetPriceSet: '0x52540101',
+  RoundSettled: '0x52540102',
+  DepositAccepted: '0x52540103',
+  TechnicalAborted: '0x52540104',
+  StakingClosed: '0x5254010B',
+  CandleSubmitted: '0x5254010C',
+  Claimed: '0x5254010E',
+  DepositRefunded: '0x5254010F',
+  SettlementBounced: '0x52540110',
+  UnexpectedBounce: '0x52540111',
+};
+
+/** params.permissions.opcodes 允许出现的键：v10 入站消息 + 标准 TEP-74 Jetton opcode（其余一律视为已删除的旧消息）。 */
+export const ALLOWED_OPCODE_NAMES = [...Object.keys(V10_OPCODES), 'JettonTransfer', 'JettonBurn', 'JettonBurnNotification'];
+
 /** @returns {{errors: string[], warnings: string[]}} */
 export function validateParams(params) {
   const errors = [];
@@ -182,47 +213,47 @@ export function validateParams(params) {
   check(Number(timeline.roundsTotalSeconds) === Number(timeline.roundSeconds) * 10, '10 轮总时长必须为 30 天');
 
   const limits = p.stakeLimits;
-  check(asBigInt(limits.minStakeTokens) === 10000n, '单笔最低质押必须为 10,000 A9');
+  check(asBigInt(limits.minStakeTokens) === 100000n, '单笔最低质押必须为 100,000 A9（v10 / D-42）');
   check(asBigInt(limits.minStakeRaw) === asBigInt(limits.minStakeTokens) * 10n ** 9n, 'minStakeRaw 不一致');
   check(Number(limits.maxStakePerAddressBps) === 1000, '单地址上限 bps 必须为 1000');
   check(
     asBigInt(limits.maxStakePerAddressRaw) === 20000000000000000n,
-    '单地址固定硬顶必须为 20,000,000 A9（contracts/README §9.1 裁决）'
+    '单地址固定硬顶必须为 20,000,000 A9'
   );
   check(Number(limits.maxStakePerAddressTokens) === 20000000, 'maxStakePerAddressTokens 必须为 20,000,000');
   check(asBigInt(limits.maxTotalStakeTokens) === 200000000n, '本轮总质押上限必须为 2 亿 A9');
   check(asBigInt(limits.maxTotalStakeRaw) === asBigInt(limits.maxTotalStakeTokens) * 10n ** 9n, 'maxTotalStakeRaw 不一致');
   check(limits.cancelStakeAllowed === false, '不允许取消质押');
+  check(asBigInt(limits.stakeForwardTonMinNano ?? '0') >= 100000000n, '质押 forward_ton_amount 下限必须 ≥ 0.1 TON（v10）');
+
+  check(
+    asBigInt(p.rounds.rcFundingRaw ?? '0') === asBigInt(p.rounds.rewardPoolRaw) + asBigInt(p.rounds.teamPoolRaw),
+    'rcFundingRaw 必须等于 70 亿奖励 + 12 亿团队 = 82 亿（v10：团队额度在 RC 钱包）'
+  );
+  check(String(p.rounds.rcFundingForwardTonNano) === '0', 'RC 注资 forward_ton_amount 必须为 0（否则被当作质押退回）');
 
   const abort = p.techAbort;
-  check(Number(abort.pauseSeconds) === 14 * 86400, '连续暂停技术终止阈值必须为 14 天');
-  check(Number(abort.observationTimeoutSeconds) === 7 * 86400, '观察超时必须为 7 天');
+  check(Number(abort.abortTimeoutSeconds) === 7 * 86400, '技术终止超时必须为 7 天（v10 统一）');
+  check(Number(abort.observationTimeoutSeconds) === 7 * 86400 && Number(abort.previewTimeoutSeconds) === 7 * 86400, '观察超时 / 预告超时必须为 7 天');
+  check(!('pauseSeconds' in abort), 'v10 没有预言机暂停，techAbort.pauseSeconds 应删除');
   check(abort.anyoneCanTrigger === true, '技术终止必须任何人可触发');
   check(Number(abort.refundPrincipalBps) === 10000, '技术终止必须退 100% 本金');
   check(abort.burnsRewardOnAbort === false && abort.burnsTeamOnAbort === false, '技术终止不得销毁奖励/团队额度');
   check(abort.tierConsumed === false, '技术终止不得消耗档位');
 
-  const expectedOps = {
-    OpenRound: '0x52540001',
-    CloseStaking: '0x52540002',
-    SubmitCandle: '0x52540003',
-    OracleCandleVerified: '0x52540004',
-    FinalizeRound: '0x52540005',
-    ClaimPrincipal: '0x52540006',
-    ClaimReward: '0x52540007',
-    StartFailureBurn: '0x52540008',
-    BurnAck: '0x52540009',
-    PauseOracle: '0x5254000A',
-    ResumeOracle: '0x5254000B',
-    ReleaseTeamQuota: '0x5254000C',
-    BurnTeamQuota: '0x5254000D',
-    ClaimAll: '0x5254000E',
-  };
   const opcodes = p.permissions.opcodes;
-  for (const [name, code] of Object.entries(expectedOps)) {
-    check(String(opcodes[name]).toUpperCase() === code.toUpperCase(), 'opcode ' + name + ' 必须为 ' + code);
+  for (const [name, code] of Object.entries(V10_OPCODES)) {
+    check(String(opcodes[name] || '').toUpperCase() === code.toUpperCase(), 'opcode ' + name + ' 必须为 ' + code);
   }
-  check(!('CancelStake' in opcodes), '不得存在 CancelStake opcode（质押不可取消）');
+  for (const name of Object.keys(opcodes)) {
+    check(ALLOWED_OPCODE_NAMES.includes(name), 'opcode ' + name + ' 不在 v10 ABI 中（contracts/README §4.1），应删除');
+  }
+  const events = p.permissions.events || {};
+  for (const [name, code] of Object.entries(V10_EVENTS)) {
+    check(String(events[name] || '').toUpperCase() === code.toUpperCase(), 'event ' + name + ' 必须为 ' + code);
+  }
+  check(p.roles && p.roles.keeper && p.roles.teamWallet, 'roles 必须包含 keeper 与 teamWallet（v10 无 admin）');
+  check(Object.keys(p.roles || {}).every((key) => ['keeper', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'].includes(key)), 'roles 只允许 keeper / treasury / teamWallet / 营销 / 流动性 / 内盘（v10 无 admin）');
 
   const ids = p.deployPlan.map((item) => item.id);
   check(new Set(ids).size === ids.length, 'deployPlan 存在重复 step id');
@@ -234,8 +265,8 @@ export function validateParams(params) {
 
   if (p.toolchain.pinned === false) warnings.push('工具链未 pin 版本：执行真实部署前必须锁定 Acton/Tolk 版本并回填 toolchain.pinned=true');
   if (p.toolchain.pinned === true && !p.toolchain.pinnedVersion) warnings.push('toolchain.pinnedVersion 为空：请记录实际 Acton/Tolk 版本');
-  if (Number(p.tonBalances.roundControllerMinTon) < 20) warnings.push('RC TON 余额目标低于 contracts/README 建议的 20 TON');
-  if (Number(p.tonBalances.teamVaultMinTon) < 10) warnings.push('TeamVault TON 余额目标低于 contracts/README 建议的 10 TON');
+  if (Number(p.tonBalances.roundControllerMinTon) < 5) warnings.push('RC TON 余额目标低于 contracts/README §5 建议的 5 TON');
+  if (!(Number(p.tonBalances.keeperMinTon) > 0)) warnings.push('tonBalances.keeperMinTon 未设置：keeper 钱包 gas 无下限告警');
   if (Number(p.price.priceMultiplier) === 2) warnings.push('2× 已定档（D-33）：docs/13 的 EV 负值数据保留作为风险披露');
 
   return { errors, warnings };

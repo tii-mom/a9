@@ -1,28 +1,120 @@
 {
-  "note": "故障夹具（V7）：DB 不可用、预言机暂停、K 线缺失、销毁 pending、供应量漂移、管理员 error。",
+  "note": "故障夹具（v10）：DB 不可用、R1 失败但销毁被退回（SettlementBounced 未处理）、R2 K 线缺失、供应量漂移、UnexpectedBounce、keeper gas 不足、RC 钱包低于公式、运维 error 事件。",
   "now": 1793450000000,
-  "health": { "ok": true, "now": 1793448800000, "db": false, "dataSource": "demo", "version": "0.1.0", "uptimeSeconds": 9000 },
+  "health": {
+    "ok": true,
+    "now": 1793448800000,
+    "db": false,
+    "dataSource": "demo",
+    "version": "0.1.0",
+    "uptimeSeconds": 9000
+  },
   "config": {
-    "token": { "name": "A9", "symbol": "A9", "decimals": 9 },
-    "p0UsdE8": "116000", "usdPriceScale": 100000000, "priceMultiplier": 2, "roundCount": 10,
-    "roundRewardRaw": "700000000000000000", "totalSupplyRaw": "10000000000000000000",
-    "candleSeconds": 3600, "candleCount": 24, "minQualifiedCandles": 16, "riskDisclosureVersion": 1,
-    "stakeDurationSeconds": 129600, "observationSeconds": 86400, "previewSeconds": 43200,
-    "network": "testnet", "dataSource": "demo", "contracts": {}
+    "token": {
+      "name": "A9",
+      "symbol": "A9",
+      "decimals": 9
+    },
+    "p0UsdE8": "116000",
+    "usdPriceScale": 100000000,
+    "priceMultiplier": 2,
+    "roundCount": 10,
+    "roundRewardRaw": "700000000000000000",
+    "totalSupplyRaw": "10000000000000000000",
+    "candleSeconds": 3600,
+    "candleCount": 24,
+    "minQualifiedCandles": 16,
+    "riskDisclosureVersion": 1,
+    "stakeDurationSeconds": 129600,
+    "observationSeconds": 86400,
+    "previewSeconds": 43200,
+    "network": "testnet",
+    "dataSource": "demo",
+    "contracts": {}
   },
   "stats": {
     "supplyRaw": "8800000000000000000",
     "burnedRaw": "1000000000000000000",
     "lockedStakeRaw": "500000000000000000",
     "stakerCount": 3,
-    "oracle": { "online": false, "validSources": 0, "totalSources": 3, "coverageBps": 0, "configVersion": "1", "lastUpdate": 1793446400000, "paused": true },
-    "nextStakeOpenAt": 1793442800000
+    "nextStakeOpenAt": 1793442800000,
+    "claimedPrincipalRaw": "0",
+    "claimedRewardRaw": "0",
+    "refundPendingRaw": "0"
   },
   "rounds": [
-    { "roundId": 1, "state": "FAILED_PERMANENT", "priceMultiplier": 2, "targetPriceUsdE8": "232000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1793170400000, "stakeCloseAt": 1793300000000, "observationStart": 1793300000000, "observationEnd": 1793386400000, "candlesSeen": 24, "qualifiedCandles": 15, "totalAcceptedStakeRaw": "100000000000000000", "stakerCount": 3, "result": "FAILURE", "burnedRaw": "0", "updatedAt": 1793386500000 },
-    { "roundId": 2, "state": "ORACLE_PAUSED", "priceMultiplier": 4, "targetPriceUsdE8": "464000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1793302400000, "stakeCloseAt": 1793432000000, "observationStart": 1793432000000, "observationEnd": 1793518400000, "candlesSeen": 0, "qualifiedCandles": 0, "totalAcceptedStakeRaw": "500000000000000000", "stakerCount": 2, "result": null, "burnedRaw": null, "updatedAt": 1793448200000 }
+    {
+      "roundId": 1,
+      "state": "FAILED_PERMANENT",
+      "priceMultiplier": 2,
+      "targetPriceUsdE8": "232000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": 1793170400000,
+      "stakeCloseAt": 1793300000000,
+      "observationStart": 1793300000000,
+      "observationEnd": 1793386400000,
+      "candlesSeen": 24,
+      "qualifiedCandles": 15,
+      "totalAcceptedStakeRaw": "100000000000000000",
+      "stakerCount": 3,
+      "result": "FAILURE",
+      "burnedRaw": "0",
+      "updatedAt": 1793386500000,
+      "teamReleasedRaw": "0"
+    },
+    {
+      "roundId": 2,
+      "state": "OBSERVING",
+      "priceMultiplier": 4,
+      "targetPriceUsdE8": "464000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": 1793302400000,
+      "stakeCloseAt": 1793432000000,
+      "observationStart": 1793432000000,
+      "observationEnd": 1793518400000,
+      "candlesSeen": 0,
+      "qualifiedCandles": 0,
+      "totalAcceptedStakeRaw": "500000000000000000",
+      "stakerCount": 2,
+      "result": null,
+      "burnedRaw": null,
+      "updatedAt": 1793448200000,
+      "teamReleasedRaw": null
+    }
   ],
   "admin": {
-    "events": [ { "id": 2, "ts": 1793449880000, "level": "error", "actor": "ops", "action": "oracle_pause", "detail": "rpc timeout" } ]
+    "events": [
+      {
+        "id": 2,
+        "ts": 1793449880000,
+        "level": "error",
+        "actor": "ops",
+        "action": "keeper_submit_candle",
+        "detail": "rpc timeout"
+      }
+    ]
+  },
+  "chain": {
+    "rcJettonBalanceRaw": "8000000000000000000",
+    "keeperTonNano": "500000000",
+    "events": [
+      {
+        "type": "SettlementBounced",
+        "roundId": 1,
+        "action": 2,
+        "ts": 1793386600000
+      },
+      {
+        "type": "UnexpectedBounce",
+        "op": "0xf8a7ea5",
+        "queryId": "77",
+        "ts": 1793440000000
+      }
+    ],
+    "pendingSettlement": {
+      "1": [
+        "failureBurn"
+      ]
+    }
   }
 }

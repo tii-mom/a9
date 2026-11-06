@@ -60,7 +60,8 @@ if (!mnemonic) {
     blocking.push('raw-private-key');
   }
 }
-for (const [key, envName] of [['adminOwner', 'TON_ADMIN_OWNER_ADDRESS'], ['treasury', params.network.deployer.treasuryAddressEnv]]) {
+// v10：没有 admin；keeper 与 teamWallet 写入 RC 初始数据（部署后永久不可改），部署前必须确定。
+for (const [key, envName] of [['keeper', params.roles.keeper.env], ['teamWallet', params.roles.teamWallet.env], ['treasury', params.network.deployer.treasuryAddressEnv]]) {
   const fromEnv = process.env[envName] || '';
   const fromRegistry = registry.wallets[key] && registry.wallets[key].address;
   if (fromEnv) {
@@ -120,7 +121,7 @@ if (registry.paramsDigest && registry.paramsDigest !== digest) {
 
 section('结论');
 if (blocking.length === 0) {
-  ok(execute ? '所有门禁通过，可以进入部署（按 10 → 11 → 20 → 30 → 40 → 65 → 70 → 55 → 50 → 60 → 90 顺序）。' : 'dry-run 前置检查通过；未执行任何链上操作。');
+  ok(execute ? '所有门禁通过，可以进入部署（按 15 → 40 → 55 → 50 → 60 → verify_deployment 顺序）。' : 'dry-run 前置检查通过；未执行任何链上操作。');
 } else {
   fail('存在 ' + blocking.length + ' 个阻断项：' + [...new Set(blocking)].join(', '));
 }

@@ -22,7 +22,7 @@ kv('Jetton Master', master || '（未登记）');
 kv('接收地址', treasury || '（未提供）');
 kv('铸造数量', params.token.totalSupplyRaw + ' raw（' + params.token.totalSupplyTokens + ' A9）');
 kv('铸造后动作', '关闭 mint：admin 置空，total_supply 冻结为 100 亿');
-kv('后续分配', '70 亿 → 奖励金库；12 亿 → TeamVault；8 亿 → 团队内盘钱包；5 亿 → 流动性；5 亿 → 营销（合计 100 亿）');
+kv('后续分配', '82 亿 → RoundController（70 亿奖励 + 12 亿团队，forward 0）；8 亿 → 团队内盘钱包；5 亿 → 流动性；5 亿 → 营销（合计 100 亿）');
 
 if (!master) {
   if (execute) {

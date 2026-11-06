@@ -2,11 +2,12 @@
   "network": "testnet",
   "chainId": -3,
   "status": "not_deployed",
+  "contractsVersion": "v10",
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
-  "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-05T14:13:41.432Z",
+  "createdAt": "2026-11-06T00:00:00.000Z",
+  "updatedAt": "2026-11-06T00:00:00.000Z",
   "contracts": {
     "jettonMaster": {
       "address": null,
@@ -17,22 +18,6 @@
       "note": null
     },
     "jettonMasterTreasuryWallet": {
-      "address": null,
-      "raw": null,
-      "deployTxHash": null,
-      "codeHash": null,
-      "deployedAt": null,
-      "note": null
-    },
-    "teamVault": {
-      "address": null,
-      "raw": null,
-      "deployTxHash": null,
-      "codeHash": null,
-      "deployedAt": null,
-      "note": null
-    },
-    "teamVaultJettonWallet": {
       "address": null,
       "raw": null,
       "deployTxHash": null,
@@ -63,18 +48,10 @@
       "codeHash": null,
       "deployedAt": null,
       "note": null
-    },
-    "oracleAdapter": {
-      "address": null,
-      "raw": null,
-      "deployTxHash": null,
-      "codeHash": null,
-      "deployedAt": null,
-      "note": null
     }
   },
   "wallets": {
-    "adminOwner": {
+    "keeper": {
       "address": null,
       "raw": null,
       "testnet": null,
@@ -118,11 +95,11 @@
     }
   },
   "bindings": {
-    "teamVaultAcceptsOnly": null,
     "roundControllerJettonWalletOwner": null,
-    "teamVaultJettonWalletOwner": null,
+    "roundControllerKeeper": null,
+    "roundControllerTeamWallet": null,
     "roundControllerUpgradeable": false,
-    "adminOwnerIsSingleKey": true
+    "hasAdmin": false
   },
   "funding": [],
   "verification": {

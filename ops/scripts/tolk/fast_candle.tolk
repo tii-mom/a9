@@ -9,7 +9,7 @@ import "@acton/io"
 import "@acton/fmt"
 import "@contracts/types"
 
-fun signerName(): string { return env<string>("A9_SIGNER_WALLET") ?? "a9-fast-admin"; }
+fun signerName(): string { return env<string>("A9_SIGNER_WALLET") ?? "a9-keeper"; }
 fun envInt(name: string): int { val v = env<int>(name); if (v == null) { throw 400; } return v!; }
 
 fun main(roundId: int, candleIndex: int) {
