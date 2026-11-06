@@ -18,7 +18,8 @@
 
 | # | 门禁 | 检查命令/证据 | 负责人 |
 | --- | --- | --- | --- |
-| 1 | 合约 tag v8.6 已冻结 | git rev-parse + tag 指向 commit 由 lead 书面确认 | lead/contract-dev |
+| 0 | **外部安全审计已完成并复核**（D-37） | `docs/21_AUDIT_RFP.md` 执行完毕；审计报告 + 复核报告归档；所有 Critical/High 已修复或书面接受 | 项目方 / 审计方 |
+| 1 | 合约 tag 已冻结（审计后为 `v8.7-audit-fixed`） | git rev-parse + tag 指向 commit 由 lead 书面确认 | lead/contract-dev |
 | 2 | 5 个 code hash 与冻结基线一致 | §3.1 的 build 产物 hash 截图/日志 | contract-dev |
 | 3 | 测试网权威 10 轮验收通过 | ops/records/fasttest-v86-rounds.md，含 C-1、R10 解锁、总量守恒 | testnet-ops |
 | 4 | 索引器对账 diff=0 | `node worker/src/indexer/tools/chain-reconcile.mjs --network testnet --rc <addr> --tv <addr> --jm <addr>`，diff 计数必须为 0（任何 getter 失败 CLI 直接 exit 1） | testnet-ops |
