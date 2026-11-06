@@ -8,7 +8,7 @@ export function frontendFixtures(state = 'OBSERVING') {
     priceMultiplier: 2, roundCount: 10, roundRewardRaw: raw(700000000), totalSupplyRaw: raw(10000000000),
     candleSeconds: 3600, candleCount: 24, minQualifiedCandles: 16, riskDisclosureVersion: 1,
     stakeDurationSeconds: 129600, observationSeconds: 86400, previewSeconds: 43200,
-    minStakeRaw: raw(100000), teamRoundRaw: raw(120000000),
+    minStakeRaw: raw(1000), teamRoundRaw: raw(120000000),
     network: 'demo', dataSource: 'demo', demo: { candleSeconds: 3600, speed: 1, epochMs: now - 3600000, previewSeconds: 43200 },
     contracts: Object.fromEntries(['jettonMaster', 'roundController', 'stakingVault', 'rewardVault', 'codeHash', 'oracleConfigHash', 'keeper', 'teamWallet', 'auditReportUrl'].map((key) => [key, null])),
     tonConnectManifestUrl: null, tonUsdE8: '300000000', frozenParams: [],

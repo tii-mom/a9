@@ -79,10 +79,13 @@ export interface StakeRow {
   nonce: string;
   risk_disclosure_version: number;
   accept_full_principal_burn: number;
-  /** v10：一次 Claim 同时领本金 + 奖励，两列同时置 1 */
+  /** 本金已领取（或已一键续战转入下一城）；v11 Claimed/Restaked 事件置 1 */
   principal_claimed: number;
+  /** 奖励已领取过至少一部分（v11：20% 立即部分或压城解锁部分） */
   reward_claimed: number;
   accepted_at: number;
+  /** v11（migrations/0012）：deposit = 转账入金；restake = 一键续战滚入。缺省视为 deposit */
+  source?: 'deposit' | 'restake' | null;
 }
 
 export interface ClaimRow {
@@ -882,6 +885,8 @@ export interface StakeInsertInput {
   riskDisclosureVersion: number;
   acceptFullPrincipalBurn: boolean;
   acceptedAt: number;
+  /** 缺省 deposit；一键续战（DepositAccepted 同交易含 Restaked）传 restake */
+  source?: 'deposit' | 'restake';
 }
 
 /** 返回 false 表示 nonce 重复（幂等拒绝）。 */
@@ -890,8 +895,8 @@ export async function insertStake(env: Env, input: StakeInsertInput): Promise<bo
     env,
     `INSERT OR IGNORE INTO stakes
        (round_id, address, amount_raw, weight_raw, nonce, risk_disclosure_version,
-        accept_full_principal_burn, principal_claimed, reward_claimed, accepted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
+        accept_full_principal_burn, principal_claimed, reward_claimed, accepted_at, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
     input.roundId,
     input.address,
     input.amountRaw.toString(),
@@ -900,8 +905,29 @@ export async function insertStake(env: Env, input: StakeInsertInput): Promise<bo
     input.riskDisclosureVersion,
     input.acceptFullPrincipalBurn ? 1 : 0,
     input.acceptedAt,
+    input.source ?? 'deposit',
   );
   return changes > 0;
+}
+
+/** 按 (round, address) 标记本金 / 奖励已领取（幂等：只会 0→1）。 */
+export async function markStakesClaimed(
+  env: Env,
+  roundId: number,
+  address: string,
+  flags: { principal: boolean; reward: boolean },
+): Promise<void> {
+  await run(
+    env,
+    `UPDATE stakes SET
+       principal_claimed = CASE WHEN ? = 1 THEN 1 ELSE principal_claimed END,
+       reward_claimed = CASE WHEN ? = 1 THEN 1 ELSE reward_claimed END
+     WHERE round_id = ? AND address = ?`,
+    flags.principal ? 1 : 0,
+    flags.reward ? 1 : 0,
+    roundId,
+    address,
+  );
 }
 
 /** 重算轮次聚合（stake 表为唯一事实来源，避免 TEXT 列做 SQL 求和丢精度）。 */
@@ -923,12 +949,69 @@ export async function refreshRoundStakeTotals(env: Env, roundId: number, now: nu
   );
 }
 
+/** v11 领取流水（migrations/0012）：事件 → 按 (round, address) 聚合成 principal / reward 两行（金额 BigInt 相加，不用 SQL SUM）。 */
+interface ClaimEventRow {
+  tx_lt: string;
+  address: string;
+  round_id: number;
+  principal_raw: string;
+  reward_raw: string;
+  claimed_at: number;
+}
+
+function aggregateClaimEvents(rows: ClaimEventRow[]): ClaimRow[] {
+  const totals = new Map<string, { roundId: number; address: string; principal: bigint; reward: bigint; claimedAt: number }>();
+  for (const row of rows) {
+    const key = row.round_id + '|' + row.address;
+    const entry = totals.get(key) ?? { roundId: row.round_id, address: row.address, principal: 0n, reward: 0n, claimedAt: 0 };
+    entry.principal += toBigInt(row.principal_raw);
+    entry.reward += toBigInt(row.reward_raw);
+    entry.claimedAt = Math.max(entry.claimedAt, row.claimed_at);
+    totals.set(key, entry);
+  }
+  const out: ClaimRow[] = [];
+  for (const entry of totals.values()) {
+    if (entry.principal > 0n) out.push({ id: 0, round_id: entry.roundId, address: entry.address, kind: 'principal', amount_raw: entry.principal.toString(), claimed_at: entry.claimedAt });
+    if (entry.reward > 0n) out.push({ id: 0, round_id: entry.roundId, address: entry.address, kind: 'reward', amount_raw: entry.reward.toString(), claimed_at: entry.claimedAt });
+  }
+  return out.sort((a, b) => a.round_id - b.round_id || a.address.localeCompare(b.address) || a.kind.localeCompare(b.kind));
+}
+
 export async function listAllClaims(env: Env): Promise<ClaimRow[]> {
-  return all<ClaimRow>(env, 'SELECT * FROM claims ORDER BY round_id ASC, address ASC, kind ASC');
+  const legacy = await all<ClaimRow>(env, 'SELECT * FROM claims ORDER BY round_id ASC, address ASC, kind ASC');
+  const events = await all<ClaimEventRow>(env, 'SELECT tx_lt, address, round_id, principal_raw, reward_raw, claimed_at FROM claim_events');
+  return [...legacy, ...aggregateClaimEvents(events)];
 }
 
 export async function listClaimsForAddress(env: Env, address: string): Promise<ClaimRow[]> {
-  return all<ClaimRow>(env, 'SELECT * FROM claims WHERE address = ? ORDER BY round_id ASC, kind ASC', address);
+  const legacy = await all<ClaimRow>(env, 'SELECT * FROM claims WHERE address = ? ORDER BY round_id ASC, kind ASC', address);
+  const events = await all<ClaimEventRow>(
+    env,
+    'SELECT tx_lt, address, round_id, principal_raw, reward_raw, claimed_at FROM claim_events WHERE address = ?',
+    address,
+  );
+  return [...legacy, ...aggregateClaimEvents(events)];
+}
+
+/**
+ * 记录一笔 v11 Claimed 事件（幂等键 tx_lt+address+round）。返回 false = 已记录过（重放）。
+ * 同一笔交易的重放不会二次累加；聚合在读取时完成。
+ */
+export async function recordClaimEvent(
+  env: Env,
+  input: { txLt: string; roundId: number; address: string; principalRaw: bigint; rewardRaw: bigint; claimedAt: number },
+): Promise<boolean> {
+  const changes = await run(
+    env,
+    'INSERT OR IGNORE INTO claim_events (tx_lt, address, round_id, principal_raw, reward_raw, claimed_at) VALUES (?, ?, ?, ?, ?, ?)',
+    input.txLt,
+    input.address,
+    input.roundId,
+    input.principalRaw.toString(),
+    input.rewardRaw.toString(),
+    input.claimedAt,
+  );
+  return changes > 0;
 }
 
 export async function getClaim(

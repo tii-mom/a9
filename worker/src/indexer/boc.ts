@@ -193,6 +193,14 @@ export class BitReader {
     return Number(this.u(bits));
   }
 
+  /** 预读 n 位无符号数（不移动游标）。 */
+  preloadUint(bits: number): number {
+    const saved = this.pos;
+    const value = Number(this.u(bits));
+    this.pos = saved;
+    return value;
+  }
+
   /** 读布尔（1 bit）。 */
   bool(): boolean {
     return this.u(1) === 1n;

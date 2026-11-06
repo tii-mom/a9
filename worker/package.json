@@ -12,7 +12,9 @@
     "db:seed": "wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql",
     "db:seed:local": "wrangler d1 execute fuse-protocol --local --file=./seed/seed.sql",
     "seed:gen": "node scripts/generate-seed.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test:social": "node --import ./src/social/test-register.mjs --test src/social/social.test.ts src/social/initdata.test.ts",
+    "test:bot": "node --import ./src/bot/test/register.mjs --test src/bot/*.test.ts"
   },
   "devDependencies": {
     "wrangler": "^4.157.0",

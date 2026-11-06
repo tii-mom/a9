@@ -1,4 +1,4 @@
-// A9 Protocol v10 — shared constants.
+// A9 Protocol v11 — shared constants (docs/35).
 // Custom opcodes occupy the project-reserved 0x5254xxxx range. Opcode numbers of
 // messages that survive from v8.9 are unchanged.
 
@@ -13,6 +13,14 @@ const OP_CLAIM_ALL: uint32 = 0x5254000E;         // user: rounds 0..10, one tran
 const OP_STAKE_DEPOSIT: uint32 = 0x5254000F;     // forward_payload of a TEP-74 transfer
 const OP_ABORT_TECHNICAL: uint32 = 0x52540010;   // anyone, after timeouts
 const OP_RETRY_SETTLEMENT: uint32 = 0x52540015;  // anyone, resend bounced settlement
+const OP_RELEASE_TEAM: uint32 = 0x52540016;      // anyone, endAt + fallback: last team quota
+
+// RC <-> StakeTicket (v11)
+const OP_TICKET_ADD_STAKE: uint32 = 0x52540301;  // RC -> ticket (deploys it)
+const OP_TICKET_UPDATE: uint32 = 0x52540302;     // RC -> ticket after a paid request
+const OP_TICKET_CLAIM: uint32 = 0x52540303;      // owner -> ticket
+const OP_TICKET_RESTAKE: uint32 = 0x52540304;    // owner -> ticket (one-tap continue)
+const OP_TICKET_REQUEST: uint32 = 0x52540305;    // ticket -> RC
 
 // Events (external-out logs)
 const EV_TARGET_PRICE_SET: uint32 = 0x52540101;
@@ -25,6 +33,8 @@ const EV_CLAIMED: uint32 = 0x5254010E;
 const EV_DEPOSIT_REFUNDED: uint32 = 0x5254010F;
 const EV_SETTLEMENT_BOUNCED: uint32 = 0x52540110;
 const EV_UNEXPECTED_BOUNCE: uint32 = 0x52540111;
+const EV_RESTAKED: uint32 = 0x52540112;
+const EV_TEAM_RELEASED: uint32 = 0x52540113;
 
 // TEP-74 standard opcodes
 const OP_JETTON_TRANSFER: uint32 = 0x0f8a7ea5;
@@ -51,7 +61,16 @@ const PRICE_MULTIPLIER: uint8 = 2;
 
 // Settlement actions (bit flags; one bit per outbound jetton message)
 const ACTION_TEAM_TRANSFER: uint8 = 1; // success: 1.2e8 to the team wallet
-const ACTION_BURN: uint8 = 2;          // failure: reward+team+principal; 0-stake success: reward
+const ACTION_BURN: uint8 = 2;          // failure: half budget+team+principal; end: leftover carry
+// queryId roundId 0 + ACTION_TEAM_TRANSFER = final ReleaseTeam transfer (bounce restores it)
+
+// v11 economics (docs/35 D-44/D-45)
+const IMMEDIATE_REWARD_BPS: uint128 = 2000;       // 20% of a reward claimable at once
+const BPS: uint128 = 10000;
+const TIMING_BPS_FIRST: uint128 = 15000;         // first third of the staking window
+const TIMING_BPS_SECOND: uint128 = 12000;
+const TIMING_BPS_LAST: uint128 = 10000;
+const FALLBACK_UNLOCK_SECONDS: uint64 = 2592000;  // 30 days after round 10
 
 // queryId layout for outbound jetton messages:
 //   settlement: SETTLE_TAG | roundId<<8 | action
@@ -65,6 +84,12 @@ const VALUE_JETTON_ACTION: int = 100000000;   // 0.1 TON per settlement transfer
 const MIN_CLAIM_VALUE: int = 100000000;       // claimant pays the outbound transfer
 const MIN_RETRY_VALUE: int = 300000000;
 const MIN_REFUND_VALUE: int = 100000000;      // forward TON needed for an instant refund
+const MIN_DEPOSIT_VALUE: int = 100000000;     // forward TON a valid deposit must carry (ticket deploy)
+const VALUE_TICKET_MSG: int = 20000000;       // RC -> ticket update / add-stake from a request
+const VALUE_TICKET_DEPLOY: int = 50000000;    // restake: deploy/top up the new ticket
+const TICKET_MIN_BALANCE: int = 20000000;     // ticket keeps this for storage, returns the rest
+const MIN_TICKET_ACTION_VALUE: int = 150000000; // owner -> ticket claim
+const MIN_TICKET_RESTAKE_VALUE: int = 250000000;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -88,6 +113,11 @@ enum Errors {
     NothingToClaim = 230,
     NotEnoughValue = 234,
     WrongWorkchain = 235,
+
+    NotTicket = 236,
+    NotOwner = 237,
+    TicketPending = 238,
+    RestakeNotOpen = 239,
 
     NothingToRetry = 240,
     BadConfig = 250,

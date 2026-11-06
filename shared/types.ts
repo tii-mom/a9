@@ -293,3 +293,130 @@ export const ENDPOINTS = {
   adminResumeOracle: '/api/admin/oracle/resume',
   adminAdvance: '/api/admin/rounds/advance'
 } as const;
+
+/* ------------------------------------------------------------------ *
+ * 社交层（docs/35 §4，链下）：/api/social/*、/s/:code、/og/:code.png
+ * 金额一律 raw 字符串；比例 bps；USD 为 number（展示用）。
+ * ------------------------------------------------------------------ */
+
+export type SocialSource = 'tg' | 'x' | 'web';
+
+/** 城门阶段：preview 预告 / staking 报名 / observing 观察 / settled 已结算（成功或失败） */
+export type SocialRoundPhase = 'preview' | 'staking' | 'observing' | 'settled';
+
+export type SocialLeaderboardType = 'squad' | 'power' | 'recruit';
+export type SocialLeaderboardScope = 'round' | 'season';
+
+export interface SocialSquadBrief {
+  code: string;
+  name: string;
+  /** 0 = 未成团，1..4 = Lv1..Lv4（按当前轮报名人数） */
+  level: number;
+  memberCount: number;
+}
+
+export interface SocialSquadDetail extends SocialSquadBrief {
+  leaderWallet: string | null;
+  tgChatId: string | null;
+}
+
+/** GET /api/social/me */
+export interface SocialMeResponse {
+  wallet: string;
+  inviteCode: string;
+  referrer: string | null;
+  squad: SocialSquadBrief | null;
+  stats: {
+    /** 当前轮战力（raw，字符串） */
+    power: string;
+    recruits: number;
+    recruitsFromX: number;
+    /** 阵亡勋章 = 本人报名过的失败轮数 */
+    medals: number;
+    /** 截至最新轮的连续报名轮数 */
+    streak: number;
+  };
+}
+
+/** POST /api/social/bind */
+export interface SocialBindRequest {
+  wallet: string;
+  referralCode?: string;
+  squadCode?: string;
+  source: SocialSource;
+  /** Telegram WebApp.initData 原文；服务端校验后取得 tgUserId（请求体不接受 tgUserId） */
+  tgInitData?: string;
+  /** TON Proof（写接口鉴权）；也可放在 X-Ton-Proof 头（base64 JSON） */
+  proof?: TonProof;
+}
+
+export interface SocialBindResponse {
+  wallet: string;
+  inviteCode: string;
+  referrer: string | null;
+  refSource: SocialSource | null;
+  squad: SocialSquadBrief | null;
+  /** 本次请求是否真正写入了邀请人 / 战队 */
+  bound: { referrer: boolean; squad: boolean };
+  /** 业务规则拒绝原因（不影响 200 返回）；null = 无拒绝 */
+  rejected: { referral: string | null; squad: string | null };
+}
+
+/** POST /api/social/squads（创建者自动成为团长并入队） */
+export interface SocialSquadCreateRequest {
+  wallet: string;
+  name: string;
+  tgChatId?: string;
+  proof?: TonProof;
+}
+
+/** POST /api/social/squads/:code/join */
+export interface SocialSquadJoinRequest {
+  wallet: string;
+  proof?: TonProof;
+}
+
+/** POST /api/social/squads 与 POST /api/social/squads/:code/join */
+export interface SocialSquadResponse {
+  squad: SocialSquadDetail;
+  /** 本次请求是否改变了该用户的战队归属 */
+  changed: boolean;
+}
+
+export interface SocialLeaderboardRow {
+  rank: number;
+  /** 战队码（type=squad）或脱敏钱包（其它类型） */
+  key: string;
+  name: string | null;
+  /** power：战力 raw；recruit：拉新积分（X 来源 ×2）；squad：全队战力 raw */
+  score: string;
+}
+
+/** GET /api/social/leaderboard（最多 100 行） */
+export interface SocialLeaderboardResponse {
+  type: SocialLeaderboardType;
+  scope: SocialLeaderboardScope;
+  roundId: number | null;
+  season: number;
+  rows: SocialLeaderboardRow[];
+}
+
+/** GET /api/social/gate */
+export interface SocialGateResponse {
+  roundId: number | null;
+  phase: SocialRoundPhase;
+  /** 城门价（USD）；轮次未开放时为 null */
+  gatePriceUsd: number | null;
+  /** 最近一根已收盘 K 线 TWAP（USD）；无数据为 null */
+  priceUsd: number | null;
+  /** STON.fi 池子 USDT 侧储备（USD）；未配置 STONFI_POOL_ADDRESS 或拉取失败为 null */
+  poolUsdt: number | null;
+  /** poolUsdt * (sqrt(gate / price) - 1)，下限 0；缺少价格或池子数据时为 null */
+  remainingUsd: number | null;
+  litCandles: number;
+  candlesSeen: number;
+  rewardBudgetRaw: string;
+  stakeCount: number;
+  /** 当前阶段结束时刻（unix 秒）；无法确定时为 null */
+  phaseEndsAt: number | null;
+}

@@ -44,9 +44,7 @@ const PARAM_TOTAL_SUPPLY: coins = 10000000000000000000; // 100 亿 A9 (9 decimal
 const PARAM_P0: uint128 = 116000;
 const PARAM_ROUND_REWARD: uint128 = 700000000000000000;
 const PARAM_TEAM_ROUND: uint128 = 120000000000000000;
-const PARAM_MIN_STAKE: uint128 = 100000000000000;
-const PARAM_MAX_PER_ADDRESS: uint128 = 20000000000000000;
-const PARAM_MAX_TOTAL_STAKE: uint128 = 200000000000000000;
+const PARAM_MIN_STAKE: uint128 = 1000000000000; // v11: 1,000 A9, no caps
 const PARAM_ABORT_TIMEOUT: uint32 = 604800;
 
 // Deployment TON budget, overridable for low-balance testnet runs. Values are TON.
@@ -278,8 +276,6 @@ fun main() {
     println("  roundRewardRaw     = {} [{}]", roundRewardRaw, intSource("A9_DEPLOY_ROUND_REWARD_RAW"));
     println("  teamRoundRaw       = {} [{}]", teamRoundRaw, intSource("A9_DEPLOY_TEAM_ROUND_RAW"));
     println("  minStakeRaw        = {} [{}]", minStakeRaw, intSource("A9_DEPLOY_MIN_STAKE_RAW"));
-    println("  maxStakePerAddress = {}", PARAM_MAX_PER_ADDRESS);
-    println("  maxTotalStakeRaw   = {}", PARAM_MAX_TOTAL_STAKE);
 
     // Resume mode (env): reuse an already-deployed JettonMaster; never deploy/mint again.
     val resumeMaster = env<address>("A9_RESUME_JETTON_MASTER_ADDRESS");
@@ -346,8 +342,6 @@ fun main() {
             roundRewardRaw,
             teamRoundRaw,
             minStakeRaw,
-            maxStakePerAddressRaw: PARAM_MAX_PER_ADDRESS,
-            maxTotalStakeRaw: PARAM_MAX_TOTAL_STAKE,
         }.toCell(),
         timing: ProtocolTiming {
             previewSeconds: previewSeconds as uint32,
@@ -359,14 +353,17 @@ fun main() {
             riskDisclosureVersion: 1,
             configVersion: 1,
         }.toCell(),
-        jettonWalletCode: build("JettonWallet"),
+        codes: ProtocolCodes { jettonWalletCode: build("JettonWallet"), ticketCode: build("StakeTicket") }.toCell(),
     };
     val rcData = Storage {
         config: cfg.toCell(),
         currentRoundId: 0,
         successCount: 0,
         rounds: [],
-        stakes: [],
+        carryRaw: 0,
+        lastSuccessRound: 0,
+        teamPendingRaw: 0,
+        endAt: 0,
     };
     val rcInit = ContractState { code: build("RoundController"), data: rcData.toCell() };
     val rcAddress = AutoDeployAddress { stateInit: rcInit }.calculateAddress();

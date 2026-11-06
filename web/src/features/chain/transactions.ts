@@ -1,6 +1,7 @@
 /**
  * 交易准备：参数校验 + 构造 TON Connect 消息。
  * 发送由 wallet 模块的 sendTonConnectTransaction 完成（复用同一个 TonConnectUI 实例）。
+ * v11：质押 payload v2（可选受益人）；领取 / 续战发给用户自己的攻城令（StakeTicket），不再有 ClaimAll / 退款账本。
  */
 
 import type { RoundSummary } from '@shared/types';
@@ -8,17 +9,17 @@ import { parseTonAddress, toRawAddress, type TonAddress } from './address';
 import { toBocBase64 } from './cell';
 import type { ChainConfig } from './config';
 import { chainError, ChainError } from './errors';
-import { buildClaimPayloadCell, buildJettonTransferCell, buildStakePayloadCell } from './payload';
+import { buildJettonTransferCell, buildStakePayloadCell, buildTicketPayloadCell } from './payload';
 import {
-  DEFAULT_CLAIM_MESSAGE_TON_NANO,
   DEFAULT_FORWARD_TON_NANO,
   DEFAULT_STAKE_MESSAGE_TON_NANO,
+  DEFAULT_TICKET_CLAIM_TON_NANO,
+  DEFAULT_TICKET_RESTAKE_TON_NANO,
   MIN_CLAIM_TON_BALANCE,
+  MIN_RESTAKE_TON_BALANCE,
   MIN_STAKE_TON_BALANCE,
   OPCODES,
-  REFUND_ROUND_ID,
   TX_VALID_FOR_SECONDS,
-  nextDepositNonce,
   nextQueryId,
 } from './protocol';
 
@@ -44,21 +45,8 @@ export interface WalletContext {
   tonBalance: string | null;
 }
 
-export type ChainTxKind = 'stake' | 'claim' | 'claimAll' | 'claimRefund';
-
-/**
- * v10 领取：
- *   claim       = Claim(roundId)（0x52540006）：该轮本金 + 全额奖励
- *   claimAll    = ClaimAll（0x5254000E）：1..10 轮全部 + 退款账本
- *   claimRefund = Claim(0)：仅退款账本
- */
-export type ClaimKind = 'claim' | 'claimAll' | 'claimRefund';
-
-const CLAIM_OPCODE: Record<ClaimKind, number> = {
-  claim: OPCODES.CLAIM,
-  claimAll: OPCODES.CLAIM_ALL,
-  claimRefund: OPCODES.CLAIM,
-};
+/** 链上交易类型：质押（转账入金）/ 攻城令领取 / 攻城令一键续战。 */
+export type ChainTxKind = 'stake' | 'ticketClaim' | 'ticketRestake';
 
 export interface PreparedTx {
   request: TonConnectTxRequest;
@@ -67,8 +55,8 @@ export interface PreparedTx {
     opcode: number;
     roundId: number | null;
     amountRaw: string | null;
-    depositNonce: string | null;
     queryId: string;
+    /** 交易接收合约：质押 = RoundController（经用户 Jetton 钱包）；领取 / 续战 = 该轮攻城令 */
     contract: string;
     requiresJettonWallet: boolean;
   };
@@ -104,44 +92,36 @@ function assertGas(chain: ChainConfig, wallet: WalletContext, minimum: number): 
   }
 }
 
-/** 质押前置校验（金额、窗口、限额、gas）。 */
+/** 质押前置校验（金额、窗口、gas）。v11 无单轮 / 单地址上限。 */
 export function validateStake(params: {
   chain: ChainConfig;
   wallet: WalletContext;
   round: RoundSummary;
   amountRaw: bigint;
-  myStakeRaw?: bigint;
   now?: number;
 }): void {
   const { chain, wallet, round, amountRaw } = params;
   const now = params.now ?? Date.now();
   assertWalletReady(chain, wallet);
-  if (round.state !== 'STAKING_OPEN') throw chainError('ROUND_NOT_OPEN', '当前轮不在报名窗口', round.state);
-  if (round.stakeOpenAt !== null && now < round.stakeOpenAt) throw chainError('ROUND_NOT_OPEN', '报名窗口尚未开启');
-  if (round.stakeCloseAt !== null && now >= round.stakeCloseAt) throw chainError('ROUND_NOT_OPEN', '报名窗口已关闭');
+  if (round.state !== 'STAKING_OPEN') throw chainError('ROUND_NOT_OPEN', '当前轮不在攻城窗口', round.state);
+  if (round.stakeOpenAt !== null && now < round.stakeOpenAt) throw chainError('ROUND_NOT_OPEN', '攻城窗口尚未开启');
+  if (round.stakeCloseAt !== null && now >= round.stakeCloseAt) throw chainError('ROUND_NOT_OPEN', '攻城窗口已关闭');
   if (amountRaw <= 0n) throw chainError('AMOUNT_INVALID');
   if (amountRaw < chain.minStakeRaw) {
     throw chainError('AMOUNT_TOO_SMALL', '低于单笔最低质押', '最低 ' + chain.minStakeRaw.toString());
   }
-  if (amountRaw > chain.maxTotalStakeRaw) {
-    throw chainError('AMOUNT_TOO_LARGE', '超过本轮总质押上限', '上限 ' + chain.maxTotalStakeRaw.toString());
-  }
-  // 单地址累计 ≤ 固定硬顶（V6.1：20,000,000 A9，不随本轮总量浮动）
-  const mine = (params.myStakeRaw ?? 0n) + amountRaw;
-  if (chain.maxStakePerAddressRaw > 0n && mine > chain.maxStakePerAddressRaw) {
-    throw chainError(
-      'AMOUNT_TOO_LARGE',
-      '单地址质押超过硬顶',
-      '单地址上限 ' + chain.maxStakePerAddressRaw.toString() + ' raw（含本轮已有质押）',
-    );
-  }
   assertGas(chain, wallet, MIN_STAKE_TON_BALANCE);
 }
 
-/** 领取前置校验（钱包、gas）。 */
+/** 领取 / 续战前置校验（钱包、gas）。 */
 export function validateClaim(params: { chain: ChainConfig; wallet: WalletContext }): void {
   assertWalletReady(params.chain, params.wallet);
   assertGas(params.chain, params.wallet, MIN_CLAIM_TON_BALANCE);
+}
+
+export function validateRestake(params: { chain: ChainConfig; wallet: WalletContext }): void {
+  assertWalletReady(params.chain, params.wallet);
+  assertGas(params.chain, params.wallet, MIN_RESTAKE_TON_BALANCE);
 }
 
 function validUntilSeconds(): number {
@@ -149,9 +129,9 @@ function validUntilSeconds(): number {
 }
 
 /**
- * 构造质押交易：
+ * 构造质押交易（v11 StakePayload v2）：
  *   用户钱包 → 用户 Jetton Wallet（TEP-74 transfer）
- *   destination = RoundController，forward_payload = StakePayload
+ *   destination = RoundController，forward_payload = StakePayload v2（beneficiary 缺省 = 本人）
  */
 export async function prepareStakeTransaction(params: {
   chain: ChainConfig;
@@ -160,17 +140,18 @@ export async function prepareStakeTransaction(params: {
   amountRaw: bigint;
   riskDisclosureVersion: number;
   jettonWalletFriendly: string;
-  depositNonce?: bigint;
+  /** 一键上车 / 赠送攻城令：受益人地址（友好或 raw）；缺省 = 本人 */
+  beneficiary?: string | null;
   signal?: AbortSignal;
 }): Promise<PreparedTx> {
   const { chain, wallet, round, amountRaw } = params;
   if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
-  const nonce = params.depositNonce ?? nextDepositNonce();
   const roundId = round.roundId;
+  const beneficiary = params.beneficiary ? requireTonAddress(params.beneficiary, 'beneficiary') : null;
   const stakePayload = buildStakePayloadCell({
     roundId,
-    depositNonce: nonce,
     riskDisclosureVersion: params.riskDisclosureVersion,
+    beneficiary,
   });
   const transferCell = buildJettonTransferCell({
     amountRaw,
@@ -198,7 +179,6 @@ export async function prepareStakeTransaction(params: {
       opcode: OPCODES.STAKE_DEPOSIT,
       roundId,
       amountRaw: amountRaw.toString(),
-      depositNonce: nonce.toString(),
       queryId: '0',
       contract: chain.roundController,
       requiresJettonWallet: true,
@@ -206,30 +186,54 @@ export async function prepareStakeTransaction(params: {
   };
 }
 
-/** 构造领取交易（Claim(roundId) / ClaimAll / Claim(0) → RoundController）。 */
-export function prepareClaimTransaction(params: {
+/** 构造攻城令领取交易（TicketClaim → 用户自己的攻城令，附 0.2 TON）。 */
+export function prepareTicketClaimTransaction(params: {
   chain: ChainConfig;
   wallet: WalletContext;
-  kind: ClaimKind;
-  roundId?: number | null;
+  roundId: number;
+  ticketAddress: string;
   queryId?: bigint;
+}): PreparedTx {
+  return prepareTicketTx({ ...params, kind: 'ticketClaim' });
+}
+
+/** 构造攻城令一键续战交易（TicketRestake → 用户自己的攻城令，附 0.3 TON）。 */
+export function prepareTicketRestakeTransaction(params: {
+  chain: ChainConfig;
+  wallet: WalletContext;
+  roundId: number;
+  ticketAddress: string;
+  queryId?: bigint;
+}): PreparedTx {
+  return prepareTicketTx({ ...params, kind: 'ticketRestake' });
+}
+
+function prepareTicketTx(params: {
+  chain: ChainConfig;
+  wallet: WalletContext;
+  roundId: number;
+  ticketAddress: string;
+  queryId?: bigint;
+  kind: 'ticketClaim' | 'ticketRestake';
 }): PreparedTx {
   const { chain, wallet, kind } = params;
   if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
-  const roundId = kind === 'claimAll' || kind === 'claimRefund' ? 0 : Number(params.roundId ?? 0);
-  if (kind !== 'claimAll' && kind !== 'claimRefund' && (roundId <= 0 || roundId > 255)) {
-    throw chainError('BAD_CONFIG', 'roundId 非法: ' + roundId);
+  if (!Number.isInteger(params.roundId) || params.roundId < 1 || params.roundId > 255) {
+    throw chainError('BAD_CONFIG', 'roundId 非法: ' + params.roundId);
   }
+  const ticket = requireTonAddress(params.ticketAddress, 'ticket');
+  const opcode = kind === 'ticketClaim' ? OPCODES.TICKET_CLAIM : OPCODES.TICKET_RESTAKE;
+  const amount = kind === 'ticketClaim' ? DEFAULT_TICKET_CLAIM_TON_NANO : DEFAULT_TICKET_RESTAKE_TON_NANO;
   const queryId = params.queryId ?? nextQueryId();
-  const payload = buildClaimPayloadCell({ op: CLAIM_OPCODE[kind], queryId, roundId });
+  const payload = buildTicketPayloadCell({ op: opcode, queryId });
   const request: TonConnectTxRequest = {
     validUntil: validUntilSeconds(),
     network: chain.chainId ?? undefined,
     from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
     messages: [
       {
-        address: chain.roundController,
-        amount: DEFAULT_CLAIM_MESSAGE_TON_NANO.toString(),
+        address: toRawAddress(ticket),
+        amount: amount.toString(),
         payload: toBocBase64(payload),
       },
     ],
@@ -238,51 +242,11 @@ export function prepareClaimTransaction(params: {
     request,
     meta: {
       kind,
-      opcode: CLAIM_OPCODE[kind],
-      roundId: kind === 'claimAll' || kind === 'claimRefund' ? 0 : roundId,
+      opcode,
+      roundId: params.roundId,
       amountRaw: null,
-      depositNonce: null,
       queryId: queryId.toString(),
-      contract: chain.roundController,
-      requiresJettonWallet: false,
-    },
-  };
-}
-
-/**
- * 构造退款账本领取交易（Claim{roundId: REFUND_ROUND_ID} → RoundController）。
- * 显式使用 REFUND_ROUND_ID=0，不复用任何默认 roundId；回执由 FIX-5 matcher（queryId + aborted/exit_code）校验。
- */
-export function prepareClaimRefundTransaction(params: {
-  chain: ChainConfig;
-  wallet: WalletContext;
-  queryId?: bigint;
-}): PreparedTx {
-  const { chain, wallet } = params;
-  if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
-  const queryId = params.queryId ?? nextQueryId();
-  const payload = buildClaimPayloadCell({ op: OPCODES.CLAIM, queryId, roundId: REFUND_ROUND_ID });
-  return {
-    request: {
-      validUntil: validUntilSeconds(),
-      network: chain.chainId ?? undefined,
-      from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
-      messages: [
-        {
-          address: chain.roundController,
-          amount: DEFAULT_CLAIM_MESSAGE_TON_NANO.toString(),
-          payload: toBocBase64(payload),
-        },
-      ],
-    },
-    meta: {
-      kind: 'claimRefund',
-      opcode: OPCODES.CLAIM,
-      roundId: REFUND_ROUND_ID,
-      amountRaw: null,
-      depositNonce: null,
-      queryId: queryId.toString(),
-      contract: chain.roundController,
+      contract: toRawAddress(ticket),
       requiresJettonWallet: false,
     },
   };

@@ -7,12 +7,7 @@ import type { ApiError } from '../../lib/api';
 import { api, useQuery } from '../../lib/api';
 import type { DataSource, ProtocolConfig } from '@shared/types';
 import { base64Decode, base64UrlEncode } from './address';
-import {
-  DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
-  DEFAULT_MAX_TOTAL_STAKE_TOKENS,
-  DEFAULT_MIN_STAKE_TOKENS,
-  DEFAULT_TOKEN_DECIMALS,
-} from './protocol';
+import { DEFAULT_MIN_STAKE_TOKENS, DEFAULT_TOKEN_DECIMALS } from './protocol';
 
 export type ChainNetwork = 'mainnet' | 'testnet';
 export type ChainDisabledReason = 'no-config' | 'demo' | 'no-contracts';
@@ -87,14 +82,9 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
   const roundController = config?.contracts.roundController?.trim() || null;
   const jettonMaster = config?.contracts.jettonMaster?.trim() || null;
 
-  // 限额：与合约公式一致——perAddressCap = maxTotalStakeRaw × maxStakePerAddressBps / 10000
-  // （V6.1 定稿：200,000,000 × 1000 / 10000 = 20,000,000 A9 固定硬顶，不是动态比例）
-  const maxTotalStakeRaw = parseRawExtra(contractExtra(config, 'maxTotalStakeRaw'), DEFAULT_MAX_TOTAL_STAKE_TOKENS * tokenUnit);
-  const maxStakePerAddressBps = parseBpsExtra(
-    contractExtra(config, 'maxStakePerAddressBps'),
-    DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
-  );
-  const derivedPerAddressCap = (maxTotalStakeRaw * BigInt(maxStakePerAddressBps)) / 10000n;
+  // 限额：v11 没有单轮总量 / 单地址上限（docs/35 D-48）。合约返回的 0 表示「不限」，这里统一为 0n。
+  const maxTotalStakeRaw = 0n;
+  const derivedPerAddressCap = 0n;
 
   let disabledReason: ChainDisabledReason | null = null;
   if (!config) disabledReason = 'no-config';
@@ -122,7 +112,7 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     minStakeRaw: parseRawExtra(contractExtra(config, 'minStakeRaw'), DEFAULT_MIN_STAKE_TOKENS * tokenUnit),
     maxTotalStakeRaw,
     maxStakePerAddressRaw: parseRawExtra(contractExtra(config, 'maxStakePerAddressRaw'), derivedPerAddressCap),
-    maxStakePerAddressBps,
+    maxStakePerAddressBps: 0,
     dataSource: config?.dataSource ?? 'demo',
     tonConnectManifestUrl: config?.tonConnectManifestUrl ?? null,
   };

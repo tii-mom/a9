@@ -14,6 +14,16 @@ import type {
   Trade,
 } from '@shared/types';
 import { ENDPOINTS } from '@shared/types';
+import type {
+  SocialBindRequest,
+  SocialBindResponse,
+  SocialLeaderboardResponse,
+  SocialMeResponse,
+  SocialSquadCreateRequest,
+  SocialSquadJoinRequest,
+  SocialSquadResponse,
+} from '@shared/types';
+import type { GateState, LeaderboardScope, LeaderboardType } from '../features/social/types';
 
 function newNonce(): string {
   const c = globalThis.crypto as Crypto | undefined;
@@ -189,3 +199,30 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
 }
 
 export type { Claimable };
+
+/* ------------------------------------------------------------------ */
+/* 社交层（Telegram 小程序 / X 拉新）：/api/social/*                     */
+/* 写接口（bind / squads / join）请求体必须带 wallet；鉴权为 TON Proof：   */
+/* body.proof 或 X-Ton-Proof 头，二选一。目前 web 尚未获取 proof（见报告），  */
+/* 未带 proof 时后端仅在 demo 且 DEMO_ALLOW_UNSIGNED_WRITES=true 下放行。    */
+/* ------------------------------------------------------------------ */
+
+export const socialApi = {
+  me: (wallet: string) => request<SocialMeResponse>(`/api/social/me?wallet=${encodeURIComponent(wallet)}`),
+  /** Telegram 身份只通过 body.tgInitData 传递（服务端校验），不再发送 tgUserId。 */
+  bind: (body: SocialBindRequest) =>
+    request<SocialBindResponse>('/api/social/bind', { method: 'POST', body: JSON.stringify(body) }),
+  createSquad: (body: SocialSquadCreateRequest) =>
+    request<SocialSquadResponse>('/api/social/squads', { method: 'POST', body: JSON.stringify(body) }),
+  joinSquad: (code: string, body: SocialSquadJoinRequest) =>
+    request<SocialSquadResponse>(`/api/social/squads/${encodeURIComponent(code)}/join`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  leaderboard: (query: { type: LeaderboardType; scope: LeaderboardScope; round?: number }) => {
+    const params = new URLSearchParams({ type: query.type, scope: query.scope });
+    if (query.round !== undefined) params.set('round', String(query.round));
+    return request<SocialLeaderboardResponse>(`/api/social/leaderboard?${params.toString()}`);
+  },
+  gate: () => request<GateState>('/api/social/gate'),
+};

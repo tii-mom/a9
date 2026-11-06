@@ -6,7 +6,7 @@
  *   1) 用户拒绝签名（TON Connect code 300 / 文案）→ WALLET_REJECTED，不可重试，绝不能当成功；
  *   2) 失败回执（aborted / bounced / 非 0 exit_code）→ stage=failed，绝不显示成功（FIX-5 回归）；
  *   3) 链源不可用（fetch 抛错）→ 回执轮询返回 null，不得误判为已确认；
- *   4) 重复提交的 payload 级防重：depositNonce / queryId 由时间+随机生成，同一毫秒重复调用也不相同。
+ *   4) 重复提交：queryId 由时间生成并单调递增（v11 无 depositNonce）。
  *
  * 用法：node qa/chain-logic.mjs      （在仓库根执行；需要 web 依赖已安装，使用 vite 的 SSR 加载器转译 TS）
  */
@@ -136,30 +136,20 @@ await step('rpc.unavailable.notConfirmed', async () => {
   return 'fetch 抛错 → stage=null（不误判成功）';
 });
 
-// 4) 重复提交：每次提交的 depositNonce / queryId 必须不同（payload 级防重，合约按 (roundId, owner, nonce) 去重）
-await step('submit.nonce.monotonic_unique', () => {
+// 4) 重复提交（v11）：StakePayload v2 不再携带 depositNonce；交易 queryId 随毫秒时间单调递增。
+//    （防重不靠合约 nonce：重复点击由 UI busy 锁与回执 queryId 匹配保证。）
+await step('submit.queryId.monotonic', () => {
   const base = 1793843480000;
-  const seenNonce = new Set();
-  const seenQuery = new Set();
-  let prevNonce = -1n;
-  let prevQuery = -1n;
+  let prev = -1n;
   for (let i = 0; i < 200; i += 1) {
     const now = base + i; // 逐毫秒提交（真实钱包连续点击/重试的形态）
-    const nonce = protocolModule.nextDepositNonce(now);
     const queryId = protocolModule.nextQueryId(now);
-    assert(nonce > prevNonce, '时间递增时 depositNonce 必须单调递增');
-    assert(queryId > prevQuery, '时间递增时 queryId 必须单调递增');
-    prevNonce = nonce;
-    prevQuery = queryId;
-    seenNonce.add(nonce.toString());
-    seenQuery.add(queryId.toString());
+    assert(queryId > prev, '时间递增时 queryId 必须单调递增');
+    prev = queryId;
   }
-  assert(seenNonce.size === 200, 'depositNonce 出现重复：' + (200 - seenNonce.size));
-  assert(seenQuery.size === 200, 'queryId 出现重复：' + (200 - seenQuery.size));
-  // 时间位必须来自毫秒时间戳：nonce = now * 4096 + random(0..4095)
-  assert(protocolModule.nextDepositNonce(base) / 4096n === BigInt(base), 'depositNonce 未嵌入毫秒时间位');
+  // 时间位必须来自毫秒时间戳：queryId = now * 1024 + random(0..1023)
   assert(protocolModule.nextQueryId(base) / 1024n >= BigInt(base), 'queryId 未嵌入毫秒时间位');
-  return '200 次逐毫秒提交：nonce/queryId 全唯一且单调递增（重复提交由合约 nonce 去重 + UI busy 锁双保险）';
+  return '200 次逐毫秒提交：queryId 单调递增（v11 无 depositNonce）';
 });
 
 globalThis.fetch = realFetch;

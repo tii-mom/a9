@@ -1,19 +1,18 @@
 /**
  * 交易消息体构造（payload @ TON Connect）。
- * 位布局见 docs/04 §19 与 web/src/features/chain/README.md：
+ * 位布局见 docs/35 §3.2 / §3.4、contracts/contracts/types.tolk（StakeDeposit）与 ticket.tolk。
  *
- * StakePayload (136 bit)
- *   op:uint32=0x5254000F | version:uint8=1 | roundId:uint8
- *   | depositNonce:uint64 | riskDisclosureVersion:uint16
- *   | acceptFullPrincipalBurn:uint8(1)
+ * StakePayload v2（右引用 cell，作为 Jetton transfer 的 forward_payload）
+ *   op:uint32=0x5254000F | version:uint8=2 | roundId:uint8 | riskDisclosureVersion:uint16
+ *   | acceptFullPrincipalBurn:uint8(1) | beneficiary:MsgAddress（addr_none = 2 个 0 bit = 记在转账发起人名下）
  *
  * JettonTransfer (TEP-74 0xF8A7EA5)
  *   op:uint32 | queryId:uint64 | amount:Coins | destination:MsgAddress
  *   | response_destination:MsgAddress | custom_payload:(Maybe ^Cell)=0
  *   | forward_ton_amount:Coins | forward_payload:(Either Cell ^Cell)=ref
  *
- * ClaimPayload (104 bit)
- *   op:uint32 | queryId:uint64 | roundId:uint8  (ClaimAll: roundId=0 → 扫描 ≤10 轮)
+ * TicketClaim / TicketRestake（用户 → 自己的攻城令）
+ *   op:uint32 | queryId:uint64
  */
 
 import type { TonAddress } from './address';
@@ -22,13 +21,14 @@ import { ACCEPT_FULL_PRINCIPAL_BURN, JETTON_TRANSFER_OP, STAKE_PAYLOAD_VERSION }
 
 export interface StakePayloadParams {
   roundId: number;
-  depositNonce: bigint | number | string;
   riskDisclosureVersion: number;
+  /** 受益人（一键上车 / 赠送攻城令）；缺省 = 转账发起人本人（addr_none） */
+  beneficiary?: TonAddress | null;
   version?: number;
   acceptFullPrincipalBurn?: number;
 }
 
-/** StakePayload cell（作为 Jetton transfer 的 forward_payload 引用）。 */
+/** StakePayload v2 cell（作为 Jetton transfer 的 forward_payload 引用）。 */
 export function buildStakePayloadCell(params: StakePayloadParams): ChainCell {
   const roundId = Number(params.roundId);
   if (!Number.isInteger(roundId) || roundId < 0 || roundId > 255) throw new Error('roundId 非法: ' + params.roundId);
@@ -38,14 +38,18 @@ export function buildStakePayloadCell(params: StakePayloadParams): ChainCell {
   const riskVersion = Number(params.riskDisclosureVersion);
   if (!Number.isInteger(riskVersion) || riskVersion < 0 || riskVersion > 0xffff) throw new Error('riskDisclosureVersion 非法: ' + params.riskDisclosureVersion);
 
-  return beginCell()
+  const builder = beginCell()
     .writeUint(0x5254000f, 32)
     .writeUint(version, 8)
     .writeUint(roundId, 8)
-    .writeUint(params.depositNonce, 64)
     .writeUint(riskVersion, 16)
-    .writeUint(accept, 8)
-    .end();
+    .writeUint(accept, 8);
+  if (params.beneficiary) {
+    builder.writeAddress(params.beneficiary);
+  } else {
+    builder.writeUint(0, 2); // addr_none
+  }
+  return builder.end();
 }
 
 export interface JettonTransferParams {
@@ -78,19 +82,12 @@ export function buildJettonTransferCell(params: JettonTransferParams): ChainCell
     .end();
 }
 
-export interface ClaimPayloadParams {
+export interface TicketPayloadParams {
   op: number;
   queryId: bigint | number | string;
-  /** ClaimAll 时填 0（合约忽略，领取 0..10 全部） */
-  roundId: number;
 }
 
-/**
- * 单轮操作消息体：op:uint32 | queryId:uint64 | roundId:uint8（104 bit）。
- * 适用：Claim 0x52540006（roundId=0 为退款账本）/ ClaimAll 0x5254000E（roundId 忽略，填 0）。
- */
-export function buildClaimPayloadCell(params: ClaimPayloadParams): ChainCell {
-  const roundId = Number(params.roundId);
-  if (!Number.isInteger(roundId) || roundId < 0 || roundId > 255) throw new Error('roundId 非法: ' + params.roundId);
-  return beginCell().writeUint(params.op, 32).writeUint(params.queryId, 64).writeUint(roundId, 8).end();
+/** 攻城令消息体：op:uint32 | queryId:uint64（TicketClaim 0x52540303 / TicketRestake 0x52540304）。 */
+export function buildTicketPayloadCell(params: TicketPayloadParams): ChainCell {
+  return beginCell().writeUint(params.op, 32).writeUint(params.queryId, 64).end();
 }

@@ -1,4 +1,4 @@
-// v10 test fixtures: real JettonMaster + JettonWallet + RoundController.
+// v11 test fixtures: real JettonMaster + JettonWallet + RoundController + StakeTicket.
 import "@stdlib/strings"
 import "@acton/build"
 import "@acton/emulation/network"
@@ -8,6 +8,7 @@ import "@acton/testing/expect"
 import "@contracts/jetton/storage"
 import "@contracts/constants"
 import "@contracts/types"
+import "@contracts/ticket"
 
 // Local copies of jetton messages (jetton/messages.tolk would clash with @contracts/types).
 struct (0x00000015) MintOnceMsg {
@@ -34,9 +35,9 @@ const A9: coins = 1000000000;                          // 1 A9 raw
 const ROUND_REWARD: coins = 700000000000000000;        // 7e8 A9
 const TEAM_ROUND: coins = 120000000000000000;          // 1.2e8 A9
 const RC_FUNDING: coins = 8200000000000000000;         // 7e9 + 1.2e9
-const MIN_STAKE: coins = 100000000000000;              // 100,000 A9
-const MAX_PER_ADDRESS: coins = 20000000000000000;      // 2e7 A9
-const MAX_TOTAL: coins = 200000000000000000;           // 2e8 A9
+const MIN_STAKE: coins = 1000000000000;                // 1,000 A9 (v11)
+const IMMEDIATE_SHARE: coins = 2000;                   // bps, mirrors IMMEDIATE_REWARD_BPS
+const FALLBACK: uint64 = 2592000;
 const P0: uint128 = 116000;
 const PREVIEW: uint32 = 43200;
 const STAKE_WINDOW: uint32 = 129600;
@@ -96,8 +97,6 @@ fun rcStorage(keeper: address, master: address, teamWallet: address): Storage {
             roundRewardRaw: ROUND_REWARD as uint128,
             teamRoundRaw: TEAM_ROUND as uint128,
             minStakeRaw: MIN_STAKE as uint128,
-            maxStakePerAddressRaw: MAX_PER_ADDRESS as uint128,
-            maxTotalStakeRaw: MAX_TOTAL as uint128,
         }.toCell(),
         timing: ProtocolTiming {
             previewSeconds: PREVIEW,
@@ -109,9 +108,18 @@ fun rcStorage(keeper: address, master: address, teamWallet: address): Storage {
             riskDisclosureVersion: 1,
             configVersion: 1,
         }.toCell(),
-        jettonWalletCode: build("JettonWallet"),
+        codes: ProtocolCodes { jettonWalletCode: build("JettonWallet"), ticketCode: build("StakeTicket") }.toCell(),
     };
-    return { config: cfg.toCell(), currentRoundId: 0, successCount: 0, rounds: [], stakes: [] };
+    return {
+        config: cfg.toCell(),
+        currentRoundId: 0,
+        successCount: 0,
+        rounds: [],
+        carryRaw: 0,
+        lastSuccessRound: 0,
+        teamPendingRaw: 0,
+        endAt: 0,
+    };
 }
 
 fun transfer(from: address, wallet: address, to: address, amount: coins, forwardTon: coins, payload: slice, value: coins): SendResultList {
@@ -178,28 +186,70 @@ fun user(env: Env, name: string, amount: coins): address {
     return u;
 }
 
-fun stakePayload(roundId: uint8, nonce: uint64, riskVersion: uint16, accept: uint8): slice {
-    val inner = beginCell()
+fun stakePayloadFor(roundId: uint8, riskVersion: uint16, accept: uint8, beneficiary: address?): slice {
+    var b = beginCell()
         .storeUint(OP_STAKE_DEPOSIT, 32)
-        .storeUint(1, 8)
+        .storeUint(2, 8)
         .storeUint(roundId, 8)
-        .storeUint(nonce, 64)
         .storeUint(riskVersion, 16)
-        .storeUint(accept, 8)
-        .endCell();
-    return beginCell().storeUint(1, 1).storeRef(inner).toSlice();
+        .storeUint(accept, 8);
+    if (beneficiary == null) {
+        b = b.storeUint(0, 2);
+    } else {
+        b = b.storeAddress(beneficiary!);
+    }
+    return beginCell().storeUint(1, 1).storeRef(b.endCell()).toSlice();
+}
+
+fun stakePayload(roundId: uint8, riskVersion: uint16, accept: uint8): slice {
+    return stakePayloadFor(roundId, riskVersion, accept, null);
 }
 
 fun stakeRaw(env: Env, owner: address, amount: coins, payload: slice, forwardTon: coins): SendResultList {
     return transfer(owner, walletOf(env.master, owner), env.rc, amount, forwardTon, payload, forwardTon + ton("0.15"));
 }
 
-fun stake(env: Env, owner: address, roundId: uint8, amount: coins, nonce: uint64): SendResultList {
-    return stakeRaw(env, owner, amount, stakePayload(roundId, nonce, 1, 1), ton("0.15"));
+fun stake(env: Env, owner: address, roundId: uint8, amount: coins): SendResultList {
+    return stakeRaw(env, owner, amount, stakePayload(roundId, 1, 1), ton("0.15"));
+}
+
+fun stakeFor(env: Env, payer: address, beneficiary: address, roundId: uint8, amount: coins): SendResultList {
+    return stakeRaw(env, payer, amount, stakePayloadFor(roundId, 1, 1, beneficiary), ton("0.15"));
+}
+
+fun ticketOf(env: Env, owner: address, roundId: uint8): address {
+    return net.runGetMethod<address>(env.rc, "get_ticket_address", [owner, roundId]);
+}
+
+fun ticketData(env: Env, owner: address, roundId: uint8): TicketView {
+    return net.runGetMethod<TicketView>(ticketOf(env, owner, roundId), "get_ticket_data");
+}
+
+fun ticketExists(env: Env, owner: address, roundId: uint8): bool {
+    return testing.getAccountState(ticketOf(env, owner, roundId)) != null;
 }
 
 fun stakedAmount(env: Env, roundId: uint8, owner: address): uint128 {
-    return net.runGetMethod<StakePositionView>(env.rc, "get_user_stake", [roundId, owner]).amountRaw;
+    if (!ticketExists(env, owner, roundId)) {
+        return 0;
+    }
+    return ticketData(env, owner, roundId).amountRaw;
+}
+
+fun claimTicket(env: Env, owner: address, roundId: uint8): SendResultList {
+    return net.send(owner, createMessage({ bounce: true, value: ton("0.2"), dest: ticketOf(env, owner, roundId), body: TicketClaim { queryId: 1 } }));
+}
+
+fun restakeTicket(env: Env, owner: address, roundId: uint8): SendResultList {
+    return net.send(owner, createMessage({ bounce: true, value: ton("0.3"), dest: ticketOf(env, owner, roundId), body: TicketRestake { queryId: 1 } }));
+}
+
+fun preview(env: Env, roundId: uint8, weight: uint128): RewardPreview {
+    return net.runGetMethod<RewardPreview>(env.rc, "get_reward_preview", [roundId, weight]);
+}
+
+fun pstate(env: Env): ProtocolStateView {
+    return net.runGetMethod<ProtocolStateView>(env.rc, "get_protocol_state");
 }
 
 fun round(env: Env, roundId: uint8): RoundView {
@@ -260,14 +310,3 @@ fun openNext(env: Env, twap24h: uint128) {
     expect(openRound(env, env.keeper, twap24h)).toHaveSuccessfulTx<OpenRound>({ to: env.rc });
 }
 
-fun claim(env: Env, owner: address, roundId: uint8): SendResultList {
-    return net.send(owner, createMessage({ bounce: true, value: ton("0.2"), dest: env.rc, body: Claim { queryId: 1, roundId } }));
-}
-
-fun claimAll(env: Env, owner: address): SendResultList {
-    return net.send(owner, createMessage({ bounce: true, value: ton("0.2"), dest: env.rc, body: ClaimAll { queryId: 1, roundId: 0 } }));
-}
-
-fun claimable(env: Env, owner: address): Claimable {
-    return net.runGetMethod<Claimable>(env.rc, "get_claimable_all", [owner]);
-}

@@ -40,6 +40,9 @@ import { parseTonAddress } from './indexer/address';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 import type { ReconcileResult } from './state';
 import type { Env as WorkerEnv } from './env';
+import { handleSocialRequest } from './social';
+import { handleTelegramWebhook, pushSquadDigest } from './bot';
+import { loadGateForBot } from './social-bot-wiring';
 
 export type { Env };
 
@@ -616,6 +619,17 @@ export default {
     try {
       const url = new URL(request.url);
       const isApi = url.pathname === '/api' || url.pathname.startsWith('/api/');
+      // v11 social layer (docs/35 §4): /api/social/*, /s/:code, /og/:code.png — already finalized.
+      const social = await handleSocialRequest(request, env, ctx);
+      if (social) {
+        logRequest(request, social.status, started);
+        return social;
+      }
+      if (url.pathname === '/api/tg/webhook' && request.method.toUpperCase() === 'POST') {
+        const tg = await handleTelegramWebhook(request, env, { gateSource: () => loadGateForBot(env) });
+        logRequest(request, tg.status, started);
+        return tg;
+      }
       if (!isApi) {
         // FIX-7：静态 GET 也有内存级 IP 限流（不写 D1）
         if (memoryLimitExceeded(env, request, 'static', Date.now())) {
@@ -652,6 +666,16 @@ export default {
     ctx.waitUntil(
       (async () => {
         try {
+          // v11: every 6h during 攻城, each squad group gets a ranking digest (bot no-ops otherwise)
+          try {
+            const d = new Date();
+            if (d.getUTCMinutes() === 0 && d.getUTCHours() % 6 === 0) {
+              const gate = await loadGateForBot(env);
+              if (gate) await pushSquadDigest(env, gate);
+            }
+          } catch (e) {
+            console.error('[bot] digest failed', e instanceof Error ? e.message : String(e));
+          }
           const auto = await state.autoplay(env);
           const st = await state.reconcile(env);
           await state.refreshDemoMarket(env, st);

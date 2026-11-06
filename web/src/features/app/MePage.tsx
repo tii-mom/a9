@@ -7,7 +7,7 @@ import { useDict, useLang } from '../../lib/lang';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, DEMO_WALLET_ENABLED, useWallet } from '../wallet';
-import { ChainMePanel, RefundClaimPanel } from '../chain';
+import { ChainMePanel } from '../chain';
 import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
 import {
   apiErrorText,
@@ -355,7 +355,6 @@ function MeDashboard({
         <div className="note-box ap-note">{d.readonlyNotice}</div>
       )}
       {chainMode ? <ChainMePanel address={address} demo={demo} /> : null}
-      <RefundClaimPanel address={address} demo={demo} />
 
       <QueryNotice query={meQuery} lang={lang} label={lang === 'zh' ? '账户' : 'Account'} />
       <QueryNotice query={roundsQuery} lang={lang} label={lang === 'zh' ? '轮次' : 'Rounds'} />
