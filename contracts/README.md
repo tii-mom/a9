@@ -10,10 +10,10 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **175 passed / 18 files**（v8.7 审计修复：F1~F12 + 真 Jetton/真 OA 回归）；acton check 0 error 0 warning。
+- **测试**：acton test → **177 passed / 18 files**（v8.8 M4 修复：F2 退款账本 carry + claimable_all 口径；含真 Jetton/真 OA 回归）；acton check 0 error 0 warning。
 - **冻结 tag/commit**：`v8.6-audit-fixed` @ `c24809a`（HEAD）。
 - **合约代码哈希（v8.6 冻结，clean rebuild，Tolk code cell）**——**以此为准**：
-    - RoundController：0xF4343A8E20756CBF683DAEBABE68C9737F8CB9FE968DC96A2600402B3DCE15AB
+    - RoundController：0x4EE42C5C0EB13CDB6689823BEA883D30E852EEA066D3C108A6531A69D4093EF8
     - TeamVault：0xDE6BE49154E3024C9B6945EA81E7181F3E1D04FECC85DBC629C08EDE6A673FB6
     - OracleAdapter：0x0C91E5338E00F18B5FFC7C5C26B510424775D8089588F4147E5B667703676768
     - JettonMaster：0xB8FAF413176C6329A98B2474FEDF765A796A14EDA96C031EE1FE5B27E59EE272
