@@ -66,6 +66,7 @@
 | **L. SetJettonWalletCode 未锁** | ❌ 假阳性，`RC:1019` 已有 `currentRoundId == 0` |
 | **N. 作废轮导致 streak 断签** | 记为**产品设计选择**（连续参与语义），不改合约；在用户风险披露里写清「轮次未开启/被技术中止时，该轮不计入连胜」 |
 | **F11. `handleRetryPendingActions` 团队路径加 dispatched 节流** | ❌ **评审后否决（Lead 决定）**。理由：`TeamVault.ReleaseTeamQuota`（`TeamVault.tolk:75-93`）已有完整幂等保护——已 released 只重发 ack 不转账、pending in-flight 直接 return 不重复转账；且 `handleRetryPendingActions` 要求调用者附 0.3 TON（打进 RC，RC 仅花 0.05 转发），**刷这个调用是亏钱的，RC 反而净赚**。若再加 dispatched 节流，必须配一条 TV→RC 的反向通知来清标志；这条通知一旦丢失（TON 上永远有可能）就会从「无害重复」变成「永久卡死」。**负收益改动，不做。** |
+| **F11. Retry 团队路径无 dispatched 节流** | **不修（Lead 裁定）**：TeamVault 的 rounds 幂等表已保证 pending release 直接 return、released 只重发 ack；0.3 TON 调用费归 RC，攻击者每刷一次亏 0.25 TON。加 dispatched + TV 反向通知反而新增「通知丢失→永久卡死」风险。代码内已加注释说明。 |
 | **M. Pause/Resume 无次数上限** | 低优先级；若 F5 已实现 OA 重置，可评估是否顺带加上限 |
 
 ## 4. 对两份审计报告本身的评价

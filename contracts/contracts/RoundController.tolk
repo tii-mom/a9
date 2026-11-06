@@ -1409,6 +1409,10 @@ fun handleRetryPendingActions(_sender: address, msg: RetryPendingActions, valueC
     var changed = false;
 
     if (rd.status == STATUS_SETTLING_SUCCESS) {
+        // A9-F11 (not fixed by design): team release retries are intentionally not
+        // throttled here. TeamVault's idempotent rounds table ignores a duplicate
+        // pending release (released -> ack only; pending -> return) so no double
+        // transfer is possible; the 0.3 TON caller value makes spamming unprofitable.
         if (!rd.teamReleaseConfirmed) {
             sendTeamRelease(v.teamVault, msg.roundId, msg.queryId);
         }
