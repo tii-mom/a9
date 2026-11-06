@@ -52,3 +52,9 @@
 1. 外部审计 v10（范围：RoundController + Jetton 的两处改动）。
 2. 测试网完整跑 10 轮（成功、失败、0 质押、技术终止、结算重试各至少一次）。
 3. 测试网 DEX（STON.fi / DeDust）建池并验证买入、卖出、退款。
+
+## 6. 合并后的状态与部署当天事项（2026-11-06）
+
+- 三个下游分支已合入合约分支，整体验证：合约 25/25、worker tsc + unit + selfcheck、web tsc + build + QA 9/9（QA fixture 已改为 v10 API 形状）、ops selftest 44/44。
+- `worker/scripts/preflight-mainnet.mjs` 已改为 v10 基线：code hash 取 contracts/README §0，最低质押 100,000 A9，要求 tag `v10-audit-fixed`。**该 tag 在 v10 外部审计通过、代码冻结后才打；在那之前 preflight 会拒绝主网部署（预期行为）。** 审计若改动代码，须同步更新 preflight 中的 hash 和 README §0。
+- 部署当天在 GitHub 仓库设置 Variables（有了真实地址后）：`PROD_ROUND_CONTROLLER_ADDRESS`、`PROD_JETTON_MASTER_ADDRESS`、**`PROD_TEAM_WALLET_ADDRESS`**、**`PROD_KEEPER_ADDRESS`**（后两个是 v10 新增，取代旧的 TeamVault 地址）、`PROD_ORACLE_CONFIG_HASH`、`PROD_D1_DATABASE_ID`。

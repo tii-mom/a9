@@ -4,7 +4,7 @@
  *
  * 用法：
  *   node worker/scripts/preflight-mainnet.mjs
- *   node worker/scripts/preflight-mainnet.mjs --tag=v8.9-audit-fixed
+ *   node worker/scripts/preflight-mainnet.mjs --tag=v10-audit-fixed
  *   # 真实地址尚未写进 wrangler.toml 时（与 CI 门禁同口径）：
  *   PROD_ROUND_CONTROLLER_ADDRESS=0:... PROD_TEAM_WALLET_ADDRESS=0:... PROD_KEEPER_ADDRESS=0:... \
  *   PROD_JETTON_MASTER_ADDRESS=0:... PROD_ORACLE_CONFIG_HASH=sha256:... \
@@ -16,9 +16,9 @@
  *   - 任一 FAIL → 进程退出码 1。
  *
  * 基线来源：
- *   - 合约 code hash：docs/18 §18 v8.9 冻结基线（§17 由 docs-sync 落地中；数值与 contracts/README.md v8.8 段、ops/config/regress-v88.registry.json 一致）。
+ *   - 合约 code hash：contracts/README.md §0 的 v10 基线（D-42）。
  *   - 主网参数：ops/config/mainnet.params.json（唯一参数输入）+ docs/00_DECISIONS_V2.md 的 V7 时间线。
- *   - 源码冻结：tag v8.9-audit-fixed 必须存在，且 contracts/{contracts,build,tests,scripts}
+ *   - 源码冻结：tag v10-audit-fixed（v10 外部审计通过后打）必须存在，且 contracts/{contracts,build,tests,scripts}
  *     与 tag 完全一致（文档可以在 tag 之后继续提交；合约/测试/构建产物/部署脚本改动会被拦住）。
  *   - 检查 7：ops/scripts 内禁止写死 `--net testnet`（主网部署脚本必须显式指定网络）。
  *   - 检查 8：生产 D1 必须独立于演示库（database_id 不同且非全 0 占位符）。
@@ -35,21 +35,17 @@ const WORKER = join(ROOT, "worker");
 
 /* ------------------------------ 基线常量 ------------------------------ */
 
-/** v8.9 冻结基线 code hash（hex，小写、无 0x）。来源：docs/18 §18。 */
-const V88_BASELINE_HASHES = {
-  RoundController: "fe7088ed1c52949cd1cb0931d95911f757bc402fc37065502002df15ccdd50ae",
-  JettonMaster: "b8faf413176c6329a98b2474fedf765a796a14eda96c031ee1fe5b27e59ee272",
-  JettonWallet: "c40f41ed05beffb7ef17e25fa0d1bb2afda72c567052546a2e310c0275d31d13",
+/**
+ * v10 合约 code hash（hex，小写、无 0x）。来源：contracts/README.md §0（D-42）。
+ * 注意：这是审计前的 v10 构建；外部审计若改动代码，必须同步更新这里和 README，并打 tag v10-audit-fixed。
+ */
+const BASELINE_HASHES = {
+  RoundController: "628e3a638d1b749c1d012d61a3f1e296bec4ae3d586b4dcb4e733a169a32c16d",
+  JettonMaster: "76b56d9a6301223f1201d719e2f4a3fb84e08d7d701cb93bb43c9d0208e5e241",
+  JettonWallet: "d06daa57ed188ce9cb6ca596dd2111347433bf335223ac66c0d713c8e3db74f4",
 };
-function v88BaselineSource() {
-  // docs-sync 补完 §17 后自动切换为引用该节；未落地时明确标注回退来源（不静默）
-  try {
-    const docs = readFileSync(join(ROOT, "docs", "18_AUDIT_BRIEF.md"), "utf8");
-    if (/^## 17\./m.test(docs)) return "docs/18 §18（v8.9 冻结基线）";
-    return "docs/18 §18（v8.9 冻结基线；§17 待 docs-sync 落地，数值与 contracts/README.md v8.8、ops/config/regress-v88.registry.json 一致）";
-  } catch {
-    return "docs/18 §18（v8.9 冻结基线；docs/18 读取失败，数值与 contracts/README.md v8.8、ops/config/regress-v88.registry.json 一致）";
-  }
+function baselineSource() {
+  return "contracts/README.md §0（v10，D-42；主网要求 tag v10-audit-fixed）";
 }
 
 /** V7 时间线（docs/00_DECISIONS_V2.md）。 */
@@ -247,7 +243,7 @@ function checkContractHashes() {
   const details = [];
   const buildDir = join(ROOT, "contracts", "build");
   const issues = collect();
-  for (const [name, expected] of Object.entries(V88_BASELINE_HASHES)) {
+  for (const [name, expected] of Object.entries(BASELINE_HASHES)) {
     const artifact = readJson(join(buildDir, name + ".json"));
     if (typeof artifact.hash !== "string" || !artifact.hash) {
       issues.add(name + ".json 缺少 hash 字段");
@@ -255,13 +251,13 @@ function checkContractHashes() {
     }
     const actual = artifact.hash.replace(/^0x/i, "").toLowerCase();
     if (actual !== expected) {
-      issues.add(name + " hash 与 v8.8 基线不一致：期望 " + expected + "，实际 " + actual);
+      issues.add(name + " hash 与 v10 基线不一致：期望 " + expected + "，实际 " + actual);
       continue;
     }
     details.push(name + "=" + expected.slice(0, 12) + "… ✓");
   }
   issues.throwIfAny();
-  details.push("基线来源：" + v88BaselineSource());
+  details.push("基线来源：" + baselineSource());
   return details;
 }
 
@@ -277,7 +273,7 @@ function checkMainnetParams() {
   assertEqual(details, "price.p0UsdE8", getPath(params, "price.p0UsdE8"), "116000");
   assertEqual(details, "rounds.roundRewardRaw", getPath(params, "rounds.roundRewardRaw"), "700000000000000000");
   assertEqual(details, "rounds.teamRoundRaw", getPath(params, "rounds.teamRoundRaw"), "120000000000000000");
-  assertEqual(details, "stakeLimits.minStakeRaw", getPath(params, "stakeLimits.minStakeRaw"), "10000000000000");
+  assertEqual(details, "stakeLimits.minStakeRaw", getPath(params, "stakeLimits.minStakeRaw"), "100000000000000");
   assertEqual(details, "stakeLimits.maxTotalStakeRaw", getPath(params, "stakeLimits.maxTotalStakeRaw"), "200000000000000000");
   assertEqual(details, "network.chainId", getPath(params, "network.chainId"), -239);
 
@@ -325,7 +321,7 @@ function git(args) {
 function checkGitTag() {
   const details = [];
   const arg = process.argv.slice(2).find((item) => item.startsWith("--tag="));
-  const expectedTag = arg ? arg.slice("--tag=".length) : "v8.9-audit-fixed";
+  const expectedTag = arg ? arg.slice("--tag=".length) : "v10-audit-fixed";
   if (!expectedTag) fail("--tag= 不能为空");
 
   // 1) tag 必须存在
@@ -464,7 +460,7 @@ console.log("仓库：" + ROOT);
 console.log("");
 
 runCheck(1, "配置：env.production 必须是 chain / mainnet / 无签名关", checkConfig);
-runCheck(2, "合约哈希：contracts/build 必须等于 v8.9 冻结基线", checkContractHashes);
+runCheck(2, "合约哈希：contracts/build 必须等于 v10 基线", checkContractHashes);
 runCheck(3, "主网参数：ops/config/mainnet.params.json 必须等于 V7", checkMainnetParams);
 runCheck(4, "迁移目录：只允许 NNNN_*.sql 且不含 seed", checkMigrations);
 runCheck(5, "源码冻结：tag 必须存在，且合约/测试/构建产物/部署脚本与 tag 完全一致", checkGitTag);

@@ -86,8 +86,8 @@ function BattleBoardView({
   const myPosition = me && board.roundId !== null ? me.stakes.find((s) => s.roundId === board.roundId) ?? null : null;
   const myStakeRaw = myPosition?.amountRaw ?? null;
   const myStakeHuman = myStakeRaw ? tokenNum(myStakeRaw, decimals) : 0;
-  const myReward = me?.rewards?.find((reward) => reward.roundId === board.roundId);
-  const myRewardText = myReward ? intFmt(tokenNum(myReward.amountRaw, decimals)) : '—';
+  const myRewardRaw = myPosition && myPosition.rewardRaw !== '0' ? myPosition.rewardRaw : null;
+  const myRewardText = myRewardRaw ? intFmt(tokenNum(myRewardRaw, decimals)) : '—';
   const twapRaw = board.live ? board.liveTwapUsdE8 : board.candles.length > 0 ? board.candles[board.candles.length - 1].twapPriceUsdE8 : null;
   const twap = usdNum(twapRaw);
   const twapAbove = twap !== null && target !== null ? twap >= target : false;

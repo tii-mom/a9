@@ -221,11 +221,11 @@ function principalStatus(
 ): { text: string; tone: 'ok' | 'bad' | 'mute' } {
   if (!round) return { text: c.locked, tone: 'mute' };
   if (round.state === 'SUCCEEDED' || round.state === 'SETTLING_SUCCESS') {
-    return stake.principalClaimed ? { text: c.claimed, tone: 'ok' } : { text: c.claimable, tone: 'ok' };
+    return stake.claimed ? { text: c.claimed, tone: 'ok' } : { text: c.claimable, tone: 'ok' };
   }
   if (round.state === 'FAILED_PERMANENT' || round.state === 'SETTLING_FAILURE') return { text: c.destroyed, tone: 'bad' };
   if (round.state === 'TECHNICAL_ABORTED') {
-    return stake.principalClaimed ? { text: c.claimed, tone: 'ok' } : { text: c.refundable, tone: 'ok' };
+    return stake.claimed ? { text: c.claimed, tone: 'ok' } : { text: c.refundable, tone: 'ok' };
   }
   return { text: c.locked, tone: 'mute' };
 }
@@ -237,7 +237,7 @@ function rewardStatus(
 ): { text: string; tone: 'ok' | 'bad' | 'mute' } {
   if (!round) return { text: '—', tone: 'mute' };
   if (round.state === 'SUCCEEDED' || round.state === 'SETTLING_SUCCESS') {
-    return stake.rewardClaimed ? { text: c.claimed, tone: 'ok' } : { text: c.claimable, tone: 'ok' };
+    return stake.claimed ? { text: c.claimed, tone: 'ok' } : { text: c.claimable, tone: 'ok' };
   }
   if (round.state === 'FAILED_PERMANENT' || round.state === 'SETTLING_FAILURE') return { text: c.destroyed, tone: 'bad' };
   return { text: '—', tone: 'mute' };

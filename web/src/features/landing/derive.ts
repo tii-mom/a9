@@ -84,7 +84,6 @@ export interface BoardView {
   observationStart: number | null;
   observationEnd: number | null;
   totalStakeRaw: string;
-  totalWeightRaw: string;
   stakerCount: number;
   rewardBudgetRaw: string;
   burnedRaw: string | null;
@@ -157,7 +156,6 @@ export function deriveBoard(
     observationStart: detail?.observationStart ?? focus?.observationStart ?? null,
     observationEnd: detail?.observationEnd ?? focus?.observationEnd ?? null,
     totalStakeRaw,
-    totalWeightRaw: detail?.totalWeightRaw ?? focus?.totalWeightRaw ?? '0',
     stakerCount: detail?.stakerCount ?? focus?.stakerCount ?? 0,
     rewardBudgetRaw: detail?.rewardBudgetRaw ?? focus?.rewardBudgetRaw ?? cfg?.roundRewardRaw ?? '0',
     burnedRaw: detail?.burnedRaw ?? focus?.burnedRaw ?? null,
