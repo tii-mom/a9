@@ -699,7 +699,7 @@ fun topUpForTimeJump(f: ProtocolFixture, amount: coins) {
 
 
 fun sendBurnConfirm(vault: TeamVaultHandle, fromMaster: address, roundId: uint8): SendResultList {
-    val q: uint64 = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+    val q: uint64 = BURN_QUERY_TAG | ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
     return net.send(fromMaster, createMessage({
         bounce: true,
         value: ton("0.1"),
@@ -710,7 +710,7 @@ fun sendBurnConfirm(vault: TeamVaultHandle, fromMaster: address, roundId: uint8)
 
 // Simulates the team burn transfer bouncing back from TeamVault's Jetton Wallet.
 fun bounceTeamBurn(vault: TeamVaultHandle, wallet: address, roundId: uint8) {
-    val q: uint64 = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+    val q: uint64 = BURN_QUERY_TAG | ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
     val body = beginCell()
         .storeUint(0xFFFFFFFF, 32)
         .storeUint(OP_JETTON_BURN, 32)
@@ -728,7 +728,7 @@ fun bounceTeamBurn(vault: TeamVaultHandle, wallet: address, roundId: uint8) {
 
 // P0-2 closure: the Jetton Master confirms TeamVault's burn, which then acks RC.
 fun confirmTeamBurn(f: ProtocolFixture, roundId: uint8) {
-    val q: uint64 = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+    val q: uint64 = BURN_QUERY_TAG | ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
     expect(net.send(f.jettonMaster, createMessage({
         bounce: true,
         value: ton("0.1"),
