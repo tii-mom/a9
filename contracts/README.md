@@ -10,14 +10,14 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **154 passed / 15 files**（含 C-1~C-4 新增用例、OracleAdapter 12 个用例与真 Jetton 两跳集成测试）；acton check 0 error 0 warning。
+- **测试**：acton test → **175 passed / 18 files**（v8.7 审计修复：F1~F12 + 真 Jetton/真 OA 回归）；acton check 0 error 0 warning。
 - **冻结 tag/commit**：`v8.6-audit-fixed` @ `c24809a`（HEAD）。
 - **合约代码哈希（v8.6 冻结，clean rebuild，Tolk code cell）**——**以此为准**：
-    - RoundController：0xC5AD291469C3BEADBDC26A6F1733004D433F12B15B025D88B983DF098BA11500
-    - TeamVault：0xCF3E6C7C9DC045F392F35E79E20AA6EDAAF9064D538CA4E78B6D1FE1443158B4
-    - OracleAdapter：0x539F3597357943584A596DA2B40F901B4984D8C8307E63CE81A67F131EAB8CBA（**c38b05a 后修正**；旧 hash 作废）
-    - JettonMaster：0x876F21A1A516FB0449A1D0AF5DBECEB8639373F947949C5AE8E1E9DBB769D64F
-    - JettonWallet：0x394E4E8D40B5D3D97D12AA950B99EA9A53387DDAC331BAAAC8923F0E6E6849A4
+    - RoundController：0xF4343A8E20756CBF683DAEBABE68C9737F8CB9FE968DC96A2600402B3DCE15AB
+    - TeamVault：0xDE6BE49154E3024C9B6945EA81E7181F3E1D04FECC85DBC629C08EDE6A673FB6
+    - OracleAdapter：0x0C91E5338E00F18B5FFC7C5C26B510424775D8089588F4147E5B667703676768
+    - JettonMaster：0xB8FAF413176C6329A98B2474FEDF765A796A14EDA96C031EE1FE5B27E59EE272
+    - JettonWallet：0xC40F41ED05BEFFB7EF17E25FA0D1BB2AFDA72C567052546A2E310C0275D31D13
 - **ABI JSON**：deploy/abi/{RoundController,TeamVault,JettonMaster,JettonWallet}.json（acton build 生成后复制；MockJettonWallet.json 仅测试用）。
 - **部署参数模板**：deploy/params.testnet.json（含 V6.1 经济参数 + V6.2 时间参数与地址占位符）；主网模板 deploy/params.mainnet.template.json（**当前 BLOCKED**，见 §10）。
 
@@ -237,6 +237,7 @@ RC 收到 transfer_notification#7362d09c（sender:MsgAddressInt，官方 TEP-74 
 - ClaimReward / ClaimAll：opcode 与字段不变；奖励部分按权重公式计算后，**阶梯期只付 floor(reward/2)，另一半进锁定池（EARLY 语义）**；本金部分仍 100%。解锁开始后旧 ClaimReward 拒绝。
 - 旧 ClaimAll 的合并转账 = 本金(100%) + 奖励的 50%；另一半在 get_unlock_info 中可见。
 - ClaimRewardEarly：仅 PENDING 且未领；立即付 floor(reward/2)，另一半进入锁定池（EARLY）。
+- ClaimPrincipal(0)：A9-CRIT-02 退款账本（round 0 不是轮次），用于领取低 gas/退款 bounce 后记入的 A9；claim kind 新增 REFUND=5，走独立 pending 回滚。
 - RollReward：仅 PENDING 且未领；奖励转入下一轮质押（受 20M/地址、200M/轮上限），超出部分进锁定池（ROLLED）。
 - ClaimUnlocked：R10 终态前拒绝；之后按 12×30 天线性领取锁定池（含 PENDING 与早领罚没部分）。
 - ClaimAll 仍 roundId=0 扫描 1..10，合并一笔 Jetton 转账；本金与奖励 pull claim，用户自付 gas。
@@ -268,6 +269,11 @@ RC 收到 transfer_notification#7362d09c（sender:MsgAddressInt，官方 TEP-74 
 | 0x52540106 | RewardEarly | RC | roundId, owner, paidRaw, lockedRaw |
 | 0x52540107 | ReferrerSet | RC | owner, referrer |
 | 0x52540108 | UnlockClaimed | RC | owner, amountRaw |
+| 0x52540109 | ClaimRolledBack | RC | queryId, roundId, kind, owner, amountRaw（回滚事件，索引器据此作废前序事件） |
+| 0x5254010A | PrincipalClaimedEvent | RC | roundId, owner, amountRaw, queryId |
+| 0x5254010B | StakingClosed | RC | roundId, closeAt, early, twap1hUsdE8 |
+| 0x5254010C | CandleSubmitted | RC | roundId, candleIndex, periodStart, periodEnd, twapPriceUsdE8, dataDigest, candleHash |
+| 0x5254010D | OraclePauseChanged | RC | roundId, paused, at |
 
 ### 4.6 Get methods（只读）
 
@@ -891,6 +897,7 @@ P0 v2 / P1 / P2（task-27，delta 复审）——用真 Jetton 合约补集成�
 | 0x52540024 | SubmitSignedOpenRound | 任意提交者 | OracleAdapter | roundId:u8, twap24hUsdE8:u128, timestamp:u64, sigCount:u8, sigs:cell |
 | 0x52540025 | SubmitSignedCloseStaking | 任意提交者 | OracleAdapter | roundId:u8, twap1hUsdE8:u128, timestamp:u64, sigCount:u8, sigs:cell |
 | 0x52540026 | SubmitSignedCandle | 任意提交者 | OracleAdapter | roundId:u8, candleIndex:u8, periodStart:u32, periodEnd:u32, twapPriceUsdE8:u128, dataDigest:u256, timestamp:u64, sigCount:u8, sigs:cell |
+| 0x52540028 | ResetRoundCandles | OA admin 或 RC | OracleAdapter | roundId:u8（恢复观察时清 OA candle 游标；RC 自动发 + admin 手动兜底） |
 
 - signers:cell：inline s0,s1,s2:u256 + threshold:u8，并 ref 一个 cell(s3:u256, s4:u256)。
 - sigs:cell：链式 node，每个 node = signerIndex:u8 + signatureHi:u256 + signatureLo:u256（+ ref 下一个 node）；最多 5 个，sigCount 指定实际数量（需 >= threshold）。Ed25519 signature 512 bits 由 hi/lo 还原。
