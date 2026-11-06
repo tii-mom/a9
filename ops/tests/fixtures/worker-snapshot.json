@@ -1,9 +1,20 @@
 {
-  "note": "对账/监控离线测试夹具（V7 时间参数：12h PREVIEW + 36h 报名 + 24h 观察 = 72h/轮；24 根 × 1h，阈值 16）。R1 成功、R2 失败、R3 观察中。",
+  "note": "对账/监控离线测试夹具（V7 时间 / v10 合约）：R1 成功（团队释放 1.2 亿）、R2 失败（一笔销毁 7 亿 + 1.2 亿 + 本金）、R3 观察中；chain 字段模拟 --chain 读数（RC 钱包比公式多 123 raw 零头）。",
   "now": 1793450000000,
-  "health": { "ok": true, "now": 1793450000000, "db": true, "dataSource": "demo", "version": "0.1.0", "uptimeSeconds": 9000 },
+  "health": {
+    "ok": true,
+    "now": 1793450000000,
+    "db": true,
+    "dataSource": "demo",
+    "version": "0.1.0",
+    "uptimeSeconds": 9000
+  },
   "config": {
-    "token": { "name": "A9", "symbol": "A9", "decimals": 9 },
+    "token": {
+      "name": "A9",
+      "symbol": "A9",
+      "decimals": 9
+    },
     "p0UsdE8": "116000",
     "usdPriceScale": 100000000,
     "priceMultiplier": 2,
@@ -19,8 +30,14 @@
     "previewSeconds": 43200,
     "network": "testnet",
     "dataSource": "demo",
-    "contracts": { "jettonMaster": null, "roundController": null, "teamVault": null, "adminOwner": null },
-    "tonUsdE8": "300000000"
+    "contracts": {
+      "jettonMaster": null,
+      "roundController": null,
+      "keeper": null,
+      "teamWallet": null
+    },
+    "tonUsdE8": "300000000",
+    "minStakeRaw": "100000000000000"
   },
   "stats": {
     "supplyRaw": "8938500000000000000",
@@ -31,14 +48,121 @@
     "liquidityUsdE8": "23200000000000",
     "priceUsdE8": "120000",
     "price24hAgoUsdE8": "116000",
-    "oracle": { "online": true, "validSources": 3, "totalSources": 3, "coverageBps": 9800, "configVersion": "1", "lastUpdate": 1793449940000, "paused": false },
-    "nextStakeOpenAt": null
+    "nextStakeOpenAt": null,
+    "claimedPrincipalRaw": "50000000000000000",
+    "claimedRewardRaw": "350000000000000000",
+    "refundPendingRaw": "100000000000000"
   },
   "rounds": [
-    { "roundId": 1, "state": "SUCCEEDED", "priceMultiplier": 2, "targetPriceUsdE8": "232000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1793147600000, "stakeCloseAt": 1793277200000, "observationStart": 1793277200000, "observationEnd": 1793363600000, "candlesSeen": 24, "qualifiedCandles": 16, "totalAcceptedStakeRaw": "100000000000000000", "stakerCount": 6, "result": "SUCCESS", "burnedRaw": "0", "updatedAt": 1793363500000 },
-    { "roundId": 2, "state": "FAILED_PERMANENT", "priceMultiplier": 4, "targetPriceUsdE8": "464000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1793170400000, "stakeCloseAt": 1793300000000, "observationStart": 1793300000000, "observationEnd": 1793386400000, "candlesSeen": 24, "qualifiedCandles": 15, "totalAcceptedStakeRaw": "241500000000000000", "stakerCount": 9, "result": "FAILURE", "burnedRaw": "1061500000000000000", "updatedAt": 1793386500000 },
-    { "roundId": 3, "state": "OBSERVING", "priceMultiplier": 8, "targetPriceUsdE8": "928000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": 1793302400000, "stakeCloseAt": 1793432000000, "observationStart": 1793432000000, "observationEnd": 1793518400000, "candlesSeen": 5, "qualifiedCandles": 4, "totalAcceptedStakeRaw": "500000000000000000", "stakerCount": 11, "result": null, "burnedRaw": null, "updatedAt": 1793449940000 },
-    { "roundId": 4, "state": "UNOPENED", "priceMultiplier": 16, "targetPriceUsdE8": "1856000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": null, "stakeCloseAt": null, "observationStart": null, "observationEnd": null, "candlesSeen": 0, "qualifiedCandles": 0, "totalAcceptedStakeRaw": "0", "stakerCount": 0, "result": null, "burnedRaw": null, "updatedAt": 1793432000000 },
-    { "roundId": 5, "state": "UNOPENED", "priceMultiplier": 32, "targetPriceUsdE8": "3712000", "rewardBudgetRaw": "700000000000000000", "stakeOpenAt": null, "stakeCloseAt": null, "observationStart": null, "observationEnd": null, "candlesSeen": 0, "qualifiedCandles": 0, "totalAcceptedStakeRaw": "0", "stakerCount": 0, "result": null, "burnedRaw": null, "updatedAt": 1793432000000 }
-  ]
+    {
+      "roundId": 1,
+      "state": "SUCCEEDED",
+      "priceMultiplier": 2,
+      "targetPriceUsdE8": "232000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": 1793147600000,
+      "stakeCloseAt": 1793277200000,
+      "observationStart": 1793277200000,
+      "observationEnd": 1793363600000,
+      "candlesSeen": 24,
+      "qualifiedCandles": 16,
+      "totalAcceptedStakeRaw": "100000000000000000",
+      "stakerCount": 6,
+      "result": "SUCCESS",
+      "burnedRaw": "0",
+      "updatedAt": 1793363500000,
+      "teamReleasedRaw": "120000000000000000"
+    },
+    {
+      "roundId": 2,
+      "state": "FAILED_PERMANENT",
+      "priceMultiplier": 4,
+      "targetPriceUsdE8": "464000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": 1793170400000,
+      "stakeCloseAt": 1793300000000,
+      "observationStart": 1793300000000,
+      "observationEnd": 1793386400000,
+      "candlesSeen": 24,
+      "qualifiedCandles": 15,
+      "totalAcceptedStakeRaw": "241500000000000000",
+      "stakerCount": 9,
+      "result": "FAILURE",
+      "burnedRaw": "1061500000000000000",
+      "updatedAt": 1793386500000,
+      "teamReleasedRaw": "0"
+    },
+    {
+      "roundId": 3,
+      "state": "OBSERVING",
+      "priceMultiplier": 8,
+      "targetPriceUsdE8": "928000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": 1793302400000,
+      "stakeCloseAt": 1793432000000,
+      "observationStart": 1793432000000,
+      "observationEnd": 1793518400000,
+      "candlesSeen": 5,
+      "qualifiedCandles": 4,
+      "totalAcceptedStakeRaw": "500000000000000000",
+      "stakerCount": 11,
+      "result": null,
+      "burnedRaw": null,
+      "updatedAt": 1793449940000,
+      "teamReleasedRaw": null
+    },
+    {
+      "roundId": 4,
+      "state": "UNOPENED",
+      "priceMultiplier": 16,
+      "targetPriceUsdE8": "1856000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": null,
+      "stakeCloseAt": null,
+      "observationStart": null,
+      "observationEnd": null,
+      "candlesSeen": 0,
+      "qualifiedCandles": 0,
+      "totalAcceptedStakeRaw": "0",
+      "stakerCount": 0,
+      "result": null,
+      "burnedRaw": null,
+      "updatedAt": 1793432000000,
+      "teamReleasedRaw": null
+    },
+    {
+      "roundId": 5,
+      "state": "UNOPENED",
+      "priceMultiplier": 32,
+      "targetPriceUsdE8": "3712000",
+      "rewardBudgetRaw": "700000000000000000",
+      "stakeOpenAt": null,
+      "stakeCloseAt": null,
+      "observationStart": null,
+      "observationEnd": null,
+      "candlesSeen": 0,
+      "qualifiedCandles": 0,
+      "totalAcceptedStakeRaw": "0",
+      "stakerCount": 0,
+      "result": null,
+      "burnedRaw": null,
+      "updatedAt": 1793432000000,
+      "teamReleasedRaw": null
+    }
+  ],
+  "chain": {
+    "totalSupplyRaw": "8938500000000000000",
+    "rcJettonBalanceRaw": "7460100000000000123",
+    "keeperTonNano": "5000000000",
+    "events": [
+      {
+        "type": "SettlementBounced",
+        "roundId": 2,
+        "action": 2,
+        "resolved": true,
+        "ts": 1793386600000
+      }
+    ],
+    "pendingSettlement": {}
+  }
 }

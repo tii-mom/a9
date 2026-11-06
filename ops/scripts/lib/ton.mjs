@@ -308,3 +308,123 @@ export function validateTestnetAddress(input, label = 'address') {
   if (parsed.testnet === false) return { ok: false, message: label + ' 是主网地址（testnet flag 缺失）：' + input };
   return { ok: true, parsed };
 }
+
+// ---------------------------------------------------------------------------
+// v10 RoundController 只读辅助（contracts/README §4.3 / §4.4）
+// ---------------------------------------------------------------------------
+
+/** v10 状态值（数值沿用 v8.9；3/5/6/7 不再出现）。 */
+export const ROUND_STATUS = { 0: 'UNOPENED', 1: 'PREVIEW', 2: 'STAKING_OPEN', 4: 'OBSERVING', 8: 'SUCCEEDED', 9: 'FAILED_PERMANENT', 10: 'TECHNICAL_ABORTED' };
+
+/** 解码 get_round(roundId) 的 RoundView 栈（types.tolk RoundView 字段顺序）。 */
+export function decodeRoundView(stack) {
+  const n = (index) => stackItemToBigInt(stack[index]);
+  const b = (index) => { const value = n(index); return value === null ? null : value !== 0n; };
+  if (!Array.isArray(stack) || stack.length < 19) return null;
+  const status = Number(n(1));
+  return {
+    roundId: Number(n(0)),
+    status,
+    state: ROUND_STATUS[status] || 'UNKNOWN(' + status + ')',
+    targetTier: Number(n(2)),
+    targetPriceUsdE8: n(3),
+    targetTwap24hUsdE8: n(4),
+    rewardBudgetRaw: n(6),
+    stakeOpenAt: n(7),
+    stakeCloseAt: n(8),
+    observationStart: n(9),
+    observationEnd: n(10),
+    candlesSeen: Number(n(11)),
+    qualifiedCandles: Number(n(12)),
+    totalAcceptedStakeRaw: n(13),
+    settledAt: n(14),
+    teamReleaseConfirmed: b(15),
+    teamBurnConfirmed: b(16),
+    rewardBurnConfirmed: b(17),
+    principalBurnConfirmed: b(18),
+  };
+}
+
+export async function getRoundView(params, roundController, roundId) {
+  const result = await runGetMethod(params, roundController, 'get_round', [roundId]);
+  return decodeRoundView(result.stack || []);
+}
+
+/** 读取任意 Jetton Wallet 的余额（get_wallet_data[0]）；未部署返回 null。 */
+export async function getJettonWalletBalance(params, walletAddress) {
+  try {
+    const result = await runGetMethod(params, walletAddress, 'get_wallet_data');
+    if (result.exit_code !== undefined && result.exit_code !== 0) return null;
+    return stackItemToBigInt((result.stack || [])[0]);
+  } catch {
+    return null;
+  }
+}
+
+/** BOC 根 cell 的数据字节（只支持读取根 cell 的前若干字节，够解 external-out 事件头）。 */
+export function bocRootData(b64) {
+  const buf = Buffer.from(String(b64 || ''), 'base64');
+  if (buf.length < 6 || buf.readUInt32BE(0) !== 0xb5ee9c72) return null;
+  const flags = buf[4];
+  const hasIdx = (flags & 0x80) !== 0;
+  const sizeBytes = flags & 0x07;
+  const offBytes = buf[5];
+  let pos = 6;
+  const readN = (bytes) => { let value = 0; for (let i = 0; i < bytes; i++) value = value * 256 + buf[pos + i]; pos += bytes; return value; };
+  const cells = readN(sizeBytes);
+  const roots = readN(sizeBytes);
+  readN(sizeBytes); // absent
+  readN(offBytes); // tot_cells_size
+  const rootIndex = roots > 0 ? readN(sizeBytes) : 0;
+  pos += (roots - 1) * sizeBytes;
+  if (hasIdx) pos += cells * offBytes;
+  // 跳到 rootIndex 号 cell
+  for (let index = 0; index < cells; index++) {
+    const d1 = buf[pos];
+    const d2 = buf[pos + 1];
+    const refs = d1 & 0x07;
+    const dataLen = Math.ceil(d2 / 2);
+    const data = buf.subarray(pos + 2, pos + 2 + dataLen);
+    if (index === rootIndex) return data;
+    pos += 2 + dataLen + refs * sizeBytes;
+  }
+  return null;
+}
+
+const V10_EVENT_NAMES = {
+  0x52540101: 'TargetPriceSet', 0x52540102: 'RoundSettled', 0x52540103: 'DepositAccepted', 0x52540104: 'TechnicalAborted',
+  0x5254010b: 'StakingClosed', 0x5254010c: 'CandleSubmitted', 0x5254010e: 'Claimed', 0x5254010f: 'DepositRefunded',
+  0x52540110: 'SettlementBounced', 0x52540111: 'UnexpectedBounce',
+};
+
+/** 把 external-out 消息体解成 v10 事件（只解运维告警需要的字段）。 */
+export function decodeRcEvent(bodyB64, meta = {}) {
+  const data = bocRootData(bodyB64);
+  if (!data || data.length < 4) return null;
+  const op = data.readUInt32BE(0);
+  const type = V10_EVENT_NAMES[op];
+  if (!type) return null;
+  const event = { type, opcode: '0x' + op.toString(16), ...meta };
+  if (type === 'SettlementBounced' && data.length >= 6) { event.roundId = data[4]; event.action = data[5]; }
+  if (type === 'UnexpectedBounce' && data.length >= 16) { event.op = '0x' + data.readUInt32BE(4).toString(16); event.queryId = data.readBigUInt64BE(8).toString(); }
+  if ((type === 'RoundSettled' || type === 'TechnicalAborted' || type === 'StakingClosed' || type === 'CandleSubmitted') && data.length >= 5) event.roundId = data[4];
+  return event;
+}
+
+/** 读取 RC 最近的 external-out 事件（TON Center v3 /transactions）。 */
+export async function fetchRcEvents(params, roundController, { limit = 50 } = {}) {
+  const parsed = parseAddress(roundController);
+  if (!parsed.ok) throw new Error('非法 RoundController：' + roundController);
+  const url = params.network.toncenter.v3 + '/transactions?account=' + encodeURIComponent(parsed.raw) + '&limit=' + limit + '&sort=desc';
+  const json = await httpJson(url, { apiKey: toncenterApiKey(params) });
+  const events = [];
+  for (const tx of json.transactions || []) {
+    for (const message of tx.out_msgs || []) {
+      if (message.destination) continue; // external-out 才是事件
+      const body = message.message_content && message.message_content.body;
+      const event = decodeRcEvent(body, { ts: Number(tx.now || 0) * 1000, txHash: tx.hash, lt: tx.lt });
+      if (event) events.push(event);
+    }
+  }
+  return events;
+}

@@ -1,29 +1,30 @@
-# 02 — A9 测试网 10 轮运营手册（Round Operations）
+# 02 — A9 测试网 10 轮运营手册（Round Operations，v10）
 
-**版本**：V7（时间参数）· 2026-11-05
+**版本**：v10（2026-11-06，D-42）
 **Owner**：testnet-ops
-**权威口径**：docs/00（V7 时间参数）、docs/02（状态机）、docs/03（K 线/手动模式）、docs/10（上线清单）
-**覆盖路径**：成功 / 失败 / 无人质押 / 暂停恢复 / 技术终止（五条）
+**权威口径**：contracts/README.md（§0–§4）、docs/34 §1–§2、docs/00 的 D-42
+**覆盖路径**：成功 / 失败 / 无人质押 / 技术终止 / 结算重试（五条）
 
 ---
 
-## 1. 单轮时间轴（固定 168 小时）
+## 1. 单轮时间轴
 
 ~~~text
-T0          上一轮结算（SUCCEEDED / FAILED_PERMANENT / TECHNICAL_ABORTED）
-T0~T0+12h   PREVIEW 预告期（不开放质押；发开轮预告；准备物料）
-T0+12h      自动开窗（STAKING_OPEN；开窗交易锁定 target）
-T0+12h~+48h 报名 36h（触价可提前关窗）
-T0+48h      关窗（STAKING_CLOSED）→ 观察开始
-T0+48h~+72h 观察 24h（24 根 × 1h K 线，阈值 16）
-T0+72h      观察结束 → 判定 → 结算 → 下一轮 T0
+T0              上一轮判定（SUCCEEDED / FAILED_PERMANENT，或 TECHNICAL_ABORTED）
+T0 ~ T0+12h     PREVIEW 预告期（不接受质押；发预告、准备物料）
+T0+12h          keeper 发 OpenRound：开窗，锁定目标价
+T0+12h ~ +48h   报名 36h（到期后任何人可发 CloseStaking）
+T0+48h          关窗 → 观察开始
+T0+48h ~ +72h   观察 24 根 × 1h K 线（keeper 每小时 SubmitCandle）
+第 24 根提交时  直接判定：SUCCEEDED 或 FAILED_PERMANENT → 下一轮 PREVIEW
 ~~~
 
-- 报名时长严格 129,600 秒（36h）；观察窗口 86,400 秒 / 24 根 × 1h；单轮 72h、10 轮 30 天。
-- PREVIEW 与开窗由合约按 prevSettledAt 推导，不人工指定；测试网仅做**确认与监控**，不提前/延后开窗。
-- **例外（contracts/README §3.2）**：R1 无 PREVIEW，由 admin 在部署完成后手动 OpenRound（交易中 stakeOpenAt = now，并锁定 target）；R2~R10 才有 12h PREVIEW。
-- **晚开窗兜底（contracts/README §9.7）**：若 keeper 错过整个 36h 报名窗口，OpenRound 会把 stakeOpenAt 重锚为 now；正常路径不触发，但必须监控三个倒计时。
-- 触价提前关窗只改变关窗时刻，观察仍是完整 24h/24 根。
+- 报名时长 129,600 秒（36h）；观察 24 根 × 3,600 秒；单轮约 72h；10 轮约 30 天。
+- **没有提前关窗，没有预言机暂停。** 开窗、关窗、判定都是合约规则；运营不能提前或延后。
+- **判定不需要第二笔交易**：第 24 根 K 线提交即判定，没有结算中间态。
+- 结算转账或销毁如果在第一跳被退回，会出现 SettlementBounced 事件，需要调用 RetrySettlement（见 §3.6）。这不影响判定结果。
+- **R1 无预告期**：部署完成后 keeper 直接 OpenRound（见 01 Step 80）。
+- **技术终止**：报名或观察阶段在应结束时间后 7 天仍未判定，或下一轮在预告结束后 7 天仍未开轮，任何人都可以调用 AbortTechnical。
 
 ---
 
@@ -31,182 +32,206 @@ T0+72h      观察结束 → 判定 → 结算 → 下一轮 T0
 
 | 角色 | 职责 | 可用操作 | 不可做 |
 | --- | --- | --- | --- |
-| Ops Lead | 轮次总控、决策、对外口径 | 读状态、组织公告、升级事故 | 不得单独执行 owner 写操作 |
-| Keeper（测试网白名单） | 每 1h 提交 K 线、跑 tick/监控 | SubmitCandle、只读巡检 | 不得暂停/恢复/结算 |
-| On-call | 7×24 告警响应、一线处置 | 读状态、按预案升级、执行经过批准的操作 | 不得改参数/目标价 |
-| Comms | 公告与社区沟通 | 按模板发公告（经 Lead 批准） | 不得承诺收益/透露未公开地址 |
-| Finance | 对账、销毁/释放核对 | 只读链上 + 对账表 | 不得动用金库 |
-| 合约负责人 | 合约问题定位、重建 | 部署/修复（新部署） | 不得热修已部署合约 |
-| Owner（单密钥，硬件钱包） | 最小权限写操作 | 开轮确认、关窗、暂停/恢复、必要时结算、技术终止 | 见 04 手册权限边界 |
+| Ops Lead | 轮次总控、决策、对外口径 | 读状态、组织公告、升级事故 | 不得单独执行 keeper 写操作（需双人） |
+| Keeper 热钱包 | 开轮、每小时提交 K 线 | OpenRound、SubmitCandle；到期后也可 CloseStaking | 不能提现、改参数、暂停；只放 gas |
+| On-call | 7×24 告警响应、一线处置 | 读状态；按预案调用 CloseStaking、AbortTechnical、RetrySettlement（任何人可调，需留痕）；升级 | 不得伪造或替换 K 线；不得改参数 |
+| Comms | 公告与社区沟通 | 按模板发公告（经 Lead 批准） | 不承诺收益；不透露未公开地址 |
+| Finance | 对账、销毁与释放核对 | 只读链上与对账表 | 不得动用金库 |
+| 合约负责人 | 故障定位、必要时重建 | 排查、新部署 | 不得热修已部署合约（不可升级） |
 
-**双人规则**：任何 owner 写操作（暂停/恢复/结算/技术终止）必须“一人操作 + 一人核对地址与参数”，并在操作日志留痕。测试网同样执行，以演练主网流程。
+**双人规则**：以下操作必须“一人操作 + 一人核对”，并留痕：
+
+- 任何手工 SubmitCandle、补交或改交 K 线；
+- R1 开轮（含 twap24h 的输入）；
+- 手工触发 AbortTechnical 或 RetrySettlement（即使合约允许任何人调用）。
+
+测试网同样执行，以演练主网流程。
 
 ---
 
-## 3. 每轮 SOP（8 个阶段）
+## 3. 每轮 SOP（7 个阶段）
 
-### 3.1 P0 — 结算确认（T0，上一轮结束时）
+### 3.1 P0 — 判定确认（判定当刻）
 
-- [ ] 运行 node ops/scripts/80_admin_ops.mjs --action status --round <N-1>，确认上一轮为终态（SUCCEEDED / FAILED_PERMANENT / TECHNICAL_ABORTED）。
-- [ ] 成功轮：确认 TeamVault 释放 1.2 亿（TeamReleased 事件）且本轮只释放一次。
-- [ ] 失败轮：确认三笔销毁（reward 7 亿 / team 1.2 亿 / principal 全部）均已 BurnAck；total_supply 实际减少。
-- [ ] 运行 node ops/scripts/reconcile.mjs --chain 生成对账 CSV；差异必须为 0（或已解释并记录）。
-- [ ] 更新 KPI 看板（templates/kpi-dashboard.md §1）。
-- [ ] 发布结算公告（成功/失败模板）；技术终止走 abort 模板。
+- [ ] `node ops/scripts/80_admin_ops.mjs --action status --round <N>`：确认状态为 SUCCEEDED（8）或 FAILED_PERMANENT（9）。
+- [ ] 读 RoundSettled 事件：`status`、`qualifiedCandles`、`candlesSeen`、`totalAcceptedStakeRaw`、`tierAfter`、`rewardBurnRaw`、`teamBurnRaw`、`principalBurnRaw`、`teamReleasedRaw`。
+- [ ] 成功：`teamReleasedRaw` = 1.2 亿 A9，且 RC 向 teamWallet 只转一次。
+- [ ] 失败：`rewardBurnRaw` = 7 亿、`teamBurnRaw` = 1.2 亿、`principalBurnRaw` = 本轮总质押；total_supply 减少相同合计。
+- [ ] 检查是否出现 SettlementBounced（0x52540110）。有则按 §3.6 处理。
+- [ ] `node ops/scripts/reconcile.mjs --chain` 生成对账 CSV；差异必须为 0，或已解释并记录。
+- [ ] 更新 KPI 看板（ops/templates/kpi-dashboard.md）。
+- [ ] 发布结算公告（success / fail）；技术终止走 abort 模板。
 - [ ] 归档：交易哈希、事件、对账 CSV、公告链接 → ops/records/ 与 ops/drills/。
 
 ### 3.2 P1 — PREVIEW 预告（T0 → T0+12h）
 
-- [ ] 计算下一轮：tier = 1 + 已成功轮数（失败同档）；阶梯下限 = P0 × 2^tier；实际 target 在开窗时锁定。
-- [ ] 若是 R1（部署后首轮）：无 PREVIEW，按 runbooks/01 §Step95 由 admin 手动 OpenRound（带 twap24h），公告与开轮同步。
-- [ ] 检查 TeamVault 与奖励池余额 ≥ 本轮额度（12 亿池剩余、70 亿池剩余）。
-- [ ] 准备并审批开轮公告（open 模板），预告期结束前发布；前端三个倒计时（距开窗 / 距关窗 / 距判定）核对。
-- [ ] 确认流动性/做市就绪（不做单边加池）：冷启动池 2 亿 A9 + $232,000 USDT（占流动性额度 40%，剩余 3 亿后续加池）；确认客服 FAQ 已更新。
-- [ ] 12h 到点自动开窗；人工只做**确认**：
-  - 80_admin_ops --action status --round <N> 看到 STAKING_OPEN；
+- [ ] 计算下一轮 tier = 1 + 已成功轮数（失败沿用同档）。
+- [ ] 目标价在开窗时锁定：`max(P0 × 2^tier, 2 × 开窗前 24h TWAP)`。P0 = 116000 USD_E8。公告中的数字以链上 TargetPriceSet 为准。
+- [ ] 检查 RC 钱包余额足够覆盖本轮 7 亿奖励与 1.2 亿团队额度（reconcile 输出）。
+- [ ] TON：RC ≥ 20 TON，keeper ≥ 2 TON（见 01 Step 55）。
+- [ ] 准备开轮公告（open 模板），预告期结束前审批发布。
+- [ ] 确认流动性与做市物料（不做单边加池）：冷启动池 2 亿 A9 + $232,000 USDT（占流动性额度 40%，剩余 3 亿 A9 后续加池）。更新客服 FAQ。
+- [ ] **keeper 在 T0+12h 发 OpenRound**（合约不会自动开窗）。运营只做**确认**：
+  - `80_admin_ops --action status --round <N>` 显示开窗状态；
   - 链上 TargetPriceSet 的 target 与公告一致（任何人可用 P0、tier、TWAP 复算）。
-- [ ] 若开窗时间已到但状态未变：按事故流程升级（P1），不要手动改时间参数。
+- [ ] 若 T0+12h 之后 1 小时仍未开窗：触发 monitor.next_round.overdue（P1），升级 keeper 排查。预告结束 7 天后仍未开轮，任何人可调用 AbortTechnical 跳过本轮（见 §4）。
 
 ### 3.3 P2 — 报名 36h（T0+12h → T0+48h）
 
-每 1 小时巡检（观察期）/ 每 4 小时（报名期），可由 keeper/监控自动化：
+每 4 小时巡检（可由监控自动化）：
 
-- [ ] monitor_check.mjs：健康、K 线（若已关窗）、预言机、供应量、管理员操作。
-- [ ] 质押总额与单地址集中度：单地址 ≤ 本轮总质押 10%，本轮 ≤ 2 亿 A9（合约强制，前端提示）。
-- [ ] 是否触发“触价提前关窗”：报名期内 1h TWAP ≥ 目标价 → 合约应立即关窗（确认状态、发截止公告）。
-- [ ] 客服/社群问题：为什么不能取消质押、失败怎么销毁、技术暂停怎么办（统一口径）。
+- [ ] `monitor_check.mjs`：健康、供应量、RC 钱包对账、keeper 状态。
+- [ ] 质押总额与单地址占比：单笔 ≥ 100,000 A9；单地址每轮 ≤ 2,000 万 A9；本轮总额 ≤ 2 亿 A9（合约强制，前端提示）。
+- [ ] 质押不可撤回；唯一退款路径见客服口径（无效质押立即退回；TON 不足时进退款账本，低于 10 万 A9 的零头不退）。
+- [ ] 客服与社群统一口径：为什么不能取消质押、失败怎么销毁、技术终止怎么退款。
 - [ ] 每日 10:00 UTC 更新运营日报（质押量、地址数、集中度、异常）。
 
-### 3.4 P3 — 关窗（T0+48h，或触价提前）
+### 3.4 P3 — 关窗（T0+48h）
 
-- [ ] 确认状态为 STAKING_CLOSED；observationStart = stakeCloseAt（无整点取整）。
-- [ ] 发布报名截止公告（stake-close 模板；注明关窗原因与观察起止）。
+- [ ] 到期后，keeper（或值班人员）发送 CloseStaking。任何人都可以发送，但正常由 keeper 发。
+- [ ] 确认状态为 OBSERVING（4）；StakingClosed 事件已发出。
+- [ ] 发布报名截止公告（stake-close 模板）：写明观察起止时间。
 - [ ] 冻结质押快照：totalAcceptedStakeRaw、地址数、最大地址占比，写入对账表。
-- [ ] 若无人质押：**照常进入观察**（不跳过、不延期、不判负）；在公告中说明“0 人质押仍观察，通过则 7 亿销毁（D-18b）”。
+- [ ] 若无人质押：**照常进入观察**（不跳过、不延期、不判负）。公告中说明：0 人质押仍会观察；通过则 7 亿奖励销毁，团队额度照常释放。
+- [ ] 报名到期 1 小时后仍未关窗：触发 monitor.roundN.close_overdue（P1）。
 
 ### 3.5 P4 — 观察 24h（24 根 1h K 线）
 
-测试网为**手动 K 线模式**（docs/03 §12）：无签名验证，由白名单 keeper 提交，数据必须公开可复核。
+keeper 每小时提交一根 K 线。K 线数据必须公开可复核。
 
-每根 1h K 线（每小时一根，24 根；**periodStart 必须严格等于 observationStart + i × 3600**，否则合约报 CandlePeriodMismatch）：
+- [ ] 取得该 1h 区间的 TWAP，保留原始数据与计算说明。
+- [ ] 计算 `periodStart = observationStart + i × 3600`，`periodEnd = periodStart + 3600`；observationStart 必须与链上一致。
+- [ ] digest 为 64 位十六进制（可带 0x）。
+- [ ] 单根提交（先 dry-run，再 EXECUTE）：
+  ~~~bash
+  node ops/scripts/80_admin_ops.mjs --action submit-candle --round <N> --candle <i> --twap <USD_E8> --digest <64hex> --observation-start <unix>
+  ~~~
+  脚本自动算 periodStart / periodEnd，并校验 observationStart + i × 3600；也支持显式传入 --periodStart / --periodEnd（不一致直接拦截）。
+- [ ] 批量：`--from-json candles.json`（[{candleIndex, twapUsdE8, digest}]），或 `--count N --twaps a,b,c --digests h1,h2,h3`（与 count 等长）。
+- [ ] 提交后确认 candlesSeen 增加；达标计数正确（TWAP ≥ target 计达标，含等号）。
+- [ ] 每根 K 线归档：原始数据源、计算过程、digest、提交交易哈希。
+- [ ] 监控：K 线落后（应见 − 已见 > 1 根，触发 monitor.roundN.candle_lag）、时间区间错误、重复提交。
 
-- [ ] 取得该 1h 区间的 TWAP（多源或协议约定的公开数据，保留原始数据与算法说明）。
-- [ ] 计算：periodStart = observationStart + i × 3600，periodEnd = periodStart + 3600；digest 为 64 hex（可带 0x）。
-- [ ] 单根提交（dry-run 先看摘要；EXECUTE 需 OPS_EXECUTE=1 + OPS_CONFIRM=YES）：
-      node ops/scripts/80_admin_ops.mjs --action submit-candle --round <N> --candle <i> --twap <USD_E8> --digest <64hex> --observation-start <unix>
-      脚本自动算 periodStart/periodEnd 并强校验 observationStart + i×3600；也支持 --periodStart/--periodEnd 显式传入（不一致直接拦截，不进 acton）。
-- [ ] 批量/循环：--from-json candles.json（[{candleIndex,twapUsdE8,digest}]）或 --count N --twaps a,b,c --digests h1,h2,h3（与 count 等长）。
-- [ ] 底层调用（脚本模板自动生成）：OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<wallet> ROUND_CONTROLLER_ADDRESS=<rc> A9_CANDLE_INDEX=<i> A9_PERIOD_START=<unix> A9_PERIOD_END=<unix> A9_TWAP_E8=<usd_e8> A9_DIGEST=<64hex> acton script scripts/deploy/admin_op.tolk submit-candle <N> 0 --net testnet。
-- [ ] oracle-candle（0x52540004）当前 RC 无 handler，仅 dry-run 联调，**禁止广播**。
-- [ ] 提交后确认 candlesSeen 增加、qualified 判定正确（TWAP ≥ target 计达标，含等号）。
-- [ ] 每根 K 线数据归档：原始源、计算过程、digest、提交交易哈希（公开可复核）。
-- [ ] 监控：K 线缺失（应见 vs 已见 > 1 根）、时间区间错误、重复提交、预言机暂停。
+**禁止**：观察窗口内更换价格源或改目标价；把缺失数据当成未达标；在第 24 根之前人工判定。
 
-**禁止**：不得在观察窗口内更换价格源/改目标价；不得把缺失数据当未达标；不得提前结算。
+### 3.6 P5 — 判定与结算（第 24 根提交时）
 
-### 3.6 P5 — 判定与结算（T0+72h 前后）
+- [ ] 第 24 根提交即判定。qualified ≥ 16 → SUCCEEDED；≤ 15 → FAILED_PERMANENT。无中间态。
+- [ ] 公告数字必须与 RoundSettled 事件一致。
+- [ ] **成功**：
+  - 质押人用 `Claim(roundId)` 一次领取本金 + 全额奖励（奖励 = floor(7 亿 × 我的质押 / 本轮总质押)）；
+  - 1.2 亿团队额度由 RC 直接转 teamWallet（只一次）。
+- [ ] **失败**：一笔销毁（7 亿 + 1.2 亿 + 全部本金），total_supply 真实减少；该轮本金不可领取。未确认 RoundSettled 前不得公告“已销毁”。
+- [ ] **0 人质押**：成功 → 7 亿销毁，团队 1.2 亿照常释放；失败 → 销毁 7 亿 + 1.2 亿。
+- [ ] **SettlementBounced**（0x52540110，action：1 = 团队转账，2 = 销毁）：出现即调用 RetrySettlement（见 §3.6.1）。
+- [ ] **UnexpectedBounce**（0x52540111，字段 op、queryId）：不明退回，**人工核查**，不得自行重试或补转。
 
-- [ ] 24 根齐备后：qualified ≥ 16 → 成功；**≤15 即失败**（V7 口径：无中间态，避免轮次永久卡住）。
-- [ ] 判定条件必须以链上状态为准（SETTLING_FAILURE/FAILED_PERMANENT），公告数字与 RoundSettled 事件一致。
-- [ ] 触发结算（正常由 keeper/任何人触发；owner 仅必要时介入）：80_admin_ops --action finalize-round --round <N>。
-- [ ] 成功：确认本金可领取 + 7 亿奖励可 claimAll + TeamVault 释放 1.2 亿（仅一次）。
-- [ ] 失败：确认三笔销毁全部确认后状态才进入 FAILED_PERMANENT；未确认前不得公告“已销毁”。
-- [ ] 技术故障（数据缺失/合约异常）：不得判负，进入 ORACLE_PAUSED；记录原因与最后有效 K 线。
+#### 3.6.1 结算重试（RetrySettlement）
+
+~~~bash
+OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<wallet> node ops/scripts/80_admin_ops.mjs --action retry-settlement --round <N>
+~~~
+
+- 任何人可调用，消息 value ≥ 0.3 TON。
+- 只在看到对应轮次的 SettlementBounced 后调用；调用前先看事件中的 action 类型。
+- 调用后核对：RC 钱包余额、teamWallet 收到的金额，或 total_supply 的变化，并写入对账表。
 
 ### 3.7 P6 — 公告与对账
 
-- [ ] 发布成功/失败公告（模板 success / fail）；失败公告必须列三笔销毁金额与合计。
-- [ ] 对账：node ops/scripts/reconcile.mjs --chain --strict（差异 ≠0 时停止对外、升级 P0）。
-- [ ] 更新 KPI：通过率、销毁量、参与地址、claim 率。
-- [ ] 客服 FAQ 更新（本轮结果、领取方式、下一轮预告）。
+- [ ] 发布成功或失败公告（模板 success / fail）。失败公告必须列出 7 亿、1.2 亿、本金三项销毁金额与合计。
+- [ ] 对账：`node ops/scripts/reconcile.mjs --chain --strict`。差异 ≠ 0 时停止对外数字，升级 P0。
+- [ ] 更新 KPI：通过率、销毁量、参与地址、领取率。
+- [ ] 更新客服 FAQ：本轮结果、领取方式、下一轮预告。
 - [ ] 归档本轮全部证据。
 
 ### 3.8 P7 — 进入下一轮
 
-- [ ] 进入 12h PREVIEW；按 P1 重复。
-- [ ] 失败轮：tier 不变（同档重试），公告中明确“下一轮仍是同一档目标”。
-- [ ] 技术终止：不消耗档位，退款完成后按原 tier 继续。
+- [ ] 进入 12h PREVIEW，按 §3.2 重复。
+- [ ] 失败轮：tier 不变（同档重试）；公告明确“下一轮仍是同一档目标”。
+- [ ] 技术终止：不消耗档位；本金可领取；7 亿与 1.2 亿留在 RC；下一轮按原 tier 继续。
 
 ---
 
-## 4. 五条路径处理矩阵
+## 4. 路径处理矩阵
 
 | 路径 | 触发条件 | 合约行为 | 运营动作 | 公告模板 |
 | --- | --- | --- | --- | --- |
-| 成功 | 24 根齐备且 qualified ≥ 16 | 本金可领 + 7 亿奖励可 claimAll + 团队释放 1.2 亿 | 核对领取、对账、KPI，发成功公告 | success |
-| 失败 | 24 根齐备且 qualified ≤ 15 | 三笔 burn（7 亿 + 1.2 亿 + 本金），终态永久关闭 | 核对三笔与 supply 减少、对账、发失败公告、准备同档下一轮 | fail |
-| 无人质押 | 关窗时 totalStake = 0 | 照常观察；失败销毁奖励+团队；通过且 0 人 → 奖励销毁（D-18b） | 公告说明；对账时本金笔为 0 | stake-close / fail / success |
-| 暂停恢复 | 预言机/数据故障 | ORACLE_PAUSED；不判负不销毁；恢复后重收满 24 根 | 发暂停公告、定位数据源、恢复公告；14 天阈值计时 | pause / resume |
-| 技术终止 | 连续暂停 ≥14 天 或 观察超时 ≥7 天 | 任何人可 AbortTechnical：退 100% 本金、不销毁奖励/团队、不消耗档位 | 发 abort 公告、核对退款、继续下一轮 | abort |
+| 成功 | 24 根齐备，qualified ≥ 16 | 本金 + 全额奖励由 Claim(roundId) 一次领取；RC 直接转 1.2 亿到 teamWallet | 核对事件与转账、对账、KPI；发成功公告 | success |
+| 失败 | 24 根齐备，qualified ≤ 15 | 一笔销毁（7 亿 + 1.2 亿 + 全部本金）；轮次永久关闭；本金不可领取 | 核对销毁金额与 total_supply 减少；对账；发失败公告；准备同档下一轮 | fail |
+| 无人质押 | 关窗时总质押 = 0 | 照常观察；成功 → 7 亿销毁，团队照常释放；失败 → 销毁 7 亿 + 1.2 亿 | 公告说明；对账时本金项为 0 | stake-close / success / fail |
+| 结算重试 | 出现 SettlementBounced | 对应的结算转账或销毁未完成 | 任何人调用 RetrySettlement（≥ 0.3 TON）；核对事件与余额 | 无需对外公告，记录即可 |
+| 技术终止 | 观察应结束后 7 天，或预告结束后 7 天仍未开轮 | 任何人调用 AbortTechnical：本金可领取；7 亿与 1.2 亿留在 RC（不分配、不销毁）；不消耗档位 | 发 abort 公告；核对退款可领；按原 tier 继续下一轮 | abort |
 
-**注意**：技术终止只能在合约条件满足时触发（提前触发会 revert）；不要用管理员权限绕过。
+**注意**：AbortTechnical 只能在合约条件满足时成功调用（否则 revert）。不要用任何权限绕过，也不要伪造条件。
 
 ---
 
-## 5. 10 轮排期与档位语义
+## 5. 档位与排期
 
-- tier = 1 + 已成功轮数：只有成功才升档；失败沿用同档（D-28）。
-- 10 轮 ≠ 10 档位：连续失败可能让后续轮次停留在低档。
-- 每轮 target 在开窗时锁定：max(P0 × 2^tier, 2 × 开窗 24h TWAP)；公告中的数字以链上 TargetPriceSet 为准。
+- tier = 1 + 已成功轮数。只有成功才升档；失败沿用同档。
+- 10 轮不等于 10 个档位：连续失败会让后续轮次停留在低档。
+- 每轮 target 在开窗时锁定：`max(P0 × 2^tier, 2 × 开窗前 24h TWAP)`。
 - 阶梯下限参考（P0 = $0.00116）：tier1 $0.00232、tier2 $0.00464、tier3 $0.00928、tier4 $0.01856、tier5 $0.03712、tier6 $0.07424、tier7 $0.14848、tier8 $0.29696、tier9 $0.59392、tier10 $1.18784。
-- 单地址限额为**固定硬顶 20,000,000 A9**（contracts/README §9.1），不是动态 10%；本轮总上限仍 200,000,000 A9。
-- 排期表模板：templates/round-schedule.md（含失败调整规则）。
+- 单笔最低 100,000 A9；单地址每轮固定上限 2,000 万 A9；本轮总上限 2 亿 A9。
+- 排期表：ops/templates/round-schedule.md。
 
-| 轮次 | 计划窗口 | 奖励 | 团队额度 | 关键动作 |
+| 轮次 | 计划开窗（相对 T0） | 奖励 | 团队额度 | 关键动作 |
 | --- | --- | --- | --- | --- |
-| R1 | 部署后 admin 手动 OpenRound（无 PREVIEW）→ +36h 报名 → +24h 观察 | 7 亿 | 1.2 亿 | 首轮：SetJettonWallet/InitController/TON gas 就绪、确认流动性、公告、客服峰值 |
-| R2~R10 | 各自 T0（上一轮结算）+12h 起 | 7 亿 | 1.2 亿 | 按 §3 SOP 滚动；失败轮同档重试 |
+| R1 | T0（keeper 直接 OpenRound，无预告期） | 7 亿 | 1.2 亿 | 部署后 TON、注资登记、twap 双人复核、公告、客服峰值 |
+| R2~R10 | 上一轮判定 + 12h（约 T0 + 72h × (n − 1)） | 7 亿 | 1.2 亿 | 按 §3 滚动；失败轮同档重试 |
 
 ---
 
-## 6. 每日/每班检查清单
+## 6. 每日与每班检查清单
 
 ### 每日 10:00 UTC（值班主责）
 
-- [ ] monitor_check.mjs --notify：P0/P1 为 0，或已升级处置。
-- [ ] 轮次状态/倒计时与链上一致；公告已发、渠道已同步。
-- [ ] K 线进度（观察期）：应见 vs 已见；缺失即补提交并记录。
-- [ ] pending burn/claim/team release：>30 分钟未确认 → P0。
-- [ ] 供应量：账本 vs 链上（对账脚本）无漂移。
-- [ ] 管理员操作日志：无未授权/异常操作。
+- [ ] `monitor_check.mjs --notify`：P0/P1 为 0，或已升级处置。
+- [ ] 轮次状态与倒计时和链上一致；公告已发，渠道已同步。
+- [ ] K 线进度（观察期）：应见 vs 已见；缺失即补交并记录。
+- [ ] keeper 心跳正常；keeper 与 RC 的 TON 余额在阈值以上。
+- [ ] SettlementBounced 与 UnexpectedBounce 事件：有则按 §3.6 处理，无遗留。
+- [ ] 供应量与 RC 钱包：对账脚本无漂移。
+- [ ] keeper 出账记录：只有预期的 OpenRound 与 SubmitCandle。
 - [ ] 值班交接：状态、未结事故、待执行操作、公告排期。
 
 ### 每班交接必须包含
 
 - 当前轮次、状态、距下一阶段时间；
 - 最近 8h 告警与处置；
-- 未确认的链上动作（burn/release/claim）；
+- 未确认的链上动作（结算重试、待确认的 CloseStaking / AbortTechnical）；
 - 下一次公告时间与负责人；
 - 需要双人复核的操作队列。
 
 ---
 
-## 7. 对账表模板
+## 7. 对账表
 
-模板：ops/templates/reconciliation.csv；生成：node ops/scripts/reconcile.mjs --chain --out ops/records/reconciliation-<timestamp>.csv。
+模板：ops/templates/reconciliation.csv；生成：`node ops/scripts/reconcile.mjs --chain --out ops/records/reconciliation-<timestamp>.csv`。字段以 reconcile.mjs 的输出为准。
 
 | 字段 | 说明 | 核对规则 |
 | --- | --- | --- |
 | round_id / state / tier | 轮次、状态、档位 | 与链上 RoundView 一致 |
-| target_usd_e8 | 锁定目标价 | ≥ P0×2^tier 且 = max(阶梯, 2×TWAP)，任何人可复算 |
-| stake_total_raw / staker_count | 本轮质押与地址数 | 与链上 stakes 汇总一致 |
-| expected_burn_raw | 失败轮 7 亿 + 1.2 亿 + 本金 | 与 recorded_burn_raw 差异必须为 0 |
-| recorded_burn_raw / burn_delta_raw | 链上实际销毁/差异 | 差异 ≠0 → P0 |
-| team_release_expected_raw | 成功轮应为 1.2 亿 | 实际释放 ≤1.2 亿且仅一次 |
-| supply_ledger_raw / supply_chain_raw / supply_drift_raw | 账本/链上供应量与漂移 | 漂移 ≠0 → P0，暂停对外 |
-| updated_at / notes | 数据更新时间与备注 | 记录异常与解释 |
+| target_usd_e8 | 锁定目标价 | = max(P0 × 2^tier, 2 × TWAP)，任何人可复算 |
+| stake_total_raw / staker_count | 本轮质押与地址数 | 与链上 DepositAccepted 汇总一致 |
+| expected_burn_raw | 失败轮应销毁额：7 亿 + 1.2 亿 + 本金 | 与 RoundSettled 的三项销毁合计一致 |
+| recorded_burn_raw / burn_delta_raw | RoundSettled 记录的销毁与差异 | 差异 ≠ 0 → P0 |
+| team_release_expected_raw | 成功轮应为 1.2 亿 | 实际释放 ≤ 1.2 亿且只一次 |
+| rc_wallet_expected_raw / rc_wallet_chain_raw / rc_wallet_drift_raw | RC 钱包余额按公式的期望值与链上值 | 期望 = 82 亿 − 已释放团队 − 已销毁 − 已领取奖励 + 未领取本金；漂移 ≠ 0 → P0 |
+| supply_chain_raw / supply_drift_raw | 链上 total_supply 与 账本 | 账本 = 1e19 − 累计销毁；漂移 ≠ 0 → P0，暂停对外披露 |
+| updated_at / notes | 更新时间与备注 | 记录异常与解释 |
 
-**三笔销毁明细**（reward / team / principal + txHash + 确认状态）在切真链后由事件索引补齐；过渡期用 expected_burn_raw 与总销毁核对。
+> 终止轮的 8.2 亿（7 亿 + 1.2 亿）留在 RC，公式中不扣减。
 
 ---
 
-## 8. KPI 看板字段
+## 8. KPI 看板
 
 完整字段见 ops/templates/kpi-dashboard.md。每轮必须更新：
 
-- 经营：roundId、tier、target、stakeTotal、stakerCount、top1ShareBps、qualifiedCandles、result、rewardUnlocked/Claimed、principalReturned、burnedReward/Team/Principal/Total、teamReleased、supplyAfter、burnConfirmSec、claimPending。
-- 增长：uniqueStakersTotal、newStakersRound、repeatRate、stakeConcentrationBps、walletConnectCount、claimRate。
-- 技术：cronHeartbeatAgeSec、candleSeenVsExpected、oraclePaused、pendingActions、bounceFailedTx24h、contractTonBalance、supplyDriftRaw、adminOpsAbnormal。
+- 经营：roundId、tier、targetUsdE8、stakeTotal、stakerCount、qualifiedCandles、result、成功与失败金额、teamReleased、supplyAfter、claimPending。
+- 增长：uniqueStakersTotal、newStakersRound、repeatRate、stakeConcentrationBps、claimRate。
+- 技术：cronHeartbeatAgeSec、candleSeenVsExpected、keeperTonBalance、settlementBounced、unexpectedBounce、rcVaultDriftRaw、supplyDriftRaw。
 
 ---
 
@@ -214,13 +239,13 @@ T0+72h      观察结束 → 判定 → 结算 → 下一轮 T0
 
 | 时点 | 模板 | 渠道 | 审批 |
 | --- | --- | --- | --- |
-| 预告期（开窗前） | open | 官网/X/TG 中英 | Lead 批准 |
-| 关窗（正常/触价） | stake-close | 官网/X/TG | Ops Lead |
-| 观察暂停/恢复 | pause / resume | 官网/X/TG + 状态页 | Lead + 合约负责人 |
-| 判定成功/失败 | success / fail | 官网/X/TG | Lead 批准（失败需财务核对三笔后） |
-| 技术终止 | abort | 官网/X/TG + 客服话术 | Lead + 项目方 |
+| 预告期（开窗前） | open | 官网 / X / TG（中英） | Lead 批准 |
+| 关窗 | stake-close | 官网 / X / TG | Ops Lead |
+| 判定成功 | success | 官网 / X / TG | Lead 批准 |
+| 判定失败 | fail | 官网 / X / TG | Lead 批准（须财务核对销毁金额后） |
+| 技术终止 | abort | 官网 / X / TG + 客服话术 | Lead + 项目方 |
 
-模板库：ops/templates/announcements.json；渲染：node ops/scripts/announcement.mjs --type <type> --round <N> --lang both --out ops/records/ann-u.md；发送需 --post-telegram 且 OPS_CONFIRM=YES。详见 05_announcements.md。
+模板库：ops/templates/announcements.json；渲染：`node ops/scripts/announcement.mjs --type <type> --round <N> --lang both`。发送需 `--post-telegram` 且 OPS_CONFIRM=YES。详见 05_announcements.md。
 
 ---
 
@@ -228,39 +253,41 @@ T0+72h      观察结束 → 判定 → 结算 → 下一轮 T0
 
 | 场景 | 立即动作 | 禁止 | 升级 |
 | --- | --- | --- | --- |
-| K 线缺失/延迟 | 补提交、记录；连续缺 2 根以上发暂停公告并排查 | 把缺失当未达标 | P1，合约负责人 |
-| 预言机/数据源异常 | PauseOracle（双人）；发 pause 公告；记录最后有效 K 线 | 暂停期间结算/销毁 | P1 |
-| K 线被伪造/来源冲突（测试网） | 停止提交、公开数据复核、必要时暂停 | 继续用可疑数据判定 | P0，Lead |
-| 结算卡住 >30 分钟 | 查 burn ack/pending；重试 pending 动作；发状态更新 | 手工改状态/跳过确认 | P0 |
-| supply 漂移 | 停止对外披露；全量对账；保留现场 | 继续结算/领取 | P0，Lead+财务 |
-| 管理员异常操作 | 立即暂停相关动作、核对日志与签名者、公告 | 隐瞒/继续 | P0，项目方 |
-| 合约疑似漏洞 | 暂停（若可）、停止质押、技术评估、公告 | 自行打补丁 | P0，合约负责人+审计 |
-| 技术终止条件满足 | 任何人可触发 AbortTechnical；发 abort 公告；核对退款 | 提前触发/伪造条件 | P1 |
+| K 线缺失或延迟 | keeper 补交；落后 > 1 根时触发 candle_lag 告警并排查 | 把缺失当成未达标 | P1，合约负责人 |
+| keeper 失联（未开轮或未交 K 线） | 查 keeper 服务与 TON gas；预告结束 7 天后任何人可 AbortTechnical | 手工替换结果；尝试更换 keeper（合约内无此入口） | P1 |
+| K 线可疑（来源冲突、疑似伪造） | 停止对外宣称该轮结果；用公开数据复核；评估 keeper 是否泄露（见 04 §9） | 继续以可疑数据对外判定 | P0，Lead |
+| 结算重试（SettlementBounced） | 调用 RetrySettlement；记录 | 手工转账补救 | P1 |
+| 不明退回（UnexpectedBounce） | 核查 op 与 queryId；冻结对外数字；通知合约负责人 | 自行二次转账或重试 | P0 |
+| 供应量或 RC 钱包漂移 | 停止对外披露；全量对账；保留现场 | 继续公告结算数字 | P0，Lead + 财务 |
+| 合约疑似漏洞 | 停止前端质押入口（运维开关）；停止 keeper 提交；保留现场 | 自行打补丁 | P0，合约负责人 + 审计 |
+| keeper 密钥疑似泄露 | 见 04 §9；公告；评估重部署 | 等待（keeper 无法更换） | P0，项目方 |
+| 技术终止条件满足 | 任何人可调用 AbortTechnical；发 abort 公告；核对退款 | 提前或伪造条件调用 | P1 |
 
 ---
 
 ## 11. 交接与归档
 
 - 每轮结束后 24h 内完成：公告、对账、KPI、事故记录、证据归档。
-- 事故记录模板：ops/templates/incident-log.csv；P0/P1 必须 24h 内出复盘。
-- 值班表模板：ops/templates/shift-schedule.csv。
-- 所有对外数字必须链上可验证；不发布未确认的销毁/释放数字。
+- 事故记录：ops/templates/incident-log.csv；P0 / P1 必须 24h 内出复盘。
+- 值班表：ops/templates/shift-schedule.csv。
+- 所有对外数字必须链上可验证；不发布未确认的销毁或释放数字。
 
 ---
 
-## 12. 与 contracts/README 的实现差异（运维必须按实现执行）
+## 12. v10 口径速查
 
-| 项 | docs 旧口径 | 实现 / 裁决 | 运营影响 |
-| --- | --- | --- | --- |
-| Vault 架构 | StakingVault + RewardVault 两个地址 | RC 只拥有 1 个 Jetton Wallet（本金+奖励），无独立 vault | 地址簿/公告不要出现不存在的 vault 地址 |
-| 单地址限额 | 本轮总质押 10%（动态） | 固定硬顶 20,000,000 A9 + 总上限 2 亿 | 前端/客服话术按固定硬顶解释 |
-| 判定阈值 | 旧口径（较少 K 线、较低阈值） | 24 根齐备后 ≥16 成功、≤15 失败（V7） | 判定/公告无中间带 |
-| R1 启动 | 12h PREVIEW | R1 无 PREVIEW，admin 手动 OpenRound | 上线当日必须安排开轮操作与公告 |
-| SetJettonWallet | 未提及 | 0x52540016 一次性，admin 调用，早于 InitController | 部署 65 → 70 顺序不可颠倒 |
-| Burn ack | 标准 TEP-74 无 ack | 测试网由 jettonMaster 地址充当 ack 权威 | 主网前必须换受审计扩展；对账以链上 supply 为准 |
-| 晚开窗 | 严格推导 | 错过 36h 报名窗口会重锚 stakeOpenAt | 监控三倒计时 + 告警；异常时公告 |
-| 技术终止后 | 未明确 | 创建下一轮 PREVIEW、tier 不变 | 继续排期，不消耗档位 |
+| 项 | 规则 |
+| --- | --- |
+| 合约 | JettonMaster、标准 JettonWallet、RoundController 三个 |
+| 运营角色 | 只有 keeper（热钱包，只放 gas）；没有 admin |
+| 判定点 | 第 24 根 K 线提交时；无结算中间态 |
+| 成功分配 | 奖励按质押占比分 7 亿；本金 + 奖励由 Claim(roundId) 一次全额领取；1.2 亿由 RC 直接转 teamWallet |
+| 失败销毁 | 一笔：7 亿 + 1.2 亿 + 全部本金 |
+| 领取 | Claim(roundId)（0x52540006）；ClaimAll（0x5254000E）；Claim(0) 领取退款账本 |
+| 最低质押 | 100,000 A9 |
+| 退款 | 无效质押立即退回（附带 ≥ 0.1 TON）；TON 不足时进退款账本，低于 10 万 A9 的零头不退 |
+| 不可用功能 | 提前关窗、暂停或恢复、早领、推荐、连续参与、滚存、解锁、撤回质押 |
 
 ---
 
-*本手册覆盖 10 轮全部运营动作；任何与链上合约冲突处，以经审计合约与签署参数为准。*
+*本手册覆盖 10 轮全部运营动作；任何与链上合约冲突之处，以经审计合约与签署参数为准。*

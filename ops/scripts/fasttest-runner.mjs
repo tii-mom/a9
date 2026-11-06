@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** fasttest-runner.mjs — 快测 10 轮编排：逐轮质押 + 领取/滚存/解锁，记录每轮证据。
+/** fasttest-runner.mjs — v10 快测 10 轮编排：逐轮质押（含低于 10 万的退款探针）+ Claim / ClaimAll，记录每轮证据。
  * 用法：OPS_EXECUTE=1 node ops/scripts/fasttest-runner.mjs --rc <fastRc> --start 2 --end 10
  */
 import { spawnSync } from 'node:child_process';
@@ -64,7 +64,10 @@ async function runUser(key, cmd, a = 0, b = 0, c = 0, addr) {
   return { ok: false, cause: 'INFRA', stdout: '', text: 'retry exhausted' };
 }
 const A9 = 1000000000n;
-function stakeAmount(key, roundId) { return (roundId === 4 && key === 'A' ? 10000n : 100000n) * A9; }
+const MIN_STAKE = BigInt(params.stakeLimits.minStakeRaw);
+// R4 的 A 故意质押 5 万（低于 10 万最低额）：forward 0.12 TON → 合约即时退回，链上仓位应为 0
+function stakeAmount(key, roundId) { return (roundId === 4 && key === 'A' ? 50000n : 100000n) * A9; }
+function expectedPosition(amount) { return amount >= MIN_STAKE ? amount : 0n; }
 async function walletA9(address) {
   try { const r = await runGetMethod(params, address, 'get_wallet_data'); return stackItemToBigInt(r.stack[0]); } catch { return 0n; }
 }
@@ -84,8 +87,6 @@ async function userWalletAddress(owner) {
 
 const staked = new Set();
 const claimed = new Set();
-let defectTested = false;
-let unlockDone = false;
 const started = Date.now();
 while (Date.now() - started < 80 * 60 * 1000) {
   const cur = await currentRound();
@@ -114,54 +115,31 @@ while (Date.now() - started < 80 * 60 * 1000) {
         const readback = await queryUser('stake', users[key].address, cur);
         const m = readback.match(/amount=(\d+)/);
         actual = m ? BigInt(m[1]) : 0n;
-        log({ event: 'stake-readback', roundId: cur, key, expected: amount.toString(), actual: actual.toString(), pass: actual === amount, attempt: attempt + 1 });
-        if (actual === amount) { confirmed = true; break; }
+        const expected = expectedPosition(amount);
+        log({ event: 'stake-readback', roundId: cur, key, expected: expected.toString(), actual: actual.toString(), pass: actual === expected, attempt: attempt + 1 });
+        if (actual === expected) { confirmed = true; break; }
         await sleep([2000, 4000, 8000, 8000][attempt]);
       }
-      if (!confirmed) { log({ event: 'stake-readback-fail', roundId: cur, key, expected: amount.toString(), actual: actual.toString() }); process.exit(3); }
+      if (!confirmed) { log({ event: 'stake-readback-fail', roundId: cur, key, expected: expectedPosition(amount).toString(), actual: actual.toString() }); process.exit(3); }
+      if (amount < MIN_STAKE && wallet) {
+        await sleep(4000);
+        const after = await walletA9(wallet);
+        log({ event: 'below-min-refund', roundId: cur, key, before: before.toString(), after: after.toString(), refunded: after === before });
+      }
     }
-  }
-  // known defect test: after stakeCloseAt but before close, try RollReward on round 1 from C
-  if (cur === 4 && !defectTested && rd.status === 2 && nowSec() >= rd.stakeCloseAt) {
-    defectTested = true;
-    const before = await queryUser('stake', users.C.address, 4);
-    const beforeAmount = (before.match(/amount=(\d+)/) || [])[1] || '0';
-    const res = await runUser('C', 'roll', 3, 0, 0);
-    await sleep(4000);
-    const rbR3 = await queryUser('stake', users.C.address, 3);
-    const rbR4 = await queryUser('stake', users.C.address, 4);
-    const state = Number((rbR3.match(/rewardState=(\d+)/) || [])[1] ?? -1);
-    const afterAmount = (rbR4.match(/amount=(\d+)/) || [])[1] || '0';
-    const pass = state === 0 && afterAmount === beforeAmount;
-    log({ event: 'defect-roll-after-close', roundId: 4, rollRound: 3, scriptOk: res.ok, rewardState: state, beforeAmount, afterAmount, pass, rawR3: rbR3.slice(-220) });
   }
   if ([8, 9, 10].includes(rd.status) && !claimed.has(cur)) {
     claimed.add(cur);
     log({ event: 'round-terminal', roundId: cur, status: rd.status, qualified: rd.qualified, candles: rd.candles, totalStake: rd.totalStake?.toString() });
-    if (rd.status === 8) {
-      if (cur === 3) { await runUser('A', 'claim-principal', 3, 0, 0); await runUser('B', 'claim-early', 3, 0, 0); await runUser('C', 'roll', 3, 0, 0); }
-      if (cur === 4) { await runUser('A', 'claim-all', 4, 0, 0); await runUser('B', 'claim-early', 3, 0, 0); await runUser('C', 'claim-principal', 4, 0, 0); }
-      if (cur === 5) { await runUser('A', 'claim-all', 5, 0, 0); await runUser('C', 'claim-all', 5, 0, 0); }
-      if (cur === 7) { await runUser('B', 'claim-all', 7, 0, 0); }
-      if (cur === 8) { await runUser('A', 'claim-principal', 8, 0, 0); }
+    if (rd.status === 8 || rd.status === 10) {
+      // v10：Claim(roundId) = 本金 + 全额奖励；ClaimAll = 1..10 + 退款账本
+      if (cur % 2 === 1) { await runUser('A', 'claim', cur, 0, 0); await runUser('B', 'claim-all', 0, 0, 0); }
+      else { await runUser('C', 'claim', cur, 0, 0); }
     }
     for (const key of ['A', 'B', 'C']) {
       const rb = await queryUser('stake', users[key].address, cur);
-      log({ event: 'claim-readback', roundId: cur, key, raw: rb.slice(-220) });
-    }
-    if (cur === endRound && !unlockDone) {
-      unlockDone = true;
-      await sleep(3000);
-      const wallet = await userWalletAddress(users.A.address);
-      const b0 = wallet ? await walletA9(wallet) : 0n;
-      const first = await runUser('A', 'claim-unlocked', 1, 0, 0);
-      await sleep(5000);
-      const b1 = wallet ? await walletA9(wallet) : 0n;
-      await sleep(15000);
-      const second = await runUser('A', 'claim-unlocked', 2, 0, 0);
-      await sleep(5000);
-      const b2 = wallet ? await walletA9(wallet) : 0n;
-      log({ event: 'claim-unlocked', first: first.ok, second: second.ok, balanceBefore: b0.toString(), afterFirst: b1.toString(), afterSecond: b2.toString(), secondIncreased: b2 > b1 });
+      const cl = await queryUser('claimable', users[key].address, cur);
+      log({ event: 'claim-readback', roundId: cur, key, raw: rb.slice(-160), claimable: cl.slice(-120) });
     }
   }
   await sleep(2000);

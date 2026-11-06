@@ -126,11 +126,9 @@ const values = {
   burnedTeam: tokens(burnedTeamRaw),
   burnedPrincipal: tokens(burnedPrincipalRaw),
   closeReason: data.closeReason || '36 小时报名窗口到期正常关闭',
-  pauseReason: data.pauseReason || '价格数据源异常，暂停观察',
-  resumeAt: fmtTime(data.resumeAt || data.pausedAt),
-  abortReason: data.abortReason || '连续暂停 14 天或观察结束超时 7 天',
+  abortReason: data.abortReason || '观察应结束后 7 天仍未判定，或预告结束后 7 天仍未开轮',
   nextRoundId: String(data.nextRoundId || Math.min(roundId + 1, 10)),
-  claimNote: data.claimNote || '本金与奖励均通过 pull claim 领取（用户自付 gas，可跨轮累积一次领取）',
+  claimNote: data.claimNote || '本金 + 全额奖励一次领取（Claim / ClaimAll，用户自付 gas）',
   siteUrl: data.siteUrl || 'https://a9.lat',
 };
 

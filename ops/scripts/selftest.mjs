@@ -7,9 +7,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asBigInt, expectedLadder, loadAndValidate, paramsDigest, rawAmount } from './lib/config.mjs';
-import { emptyRegistry, recordFunding, setContract, setWallet, writeRegistry } from './lib/registry.mjs';
-import { crc16, formatAddress, parseAddress } from './lib/ton.mjs';
+import { ALLOWED_OPCODE_NAMES, V10_OPCODES, asBigInt, expectedLadder, loadAndValidate, loadParams, paramsDigest, rawAmount, validateParams } from './lib/config.mjs';
+import { FUNDING_KINDS, emptyRegistry, recordFunding, setContract, setWallet, writeRegistry } from './lib/registry.mjs';
+import { crc16, decodeRcEvent, formatAddress, parseAddress } from './lib/ton.mjs';
+import { expectedSettlement, pendingSettlementActions } from './lib/ledger.mjs';
 import { expectedProtocolConfig, verifyAllocationInvariant, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
 import { section, ok, fail, warn, info, kv, table, summary } from './lib/log.mjs';
 
@@ -57,18 +58,42 @@ test('allocation.sum', () => {
   assert(result.ok, '分配总和 != 100 亿');
   return result.sumRaw + ' raw';
 });
-test('params.set_jetton_wallet_code', () => {
-  assert(String(params.permissions.opcodes.SetJettonWalletCode || '').toLowerCase() === '0x5254001b', 'SetJettonWalletCode opcode 必须为 0x5254001B');
-  assert(String(params.permissions.opcodes.SetTeamWalletJettonWallet || '').toLowerCase() === '0x5254001c', 'SetTeamWalletJettonWallet opcode 必须为 0x5254001C');
-  assert(!params.toolchain.adapters.acton.commands.setJettonWalletCode, 'stepwise wiring 命令应已删除（admin_op 不提供）');
-  assert(!params.toolchain.adapters.acton.commands.setTeamWalletJettonWallet, 'stepwise wiring 命令应已删除（admin_op 不提供）');
-  assert(params.toolchain.adapters.acton.stepwiseDeployment && params.toolchain.adapters.acton.stepwiseDeployment.enabled === false, 'stepwiseDeployment 必须标记 disabled');
-  const order = params.deployOrder.join(' ');
-  assert(order.includes('SetJettonWalletCode'), 'deployOrder 缺少 SetJettonWalletCode 步骤');
-  assert(order.includes('SetTeamWalletJettonWallet'), 'deployOrder 缺少 SetTeamWalletJettonWallet 步骤');
-  const bind = params.toolchain.adapters.acton.commands.bindRoles;
-  assert(!bind.includes('A9_TEAM_WALLET_JETTON_WALLET'), 'InitController 不应再传 teamWalletJettonWallet');
-  return '1B/1C opcode + 整体部署路径 + deployOrder 已就位；stepwise wiring 已标记 disabled';
+test('params.v10_contracts', () => {
+  const opcodes = params.permissions.opcodes;
+  for (const [name, code] of Object.entries(V10_OPCODES)) assert(String(opcodes[name] || '').toUpperCase() === code.toUpperCase(), 'opcode ' + name + ' 必须为 ' + code);
+  assert(Object.keys(opcodes).every((name) => ALLOWED_OPCODE_NAMES.includes(name)), '存在 v10 ABI 以外的 opcode');
+  assert(params.permissions.events.SettlementBounced === '0x52540110' && params.permissions.events.UnexpectedBounce === '0x52540111', '缺少 SettlementBounced / UnexpectedBounce 事件');
+  assert(params.stakeLimits.minStakeRaw === '100000000000000', '最低质押必须为 100,000 A9');
+  assert(params.rounds.rcFundingRaw === '8200000000000000000' && params.rounds.rcFundingForwardTonNano === '0', 'RC 注资必须为 82 亿且 forward 0');
+  assert(params.roles.keeper && params.roles.teamWallet && Object.keys(params.roles).length === 6, 'roles 必须是 keeper/treasury/teamWallet/营销/流动性/内盘');
+  const commands = params.toolchain.adapters.acton.commands;
+  assert(commands.deployAllContracts.includes('A9_KEEPER_ADDRESS={keeper}') && commands.deployAllContracts.includes('A9_TEAM_WALLET_ADDRESS={teamWallet}'), 'deployAllContracts 必须传 keeper / teamWallet');
+  const ids = params.deployPlan.map((item) => item.id);
+  assert(JSON.stringify(ids) === JSON.stringify(['preflight', 'jettonMaster', 'jettonMint', 'contracts', 'params', 'tonGas', 'funding', 'register', 'verify']), 'deployPlan 不是 v10 顺序：' + ids.join(','));
+  for (const file of ['testnet', 'mainnet', 'ceremony', 'prodtest']) {
+    const other = loadParams(join(OPS_ROOT, 'config', file + '.params.json'));
+    const result = validateParams(other);
+    assert(result.errors.length === 0, file + '.params.json：' + result.errors.join('; '));
+  }
+  return 'opcode/事件/最低质押/RC 82 亿 forward 0/keeper + teamWallet；4 个生产时序参数文件通过';
+});
+test('ledger.formulas', () => {
+  const failed = expectedSettlement(params, 'FAILED_PERMANENT', '241500000000000000');
+  assert(failed.burnRaw === 1061500000000000000n && failed.teamReleaseRaw === 0n, '失败轮一笔销毁 = 7 亿 + 1.2 亿 + 本金');
+  const success = expectedSettlement(params, 'SUCCEEDED', '1');
+  assert(success.burnRaw === 0n && success.teamReleaseRaw === 120000000000000000n, '成功轮释放 1.2 亿、不销毁');
+  assert(expectedSettlement(params, 'SUCCEEDED', '0').burnRaw === 700000000000000000n, '0 人质押成功：销毁 7 亿奖励');
+  assert(expectedSettlement(params, 'TECHNICAL_ABORTED', '5').burnRaw === 0n, '技术终止不销毁');
+  assert(pendingSettlementActions({ state: 'FAILED_PERMANENT', totalAcceptedStakeRaw: 1n, rewardBurnConfirmed: false, teamBurnConfirmed: false, principalBurnConfirmed: false }).length === 1, '销毁被退回应待重试');
+  assert(pendingSettlementActions({ state: 'SUCCEEDED', totalAcceptedStakeRaw: 1n, teamReleaseConfirmed: true }).length === 0, '团队转账已确认');
+  return '一笔销毁 / 团队释放 / *Confirmed → RetrySettlement';
+});
+test('ton.decode_rc_event', () => {
+  const data = Buffer.from([0x52, 0x54, 0x01, 0x10, 3, 2]);
+  const boc = Buffer.concat([Buffer.from([0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 1, 1, 0, 2 + data.length, 0]), Buffer.from([0, data.length * 2]), data]);
+  const event = decodeRcEvent(boc.toString('base64'));
+  assert(event && event.type === 'SettlementBounced' && event.roundId === 3 && event.action === 2, '事件解码失败：' + JSON.stringify(event));
+  return 'SettlementBounced(roundId=3, action=2)';
 });
 test('liquidity.cold_start', () => {
   const liquidity = params.supply.allocations.liquidity;
@@ -98,7 +123,8 @@ test('timeline.invariants', () => {
 test('protocol.config.expected', () => {
   const expected = expectedProtocolConfig(params);
   assert(expected.p0UsdE8 === '116000' && expected.priceMultiplier === 2, 'P0/倍数错误');
-  assert(expected.techAbortPauseSeconds === 1209600 && expected.techAbortObservationTimeout === 604800, '技术终止参数错误');
+  assert(expected.techAbortPauseSeconds === 604800 && expected.techAbortObservationTimeout === 604800, '技术终止超时必须统一为 7 天（v10）');
+  assert(expected.minStakeRaw === '100000000000000', '最低质押必须为 100,000 A9');
   return '22 个字段与 V7 一致';
 });
 test('raw.amount.helper', () => {
@@ -133,21 +159,22 @@ section('自测：登记表与验收（临时目录）');
 test('registry.roundtrip', () => {
   const registry = emptyRegistry();
   const addresses = {};
-  for (const key of ['jettonMaster', 'teamVault', 'roundController']) {
+  for (const key of ['jettonMaster', 'roundController']) {
     addresses[key] = formatAddress(0, createHash('sha256').update('contract-' + key).digest('hex'), { bounceable: true, testnet: true });
     setContract(registry, key, addresses[key], { note: 'selftest' });
   }
-  for (const key of ['adminOwner', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet']) {
+  for (const key of ['keeper', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet']) {
     setWallet(registry, key, formatAddress(0, createHash('sha256').update('wallet-' + key).digest('hex'), { bounceable: true, testnet: true }));
   }
-  for (const kind of ['roundRewards', 'team', 'marketing', 'liquidity', 'internalSale']) {
-    const plan = { roundRewards: params.rounds.rewardPoolRaw, team: params.rounds.teamPoolRaw, marketing: params.supply.allocations.marketing.raw, liquidity: params.supply.allocations.liquidity.raw, internalSale: params.supply.allocations.internalSale.raw };
+  for (const kind of FUNDING_KINDS) {
+    const plan = { roundController: params.rounds.rcFundingRaw, marketing: params.supply.allocations.marketing.raw, liquidity: params.supply.allocations.liquidity.raw, internalSale: params.supply.allocations.internalSale.raw };
     recordFunding(registry, { kind, recipient: formatAddress(0, createHash('sha256').update('fund-' + kind).digest('hex'), { bounceable: true, testnet: true }), amountRaw: plan[kind], confirmed: true });
   }
   registry.paramsDigest = digest;
   writeRegistry(registry);
   const checks = verifyRegistryStructure(registry);
   assert(checks.filter((item) => item.status === 'FAIL').length === 0, '登记表结构检查失败');
+  assert(registry.status === 'funded', '登记表状态应为 funded（RC 82 亿 + 8/5/5），实际 ' + registry.status);
   return addresses.roundController.slice(0, 12) + '…';
 });
 test('verify_deployment.offline', () => {
@@ -161,8 +188,15 @@ test('admin_ops.policy_reject', () => {
   assert(result.out.includes('禁止'), '缺少拒绝原因');
   return 'modify-target 被权限策略拒绝';
 });
+test('admin_ops.removed_actions', () => {
+  for (const action of ['pause-oracle', 'finalize-round', 'start-observation', 'retry-pending']) {
+    const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', action, '--round', '1'], { OPS_REGISTRY: tempRegistry });
+    assert(result.code === 1 && result.out.includes('v10 只保留'), action + ' 未被拒绝（exit ' + result.code + '）');
+  }
+  return 'v8.9 动作全部拒绝';
+});
 
-section('自测：公告模板（7 类 × 中英）');
+section('自测：公告模板（5 类 × 中英）');
 const templateFile = join(OPS_ROOT, 'templates', 'announcements.json');
 const templates = JSON.parse(readFileSync(templateFile, 'utf8'));
 for (const type of Object.keys(templates.templates)) {
@@ -184,7 +218,8 @@ test('reconcile.healthy', () => {
   assert(existsSync(out), 'CSV 未生成');
   const csv = readFileSync(out, 'utf8');
   assert(csv.includes('FAILED_PERMANENT') && csv.includes('SUCCEEDED'), 'CSV 内容不完整');
-  return 'R1 成功 / R2 失败三笔销毁一致 / 供应量一致';
+  assert(result.out.includes('RC 钱包') && result.out.includes('偏差'), '缺少 RC 钱包公式核对');
+  return 'R1 成功团队释放 / R2 一笔销毁 / 供应量 / RC 钱包公式（+123 零头）一致';
 });
 test('monitor.healthy', () => {
   const result = run([join(SCRIPTS, 'monitor_check.mjs'), '--snapshot', join(FIXTURES, 'worker-snapshot.json')]);
@@ -195,14 +230,14 @@ test('monitor.healthy', () => {
 test('monitor.faults', () => {
   const result = run([join(SCRIPTS, 'monitor_check.mjs'), '--snapshot', join(FIXTURES, 'worker-snapshot-bad.json')]);
   assert(result.code === 2, '故障夹具未返回 2（实际 ' + result.code + '）');
-  for (const expected of ['worker.db', 'supply.drift', 'burn_pending', 'oracle.paused', 'admin.error_events']) {
+  for (const expected of ['worker.db', 'supply.drift', 'rc.vault.drift', 'settlement.bounced.R1', 'unexpected.bounce', 'keeper.ton_low', 'round.2.candle_missing', 'ops.error_events', 'retry-settlement --round 1']) {
     assert(result.out.includes(expected), '缺少告警：' + expected);
   }
-  return 'P0=3 / P1=4 / P2=1';
+  return 'P0=3 / P1=7 / P2=1；SettlementBounced → retry-settlement';
 });
 
 section('自测：部署脚本 dry-run（临时登记表）');
-for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '15_deploy_contracts.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '55_fund_ton.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs']) {
+for (const script of ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '15_deploy_contracts.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '55_fund_ton.mjs', '50_fund_vaults.mjs', '60_verify_and_register.mjs']) {
   test('dryrun.' + script, () => {
     const extra = script === '50_fund_vaults.mjs' ? ['--all'] : [];
     const result = run([join(SCRIPTS, script), ...extra], { OPS_REGISTRY: tempRegistry });
@@ -218,7 +253,8 @@ test('deploy_all.whole', () => {
   assert(result.code === 0, 'whole 模式失败：' + result.out.slice(-800));
   assert(result.out.includes('部署模式') && result.out.includes('whole'), '未以 whole 模式运行');
   assert(result.out.includes('contracts') && result.out.includes('verify'), 'whole 模式缺少步骤');
-  return '整体路径 15→40→55→50→60→90 dry-run PASS';
+  assert(!result.out.includes('jettonWallets') && !result.out.includes('roles'), 'whole 模式不应再有钱包/角色绑定步骤');
+  return '整体路径 15→40→55→50→60→verify dry-run PASS';
 });
 test('deploy_all.jetton', () => {
   const result = run([join(SCRIPTS, 'deploy_all.mjs'), '--mode', 'jetton'], { OPS_REGISTRY: tempRegistry });
@@ -232,7 +268,8 @@ test('dryrun.50.summary', () => {
   const result = run([join(SCRIPTS, '50_fund_vaults.mjs'), '--all'], { OPS_REGISTRY: tempRegistry });
   assert(result.code === 0, '50 dry-run 失败：' + result.out.slice(-700));
   for (const expected of ['dest=', 'value=', 'fund_jetton', 'A9']) assert(result.out.includes(expected), '缺少摘要字段：' + expected);
-  return '5 笔 fund_jetton 摘要（dest/value/amount）';
+  assert(result.out.includes('forward_ton_amount 必须为 0'), '缺少 RC 注资 forward 0 提示');
+  return '4 笔 fund_jetton 摘要（RC 82 亿 forward 0 + 8/5/5）';
 });
 test('dryrun.55.summary', () => {
   const result = run([join(SCRIPTS, '55_fund_ton.mjs')], { OPS_REGISTRY: tempRegistry });
@@ -241,10 +278,10 @@ test('dryrun.55.summary', () => {
   return 'fund_ton 摘要（dest/value=整数 TON）';
 });
 test('dryrun.80.summary', () => {
-  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'pause-oracle', '--round', '1'], { OPS_REGISTRY: tempRegistry });
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'retry-settlement', '--round', '1'], { OPS_REGISTRY: tempRegistry });
   assert(result.code === 0, '80 dry-run 失败：' + result.out.slice(-700));
   for (const expected of ['dest=', 'op=', 'value/extra=', 'admin_op.tolk']) assert(result.out.includes(expected), '缺少摘要字段：' + expected);
-  return 'admin_op 摘要（dest/op/value/round）';
+  return 'retry-settlement 摘要（dest/op/value/round）';
 });
 
 section('自测：submit-candle（正例 + 窗口不一致负例）');
@@ -267,26 +304,18 @@ test('dryrun.80.submit_candle_window_mismatch', () => {
   return 'periodStart 不匹配 → ops 层拦截，未进入 acton';
 });
 
-section('自测：SetJettonWalletCode（P0 修复）');
-test('dryrun.65.set_code', () => {
-  const result = run([join(SCRIPTS, '65_set_jetton_wallets.mjs')], { OPS_REGISTRY: tempRegistry });
-  assert(result.code === 0, '65 dry-run 失败：' + result.out.slice(-900));
-  for (const expected of ['SetJettonWalletCode', 'SetTeamWalletJettonWallet', 'teamWalletJettonWallet', '0x5254001B', '0x5254001C', 'query-only', 'BLOCKED']) {
-    assert(result.out.includes(expected), '缺少新步骤字段：' + expected);
-  }
-  return '65 dry-run：整体部署 wiring + query-only 推荐 + stepwise BLOCKED';
-});
-
-test('dryrun.65.stepwise_blocked', () => {
-  const result = run([join(SCRIPTS, '65_set_jetton_wallets.mjs'), '--execute'], { OPS_REGISTRY: tempRegistry });
-  assert(result.code === 1, 'stepwise 65 应为 BLOCKED（exit 1），实际 ' + result.code);
-  assert(result.out.includes('BLOCKED'), '缺少 BLOCKED 说明');
-  assert(!result.out.includes('acton script'), 'stepwise 不应进入 acton 调用');
-  return '65 --execute（非 query-only）在 ops 层被拦截';
+section('自测：主网仪式 dry-run（v10 阶段）');
+test('ceremony.dry_run', () => {
+  const result = run([join(SCRIPTS, '90_mainnet_ceremony.mjs'), '--dry-run'], { OPS_REGISTRY: join(temp, 'ceremony.registry.json') });
+  assert(result.code === 0, '仪式 dry-run 失败：' + result.out.slice(-800));
+  for (const phase of ['P0', 'P0.5', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6']) assert(result.out.includes('[OK] ' + phase + ' DRY_RUN'), '阶段未 dry-run：' + phase);
+  assert(result.out.includes('8200000000000000000'), 'P4 缺少 82 亿断言');
+  assert(!existsSync(join(temp, 'ceremony.registry.json')), 'dry-run 不应写登记表');
+  return 'P0..P6 DRY_RUN，未写登记表';
 });
 
 section('自测：全部脚本语法');
-const scriptFiles = ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '15_deploy_contracts.mjs', '20_deploy_teamvault.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '50_fund_vaults.mjs', '55_fund_ton.mjs', '60_verify_and_register.mjs', '65_set_jetton_wallets.mjs', '70_bind_roles.mjs', '80_admin_ops.mjs', 'deploy_all.mjs', 'verify_deployment.mjs', 'reconcile.mjs', 'monitor_check.mjs', 'announcement.mjs'];
+const scriptFiles = ['00_preflight.mjs', '10_deploy_jetton.mjs', '11_mint_and_lock_jetton.mjs', '15_deploy_contracts.mjs', '30_deploy_round_controller.mjs', '40_init_params.mjs', '50_fund_vaults.mjs', '55_fund_ton.mjs', '60_verify_and_register.mjs', '80_admin_ops.mjs', '90_mainnet_ceremony.mjs', '91_deploy_multisig.mjs', '92_multisig_order.mjs', 'deploy_all.mjs', 'verify_deployment.mjs', 'reconcile.mjs', 'monitor_check.mjs', 'announcement.mjs', 'keeper-candles.mjs', 'fasttest-runner.mjs', 'lib/ledger.mjs'];
 test('syntax.all', () => {
   const bad = [];
   for (const file of scriptFiles) {

@@ -1,268 +1,128 @@
-# 06 — 主网 admin 权限与多签方案（调研结论，待用户拍板）
+# 06 — 主网 keeper 与资金钱包权限（v10）
 
-> 状态：**只读调研 + 方案文档**，不含实现代码、不部署、不改合约。
-> 适用基线：合约冻结版 `v8.6-audit-fixed` @ `c24809a`（154 tests / 15 files）。
-> 决策目标：在主网部署**之前**确定 `RoundController` / `TeamVault` 的 admin 地址（部署后永久不可改）。
-> 关联：D-21 / D-23（原「不设多签」结论）、D-24（不可升级）、D-35（主网前修复窗口）。
-
----
-
-## 0. TL;DR（给用户的一句话）
-
-**推荐方案 A：用 TON 官方 Multisig v2（2-of-3，硬件钱包签名）作为主网 `RoundController` + `TeamVault`（建议同时 `OracleAdapter`）的 admin；Jetton Master admin 保持部署 EOA 并在 mint 时永久归零。**
-代价：ops 工具链改造 **8.5–12 人天** + 部署流程改为「先部署多签 → 合约 admin 指向多签 → wiring 用一个多签订单执行」+ 上线推迟约 1–2 天；收益：彻底消除「单个私钥泄露/丢失即永久失去协议控制权」的不可逆风险。
+> 状态：**待项目方确认**。v10 合约没有 admin，本手册只定义主网的运营写权限（keeper 热钱包）和资金钱包的托管方式。
+> 适用基线：contracts/README.md v10（D-42，2026-11-06）。
+> 关联：04（测试网密钥与操作）、07（主网部署全流程）。
 
 ---
 
-## 1. 硬约束（代码证据，非推测）
+## 0. TL;DR
 
-| 合约 | admin 写入方式 | 之后能否改 | 证据 |
-|---|---|---|---|
-| RoundController | 部署时写入 `ProtocolAddresses.admin`（`deploy-emulation.tolk` 的 `scripts.wallet("admin")`） | **不能**（全仓无 SetAdmin/ChangeAdmin 消息；`RoundControllerAllowedMessage` 无该 op，`requireAdmin` 只读） | `contracts/contracts/RoundController.tolk` §handler 列表、`deploy-emulation.tolk` L222/L380 |
-| TeamVault | 部署时写入 `config.admin` | **不能**（allowed messages 无改 admin；`InitController` 只写 `controller`，且一次性） | `TeamVault.tolk` L11-12、L44-64 |
-| OracleAdapter | 部署时写入 `config.admin` | **能**：`SetOracleAdmin`（当前 admin 签名即可转移） | `OracleAdapter.tolk` L241-253 |
-| Jetton Master | 部署时写入 admin，**mint 同一逻辑内永久置 null** | 无（admin=null，mint 关闭） | `deploy-emulation.tolk` L259-275 |
-
-> 说明：Lead 提到的「只能通过 `InitController` 写一次」严格来说属于 **TeamVault.controller**（把 TV 绑定到 RC，一次性且不可改）；`RoundController.admin` 是**部署构造参数**，效果相同——**主网上线后永久不可改**。两者都要求「部署时就必须是最终地址」。
-> **推论：不能采用「先用 EOA 部署、再迁移给多签」的路径**（没有 SetAdmin），必须从第一次部署起就让 admin = 多签地址。
+1. **没有 admin**。JettonMaster 的铸造在部署交易里关闭；RoundController 不可升级、没有提现、没有参数修改入口。
+2. **唯一的运营写权限是 keeper 热钱包**：发 OpenRound 与 SubmitCandle。CloseStaking、AbortTechnical、RetrySettlement 任何人都可以调用。
+3. **keeper 地址在部署时写入 RC，之后无法更换。** 私钥泄露后攻击者可以伪造 K 线，决定任意一轮成败。这是必须对外披露的信任模型（见 §5）。
+4. **keeper 钱包只放 gas，不放 A9。**
+5. 资金钱包（treasury、teamWallet、marketingWallet、liquidityWallet、teamInternalWallet）是普通钱包，**没有合约权限**。它们的托管方式不影响协议安全模型，但仍按本手册执行。
+6. 可选：treasury 与 teamWallet 使用 Multisig v2（2-of-3）。是否采用由项目方决定（见 §8）。
 
 ---
 
-## 2. 当前 admin 权限清单（决定「为什么必须多签」）
+## 1. 权限清单
 
-### 2.1 RoundController（admin = 永久）
-
-| 操作 | opcode | 权限条件 | 生效窗口 | 资金影响 | 可替代性 |
-|---|---|---|---|---|---|
-| `SetJettonWallet` | 0x52540016 | **仅 admin** | `currentRoundId == 0`（开 R1 前） | 决定质押 Jetton Wallet（收用户本金） | 无（R1 后永久冻结） |
-| `SetJettonWalletCode` | 0x5254001B | **仅 admin** | `currentRoundId == 0` | 决定 Jetton Wallet code hash | 无（R1 后永久冻结） |
-| `OpenRound` | 0x52540001 | admin **或** oracle | 每轮 | 锁定目标价/奖励预算 | oracle（3/5 签名） |
-| `CloseStaking`（到期关窗） | 0x52540002 | **任何人** | 到点 | 无 | M-1 逃生舱 |
-| `CloseStaking`（触价早关） | 0x52540002 | admin **或** oracle | 报名期内 | 提前进观察 | oracle |
-| `SubmitCandle` | 0x52540003 | admin **或** oracle | 观察期 | 决定达标计数（销毁判定） | oracle |
-| `PauseOracle` / `ResumeOracle` | 0x5254000A/B | admin **或** oracle | 观察期（每轮仅一次 pause） | 暂停不销毁本金 | **仅 admin 实际可做**（OA 无 pause 转发） |
-| `StartObservation` | — | **任何人** | 关窗后到点 | 无 | 逃生舱 |
-| `FinalizeRound` | 0x52540005 | **任何人** | SETTLING_* 且销毁确认 | 固化成功/失败 | 逃生舱（任何人可推） |
-| `AbortTechnical` | 0x52540010 | **任何人** | 连续暂停 ≥14d 或观察超时 ≥7d | 退 100% 本金、不销毁 | 逃生舱 |
-| `RetryPendingActions` | — | **任何人** | 任意（value ≥0.3 TON） | 重试卡住的跨合约动作 | 逃生舱 |
-
-**结论**：R1 开轮后 RC admin 剩下的真实权力主要是「OpenRound/早关/Pause/Resume/SubmitCandle」——这些 **oracle（3/5 签名）都可替代**，且失败/超时都有 permissionless 逃生舱。**admin 单钥泄露不可直接转移资金，但可强制任意轮次判负，从而销毁该轮全部用户本金与奖励**：`SubmitCandle` 提交 24 根低价 K 线即可；另可 `OpenRound` 直接传 TWAP 操纵目标价、替换 OracleAdapter 签名人。**这是 D-36 已书面接受的单钥风险；用户风险披露中必须明示。**
-
-### 2.2 TeamVault（admin = 永久，风险被低估）
-
-| 操作 | 权限 | 生效窗口 | 影响 |
-|---|---|---|---|
-| `SetJettonWallet` | 仅 admin | `controller == null`（wiring 前） | TV 的 Jetton Wallet |
-| `SetTeamWalletJettonWallet` | **仅 admin** | **任何时间**（无 controller-null 限制） | **可把团队 12% 额度收款地址改到任意 Jetton Wallet**（提议者需自行构造合法钱包地址） |
-| `InitController` | 仅 admin | 一次性（controller==null） | 绑定 RC（不可逆） |
-
-**结论**：TV admin 是**可造成资金去向改变的永久权限**（团队额度重定向）。当前部署脚本里 RC admin 与 TV admin 是同一个 `admin` 钱包，所以「admin 泄露」不止轮次干扰，还包括**强制判负销毁用户本金**与**团队额度重定向**两类资金后果。这一条是推荐多签的最强理由。
-
-### 2.3 OracleAdapter（admin 可转移）
-
-`SetSignerSet`（更新 3/5 签名人 + chainId + configVersion）、`SetOracleController`（一次性）、`SetOracleAdmin`（转移 admin）。若主网 oracle 走 3/5 独立签名方（docs/10 §2），OA admin 也应指向多签，否则单个 OA admin 私钥可替换全部签名人。
-
-### 2.4 非协议权限（无需多签）
-
-treasury / teamWallet / marketingWallet / liquidityWallet / teamInternalWallet 只是 A9 持币钱包，**没有合约权限**；它们的托管策略（冷/热钱包、是否披露）不改变协议安全模型，可继续按 D-21 决策执行。
+| 角色 | 地址 | 能做什么 | 不能做什么 | 托管 |
+| --- | --- | --- | --- | --- |
+| keeper | 部署时写入 RC | OpenRound（0x52540001）、SubmitCandle（0x52540003）；到期后也可 CloseStaking | 不能提现；不能改参数；不能暂停；不能升级；不能更换自身地址 | 服务器受限账户；只放 gas（约 2 TON 起）；见 §3 |
+| 任何人 | — | CloseStaking（报名到期后）、AbortTechnical（条件满足后）、RetrySettlement（出现 SettlementBounced 后，≥ 0.3 TON） | 同左，条件不满足时合约 revert | 不适用 |
+| treasury | 部署时 mint 的接收地址 | 持有 100 亿，部署时向 RC 转 82 亿，并向内盘、流动性、营销分配 | 分配完成后应归零；无合约权限 | 主网：冷钱包（硬件）；测试网：热钱包 |
+| teamWallet | 部署时写入 RC | 接收每个成功轮的 1.2 亿（RC 直接转，最多 10 轮） | 无权限改变团队额度的去向；地址不可在链上更改 | 热钱包，只留小额；大额转冷钱包 |
+| marketingWallet | 登记表 | 持有 5 亿，营销支出 | 无合约权限 | 热钱包，小额 |
+| liquidityWallet | 登记表 | 持有 5 亿，加池与做市（冷启动池 2 亿 A9 + $232,000 USDT，占 40%；剩余 3 亿后续加池） | 无合约权限 | 热钱包，小额 |
+| teamInternalWallet | 登记表 | 持有 8 亿内盘额度，公开可查 | 无合约权限 | 多人共管热钱包 |
+| 部署者（deployer） | Acton 项目钱包 | 部署、注资、运维期 gas | 部署完成后不再拥有任何协议权限 | 本地 keystore；部署后降为低频钱包 |
 
 ---
 
-## 3. TON Multisig v2 可行性
+## 2. 主网 keeper 钱包的托管要求
 
-**合约**：`ton-blockchain/multisig-contract-v2`（TON Core 官方，Safe{Wallet} 风格）。
+由于 keeper 在线、需要定期签名，以下要求**强制**：
 
-- **安全审计**：Zellic、Trail of Bits 双审计（仓库 `audits/` 内有 PDF）。
-- **不可升级**：README 明确「Logic of multisignature wallet can not be changed after deploy」——与「admin 永久」的诉求匹配（多签本身也不会被偷偷换逻辑）。
-- **任意动作**：Order 可包含任意 `send_message`（发送 TON/Jetton/调用任意合约）与 `update_multisig_params`（改阈值/签名人/提议人）。
-- **流程**：`propose（任何人可发起吗？→ 仅 signers/proposers）→ signers 逐个 approve → 达到 threshold → 执行`；Order 为独立子合约，有 48-bit 过期时间；每个 Order 最多 255 条 transfer，超出自动拆到 `execute_internal` 续执行。
-- **地址稳定性**：地址由「code hash + 初始 data（阈值/签名人）」推导；部署后**改签名人只改 storage**，地址不变；重新部署不同配置才会得到新地址。
-- **费用**：wrapper 默认 propose 附带 **1 TON**、approve **0.1 TON**（可按需下调，需实测）；每个 action 自身还要带目标消息 value（现有 admin 消息为 **0.3 TON/条**）。建议多签约 **30–50 TON** 余额（部署 + 10 轮运维 + 应急 + 订单存储）。
-- **延迟**：等于「收集 threshold 个真人签名」的时间（分钟~小时级）；订单过期需重新提案（过期订单可通过再执行把 TON 退回多签约）。
-- **工具链现状（2026-11 调研）**：官方**未发布独立 npm SDK**；仓库提供 `wrappers/Multisig.ts`、`wrappers/Order.ts`（依赖 `@ton/core`，需 blueprint/自建打包）+ `scripts`；opcode/TL-B 公开（`new_order 0xf718510f`、`execute 0x75097f5d`、`execute_internal 0xa32c59bf`、`order.approve 0xa762230f`、`send_message 0xf1381e5b`、`update_multisig_params 0x1d0cfbd3`）。
-  - 落地方式二选一：
-    - **A-JS**：vendor `wrappers/` + `@ton/core`/`@ton/crypto`/`@ton/ton`，在 ops 里用硬件钱包/TON Connect 签名（推荐，生态成熟）。
-    - **A-Tolk**：用 acton 自建多签 TL-B（复用现有 acton keystore 签名钱包），无新 JS 依赖，但需自测 cell 编码，风险更高。
-- **已知注意点**：Order 内容不受限 → 签名人必须在钱包/工具里**完整解析订单 actions** 再签名；签名人集合变更会使未执行订单失效；threshold 必须 1..N。
+1. **主机隔离**：keeper 只运行在专用服务器上，不与公开服务（Worker、前端、公开端点）同机。
+2. **访问控制**：SSH 仅允许密钥登录，禁用密码登录；只有运维账号可以登录；最小权限；登录有日志和告警。
+3. **出账告警**：keeper 的任何出账都必须告警，并核对是否为 OpenRound 或 SubmitCandle。这是发现密钥被盗的主要手段。无出账时也要有周期性心跳。
+4. **定期审计**：每周核对 keeper 钱包的交易历史与预期操作。异常时立即停用，并按事故流程处理。
+5. **资产边界**：keeper 只放约 2 TON 的 gas，**不放 A9、USDT 或其他资产**。
+6. **不可逆边界**：合约没有 setAdmin，keeper 地址写死在 RC 中。泄露后**没有更换路径**，只能重新部署新协议。
+7. **备份**：助记词离线保存至少 2 份，异地存放。恢复演练只在隔离环境进行，禁止录入联网工具或工单。
+8. **专用钱包**：keeper 钱包不能与测试网钥匙、部署钱包或任何资金钱包共用。
 
 ---
 
-## 4. 与现有 ops 工具链的兼容性与改造工作量
+## 3. 资金钱包的托管要求
 
-### 4.1 现状
+| 钱包 | 要求 |
+| --- | --- |
+| treasury | 主网使用硬件冷钱包；只在部署和注资时连接；分配完成后余额应为 0（注资核对见 07 §4.6） |
+| teamWallet | 只留运营小额；每个成功轮到账后转入冷钱包；地址公开程度按 §4 |
+| marketingWallet / liquidityWallet | 热钱包只留当期支出；大额转冷钱包；加池操作双人复核 |
+| teamInternalWallet | 公开可查；操作前公告；多人共管，单人不得动用 |
 
-- `ops/scripts/80_admin_ops.mjs` → acton `contracts/scripts/deploy/admin_op.tolk`，使用 `A9_SIGNER_WALLET`（acton 本地 keystore 钱包）**直接**向 RC/TV 发消息，每条 0.3 TON；dry-run 默认。
-- `ops/scripts/15_deploy_contracts.mjs` → `deploy-emulation.tolk`：用 `scripts.wallet("admin")` 同时作为「admin 地址」和「wiring 消息发送方」。
-- `ops/scripts/verify_deployment.mjs`：目前**没有**校验 admin 是否为多签/签名人集合。
-
-### 4.2 必须改造的点
-
-1. **部署参数拆分**：`adminAddress`（指向多签）与「部署签名钱包」解耦；RC/TV/OA 部署时 admin = 多签地址；Jetton Master admin 保持部署 EOA（mint 后永久 null，不进多签）。
-2. **wiring 改为多签订单**：`RC.SetJettonWallet`、`RC.SetJettonWalletCode`、`TV.SetJettonWallet`、`TV.SetTeamWalletJettonWallet`、`TV.InitController`、`OA.SetOracleController`、`OA.SetSignerSet` 打包为 **1 个 Order**（≤255 actions 内），部署后由 2/3 签名执行；否则这些消息会因 sender≠admin 被拒。
-3. **新脚本 `ops/scripts/90_multisig.mjs`**：`deploy / status / list-orders / get-order / propose / approve / execute / update-signers / estimate / demo`；dry-run 必须打印每个 action 的 `target/opcode/value/body 摘要/风险标签`。
-4. **`80_admin_ops.mjs` 增加多签路由**：`--via multisig`（默认 dry-run 生成订单计划；`--propose-only / --approve --seqno / --execute --seqno`），保留 acton 直发路径给测试网/EOA 场景。
-5. **`verify_deployment.mjs` 新增强制门禁**（STRICT）：
-   - `admin.address`：RC/TV/OA 的 admin == 登记多签地址；
-   - `admin.code_hash`：多签 code hash == 审计版本（Zellic/ToB 对应 commit）；
-   - `admin.threshold/signers`：与登记的 2/3 或 3/5 一致；
-   - `multisig.pending_orders`：无未执行/未过期订单（部署前）。
-6. **密钥托管 SOP**：3 个签名人 = 3 套独立硬件钱包 + 离线助记词备份（异地/托管）；签名动作两人复核；禁止在仓库/CI 存放主网助记词。
-   - ⚠️ **现状风险（本次调研发现）**：`contracts/global.wallets.toml` 内含 `a9-deployer` / `a9-admin` 的**明文助记词**（当前是测试网钱包）。主网**严禁复用**这两个密钥；仓库若将公开，需先清理历史/轮换（建议 Lead 单独处置）。
-
-### 4.3 工作量估计（人天，不含多方协调时间）
-
-| # | 工作项 | 人天 |
-|---|---|---|
-| 1 | 多签部署工具（vendor wrappers / blueprint 脚本、部署 + 地址/代码哈希校验、testnet 验证） | 1.0–1.5 |
-| 2 | `90_multisig.mjs`（propose/approve/execute/list/status/estimate、actions 解析与 dry-run 明细） | 2.5–3.5 |
-| 3 | `80_admin_ops.mjs` 多签路由 + dry-run 订单计划（保留 direct 路径） | 0.5–1.0 |
-| 4 | 部署脚本拆分 admin/签名人 + wiring 订单构建 | 1.0–1.5 |
-| 5 | `verify_deployment.mjs` admin/multisig 门禁 | 0.5–1.0 |
-| 6 | Testnet 全流程演练（新实例：多签部署→wiring 订单→R1→一次管理操作→缺签/过期/换签名人演练） | 2.0–3.0 |
-| 7 | Runbook/SOP/密钥托管与应急演练文档 | 1.0–1.5 |
-| **合计** | 方案 A（多签） | **8.5–12 人天** |
-| B | 单一冷钱包（硬件签名路径 + SOP） | 0.5–1.5 人天 |
-| C | 混合（A + 金库独立冷钱包策略） | 8.5–12.5 人天 |
+- 所有钱包的助记词或私钥只离线保存，不进入仓库、CI、截图或聊天记录。
+- 冷钱包签名时核对链、地址（首尾与中间）、金额与 opcode。
+- 团队、营销、流动性地址不对外公开，只写入内部地址簿。
 
 ---
 
-## 5. 三个方案
+## 4. 地址公开程度
 
-### 方案 A — TON Multisig v2 作为 admin（2-of-3 或 3-of-5）
+- 公开：JettonMaster、RoundController、RC 的 Jetton 钱包、JettonWallet 代码哈希、teamWallet 的链上地址（RC 会向它转账，链上本来就能看到）。
+- 不公开：营销、流动性、内盘的热钱包地址；对外只写“项目方热钱包持有”。
+- 对外透明页只使用链上可验证的数字。
 
-- **架构**：多签部署在 TON 主网；3（或 5）个硬件钱包签名人，阈值 2（或 3）；RC/TV/OA admin = 多签地址；Jetton Master admin 仍为部署 EOA（mint 后归零）。
-- **优点**：单私钥泄露不致命（需 2 把=2-of-3 才可动）；私钥丢失可通过 `update_multisig_params` 换人（需旧集合共识）；逻辑不可升级，行为可预期。
-- **缺点**：部署流程重构（wiring 走订单）；每次 admin 操作需 2 人签名（分钟~小时级）；新增工具链与 SOP；多签本身 gas 成本。
-
-### 方案 B — 单一冷钱包（硬件）作为 admin + 逃生舱
-
-- **优点**：零改造（沿用 acton admin_op）；操作最快；gas 最低。
-- **缺点**：**永久单点**——私钥丢失/持有人失联 = 永久失去 OpenRound/暂停/早关能力（虽仍有逃生舱，但协议节奏失控、可能被迫技术中止退款）；私钥泄露/内鬼 = **可强制任意轮判负销毁本金** + **TV 团队额度重定向**；无追责分离。
-- **逃生舱**：到期关窗（任何人）、SETTLING_* finalize（任何人）、技术中止超时（任何人）、retry pending（任何人）、oracle 3/5 覆盖 open/close/candle —— 协议**不会永久死锁**，但「及时性操作」会受影响。
-
-### 方案 C — 混合：admin 多签 + 金库独立冷钱包
-
-- **架构**：同 A（RC/TV/OA admin = 多签），另外 treasury/team/marketing/liquidity 用独立冷钱包（互不共用密钥），OA 3/5 签名人与多签签名人分离（避免同一批人既管 admin 又管 oracle）。
-- **优点**：权限分离最彻底；单点事故影响面最小。
-- **缺点**：A 的全部成本 + 密钥/主体更多、协调更重；小团队可能难长期维持 3 套独立硬件钱包。
+> teamWallet 是否在 Worker 与公告中展示，需项目方确认（见 07 §10）。
 
 ---
 
-## 6. 风险对照表
+## 5. 信任模型（必须对外披露）
 
-| 场景 | A. 多签（2-of-3） | B. 单一冷钱包 | C. 混合 |
-|---|---|---|---|
-| **私钥丢失** | 丢 1 把仍可执行（2/3）；丢 2 把才失能；可用旧集合换人 | **直接永久失能**：无法 OpenRound/暂停/早关；只能靠 oracle 与逃生舱，最终可能中止退款 | 同 A；金库另有多套独立备份 |
-| **私钥泄露** | 攻击者需 2 把才能动；泄露 1 把可被替换（旧集合签名更新）；有响应窗口 | **单点全失**：TV 团队额度可被重定向、**可强制任意轮判负销毁用户本金**、无可撤销 | 同 A；且金库密钥与 admin 分离，损失面更小 |
-| **单人跑路** | 1 人跑路 = 损失 1 票，剩余 2 票仍可执行 + 换人 | **协议控制权随人走**：跑路即永久失控 | 同 A；金库另有独立托管 |
-| **多签方失联导致紧急操作无法执行** | 2-of-3 需 2 人；紧急场景可由 oracle 3/5 覆盖 open/close/candle + permissionless 逃生舱兜底；风险主要是「及时性」而非「安全性」 | 无此问题（单人可动），但换来前两项的致命风险 | 同 A；可加「紧急单人 break-glass」但会削弱多签价值，不建议 |
-
-**结论**：B 在「可用性」上最优、在「不可逆安全」上最差；A 把不可逆风险从「1 把钥匙」提升到「2 把钥匙」，且协议本身已有 permissionless 逃生舱与 oracle 3/5 兜底，**A 的可用性代价可控**。
+- **单 keeper 热钱包**：开轮与提交 K 线都由它完成，链上无法验证价格真实性。
+- **私钥泄露后果**：攻击者可以伪造 K 线，决定任意一轮成败，包括让自己的质押轮次成功、拿走该轮奖励池的份额。合约没有任何人能修改规则或提走资金，但无法防止伪造价格。
+- **缓解措施**：keeper 只放少量 gas；服务器加固；所有 K 线以事件公开（含 dataDigest 与滚动哈希 candleHash），任何人可以用公开行情复核；报名窗口不能被提前关闭，因此不能用提前关窗挡住其他人。
+- **风险披露**必须包含：单 keeper 信任模型、keeper 无法更换、低于 10 万 A9 且 TON 不足的零头不退。
 
 ---
 
-## 7. 推荐
+## 6. 上主网前的密钥检查
 
-**推荐方案 A（TON Multisig v2，起步 2-of-3）**，理由：
-
-1. RC/TV admin **永久不可改**，一旦部署没有回头路；单密钥的不可逆风险与 8.5–12 人天 + 1–2 天上线延迟相比，**成本可接受、风险不可接受**。
-2. TV admin 可**重定向团队 12% 额度**——这不是 grief，是资金去向风险，必须有分权。
-3. 多签延迟不影响轮次主流程：OpenRound/早关/SubmitCandle 由 **OracleAdapter 3/5 签名**覆盖；到期关窗、finalize、技术中止、retry 均为 **permissionless**；多签只在「pre-R1 wiring」和「PauseOracle/换签名人」等低频场景需要人工确认。
-4. Multisig v2 为 TON Core 官方、Zellic + Trail of Bits 双审计、逻辑不可升级，符合「不可升级 + 行为可预期」的协议调性。
-
-**代价与前提**：
-- 部署流程重构：**先部署多签 → 合约 admin 指向多签 → wiring 用 1 个多签订单执行**（不能再由 `deploy-emulation.tolk` 的 admin 钱包直接发 wiring）；
-- ops 工具链改造 8.5–12 人天（§4.3），主网上线整体推迟约 1–2 天；
-- 3 名签名人（建议：2 名项目核心 + 1 名外部/法律/顾问），全部硬件钱包，异地离线备份；
-- 多签常备 30–50 TON gas；
-- 若用户倾向更高安全，可升级为 3-of-5（成本不变，协调更重）。
-
-**若用户拒绝多签（方案 B）**：必须书面接受「单密钥永久风险」，并强制执行：硬件钱包冷存、离线多份备份、admin 操作双人复核、监控异常 admin 操作、主网前完成一次密钥恢复演练；同时把该风险写入 docs/10 风险登记册。
+- [ ] keeper 钱包与测试网钥匙完全独立；生成过程离线进行；双人在场。
+- [ ] keeper 地址与 teamWallet 地址核对无误（部署后不可改），并写入签字单。
+- [ ] keeper 服务器的访问、监控、出账告警已上线。
+- [ ] 资金钱包的冷热分离方案已确定，并写入 07 的签字表。
+- [ ] 仓库中没有任何助记词或私钥。
+- [ ] 历史仓库问题：`contracts/global.wallets.toml` 中含有测试网 `a9-deployer`、`a9-admin` 的明文助记词。**主网严禁复用这两个钱包**；仓库如果将公开，需先清理历史并轮换。由 Lead 单独处置。
 
 ---
 
-## 8. 上线前 checklist（采用方案 A 时）
+## 7. 运营写操作（主网）
 
-- [ ] 多签合约部署到 TON 主网（或先 testnet 全流程演练），记录地址 + code hash（与审计版本一致）
-- [ ] 登记 `adminMultisig` 地址到 `ops/config/mainnet.registry.json` 与 D1 `contracts` 表
-- [ ] 部署 Jetton Master（admin=部署 EOA）→ mint 10 亿 + admin=null（同笔）
-- [ ] 部署 TeamVault / RoundController / OracleAdapter，admin 一律 = 多签地址
-- [ ] 向多签注资（gas）并验证多签 getter：threshold=2、signers=3、地址正确
-- [ ] 用**一个多签订单**执行 wiring：RC.SetJettonWallet / RC.SetJettonWalletCode / TV.SetJettonWallet / TV.SetTeamWalletJettonWallet / TV.InitController / OA.SetOracleController / OA.SetSignerSet
-- [ ] `verify_deployment.mjs --online`（STRICT）全 PASS（含新增 admin/multisig 门禁）
-- [ ] 演练：2 人签名执行一次 OpenRound；故意缺 1 签确认无法执行；订单过期后重提案；替换一个失联签名人（update_multisig_params）
-- [ ] 密钥托管：3 套硬件钱包、离线备份异地存放、签名双人复核、紧急联系人与恢复流程上墙
-- [ ] 公开透明页补充：多签地址、阈值、审计报告链接（docs/10 §透明页要求）
+| 操作 | 发送者 | 条件 | 双人要求 |
+| --- | --- | --- | --- |
+| OpenRound（R1 与每一轮） | keeper | 预告结束（R1 为部署后）；twap24h 已双人复核 | 双人核对 target 与 twap |
+| SubmitCandle | keeper | 观察期，每小时一根 | 手工补交时双人 |
+| CloseStaking | 任何人 | 报名到期后 | 值班人员兜底时双人 |
+| AbortTechnical | 任何人 | 条件满足（7 天） | 双人确认后执行并留痕 |
+| RetrySettlement | 任何人 | SettlementBounced 出现后 | 按事件执行并留痕 |
 
 ---
 
-## 9. 待用户拍板的问题
+## 8. 可选：资金钱包使用 Multisig v2
 
-1. 阈值与签名人构成：**2-of-3**（推荐，日常可执行）还是 **3-of-5**（更安全、协调更重）？签名人分别是谁？
-2. 是否同意 **8.5–12 人天 + 上线推迟 1–2 天**换永久 admin 安全？
-3. OracleAdapter admin 是否与 RC/TV 用同一多签，还是另设（建议同址，减少主体数量）？
-4. treasury/team/marketing/liquidity 是否维持独立冷钱包（方案 C 的金库部分，无协议权限）？
-5. 是否需要对多签工具链（自建 propose/approve 脚本）做第三方代码审计？
-6. 是否公开 admin 多签地址与审计报告（透明度 vs 安全）。
-
----
-
-## 10. 参考
-
-- 合约与审计：`https://github.com/ton-blockchain/multisig-contract-v2`
-  - Zellic 审计：`audits/Multisig_Zellic_Audit_Report.pdf`
-  - Trail of Bits 审计：`audits/202403TON_Foundation_Multisignature_Wallet_Report_+_Fix_Review.pdf`
-  - Wrapper API：`wrappers/Multisig.ts`、`wrappers/Order.ts`、`wrappers/Constants.ts`
-- 本仓库相关：
-  - `contracts/contracts/RoundController.tolk`（admin 权限与逃生舱）
-  - `contracts/contracts/TeamVault.tolk`（InitController / SetTeamWalletJettonWallet）
-  - `contracts/contracts/OracleAdapter.tolk`（SetSignerSet / SetOracleAdmin）
-  - `contracts/scripts/deploy-emulation.tolk`、`ops/scripts/15_deploy_contracts.mjs`、`ops/scripts/80_admin_ops.mjs`
-  - `docs/07_OPEN_DECISIONS.md`（D-21/D-23 原结论）、`docs/10_LAUNCH_READINESS.md`（风险登记册）
+- 适用对象：treasury 与 teamWallet（不适用于 keeper，keeper 必须在线签名）。
+- 工具：TON 官方 Multisig v2（2-of-3，硬件钱包签名）。合约不可升级；地址由 code hash 与初始数据决定。
+- 工具脚本 ops/scripts/91_deploy_multisig.mjs、92_multisig_order.mjs 是否随 v10 保留，待定（见 07 §10）。
+- 费用：部署约 0.0021 TON，propose 与 approve 约 0.002 TON；多签需常备 ≥ 1 TON 作为执行与存储 gas（测试网实测）。
+- 注意：订单内容不受限，签名人必须完整解析订单 actions 后再签名。
+- 使用多签的前提：先在测试网完整演练一次（缺一签不执行、过期订单、更换签名人）。
 
 ---
 
-## 11. 测试网演练步骤（spike 已验证，task-45）
+## 9. 待项目方拍板
 
-> 前提：用户尚未拍板方案 A；以下 spike 工具是**纯加法**，删除 `ops/scripts/91_/92_` 与 `ops/spike-multisig/` 即可回滚，不影响现有 EOA 流程。
-
-1. 安装 spike 依赖：`cd ops/spike-multisig && pnpm install`
-2. 准备官方源码/预编译产物：`node ops/scripts/91_deploy_multisig.mjs --prepare`（下载到 `ops/spike-multisig/.cache/`，不改根依赖）
-3. 部署 2-of-3 多签（测试网）：
-   ```bash
-   node ops/scripts/91_deploy_multisig.mjs --signers a9-test-a,a9-test-b,a9-test-c --threshold 2          # dry-run
-   OPS_EXECUTE=1 OPS_CONFIRM=YES node ops/scripts/91_deploy_multisig.mjs --signers a9-test-a,a9-test-b,a9-test-c --threshold 2 --value 0.3 --execute
-   ```
-   产物：`ops/records/multisig-registry.json`（地址、code hash、signers、threshold）。
-4. 发起 1 个订单（可含多条 action；`--transfer 地址,金额TON` 可重复）：
-   ```bash
-   node ops/scripts/92_multisig_order.mjs propose --signer a9-test-a --expiration 3600 --transfer <addr1>,0.02 --transfer <addr2>,0.02
-   ```
-5. 第 2 个签名人确认（达到阈值即自动执行）：
-   ```bash
-   OPS_EXECUTE=1 OPS_CONFIRM=YES node ops/scripts/92_multisig_order.mjs approve --signer a9-test-b --seqno 0
-   ```
-6. 查询：`status` / `list` / `order-status --seqno N`；`ops/records/multisig-rehearsal.jsonl` 会记录每步 tx 与费用。
-7. 负向验证（每次演练必做）：
-   - 只发 1 个签名 → `executed=false`，无转账；
-   - 订单过期后再 approve → 多签执行 tx `out_msgs=0`（expired 111），无转账；
-   - `update-signers` 更换签名人 → 多签地址不变、`get_multisig_data` 更新。
-8. 实测 gas（2026-11 测试网，详见 `ops/records/multisig-rehearsal.md`）：propose ≈0.002 TON、approve+execute ≈0.002 TON、部署 ≈0.0021 TON；多签需常备 ≥0.3 TON（建议 1 TON 以上）作为 order 执行/存储 gas。
-
-
+1. keeper 的服务器与运维人员由谁负责？
+2. treasury 与 teamWallet 是否使用 Multisig v2？若使用，签名人是谁？
+3. marketing / liquidity / teamInternal 是否维持热钱包方案？
+4. teamWallet 地址是否在 Worker 与公告中展示？
+5. 风险披露中 keeper 信任模型的文案，由谁审阅？
 
 ---
 
-## 12. 热钱包 admin 的运维要求（D-41，2026-11-06）
-
-> **变更**：主网 admin 由「硬件冷钱包」改为 **服务器专用热钱包（acton keystore）**；D-36 的冷钱包部分推迟到 OA 迁移。原因：keeper 每小时用 `fast_candle.tolk` + `A9_SIGNER_WALLET` 签 `SubmitCandle`，**acton 不支持硬件钱包签名**，无 OA 签名工具；硬件 admin 会导致 keeper 无法发 K 线。
-
-因为 key 在线上，以下要求**强制**：
-
-1. **主机隔离**：admin 钱包只跑在**运维跳板机**上，**不与公开服务（worker/web/keeper 公开端点）同机**；跳板机不跑任何对外监听服务。
-2. **访问控制**：**SSH key-only、禁用密码登录**；仅部署/运维账号可登录；最小权限（能跑 acton 与签名脚本即可）；跳板机本身有访问日志与登录告警。
-3. **监控告警**：**admin 地址的任何出账（发消息）都必须告警**——这是唯一能发现密钥被盗的方式；告警覆盖：链上 external 消息、提交的 opcode、目标合约、时间；无出账也要有周期性心跳。
-4. **定期审计**：**每周**核对 admin 钱包 nonce 历史与预期操作对账；异常增加立即停用并按事故流程处理。
-5. **资产边界**：admin 钱包**只放 ~2 GRAM 做 gas，不放任何 A9/USDT 或其他资产**。
-6. **不可逆边界**：**合约不可升级、无 `SetAdmin`；密钥泄露后无法更换 admin，攻击者可永久强制任意轮次判负（销毁该轮全部用户本金与奖励）**——**无补救路径**，只能重新部署新协议。
-7. **备份**：助记词离线 ≥2 份、异地存放；恢复演练需在隔离环境验证（禁止把助记词录入联网聊天/工单）。
+*本手册与合约 v10 口径一致。合约如有新版本，需先更新本手册，再进入主网流程。*

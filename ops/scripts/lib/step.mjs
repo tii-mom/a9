@@ -11,13 +11,11 @@ const DEP_TO_CONTRACT = {
   preflight: null,
   jettonMaster: 'jettonMaster',
   jettonMint: 'jettonMaster',
-  teamVault: 'teamVault',
+  contracts: 'roundController',
   roundController: 'roundController',
   params: 'roundController',
-  jettonWallets: 'roundControllerJettonWallet',
-  roles: 'teamVault',
   tonGas: 'roundController',
-  funding: 'teamVault',
+  funding: 'roundController',
   register: 'roundController',
 };
 
@@ -66,7 +64,7 @@ export function bootstrap({ id, title, dependsOn = [] }) {
 }
 
 export function printProtocolConfigExpected(params) {
-  section('预期链上配置（V7 时间参数）');
+  section('预期链上配置（V7 时间参数 / v10 合约）');
   kv('P0', params.price.p0UsdE8 + ' USD_E8（' + params.price.p0Usd + '）');
   kv('倍数', params.price.priceMultiplier + '×（不可变）');
   kv('目标价锁定', params.price.targetFormula);
@@ -77,7 +75,8 @@ export function printProtocolConfigExpected(params) {
   kv('每轮奖励', params.rounds.roundRewardRaw + ' raw（7 亿 A9）');
   kv('团队每轮', params.rounds.teamRoundRaw + ' raw（1.2 亿 A9）');
   kv('质押限额', 'min ' + params.stakeLimits.minStakeRaw + ' / 单地址 ≤ ' + params.stakeLimits.maxStakePerAddressBps + ' bps / 本轮 ≤ ' + params.stakeLimits.maxTotalStakeRaw);
-  kv('技术终止', '暂停 ' + params.techAbort.pauseDays + ' 天或观察超时 ' + params.techAbort.observationTimeoutDays + ' 天；退本金 100%，不销毁奖励/团队，不消耗档位');
+  kv('RC 注资', params.rounds.rcFundingRaw + ' raw（70 亿奖励 + 12 亿团队），forward_ton_amount = 0');
+  kv('技术终止', '观察应结束后 / 预告结束后 ' + params.techAbort.abortTimeoutDays + ' 天，任何人可触发；本金可领，奖励/团队额度留在 RC，不消耗档位');
 }
 
 export function printNextSteps(lines) {

@@ -68,7 +68,7 @@ if (execute && hasCommand(params, 'initParams')) {
 
 if (!online) {
   info('dry-run：跳过链上 get_protocol_config 比对；加 --online 可只读比对。');
-  printNextSteps(['下一步：node scripts/70_bind_roles.mjs（一次性 InitController）']);
+  printNextSteps(['下一步：node scripts/55_fund_ton.mjs（RC / keeper gas）→ 50_fund_vaults.mjs']);
   process.exit(finish({ 模式: 'DRY-RUN', 快照: snapshotFile }));
 }
 
@@ -106,5 +106,5 @@ try {
   warn('请用 acton rpc 人工核对 get_protocol_config；未核对前不得 OpenRound。');
 }
 
-printNextSteps(['下一步：node scripts/70_bind_roles.mjs（一次性 InitController，需双人核对）']);
+printNextSteps(['下一步：node scripts/55_fund_ton.mjs（RC / keeper gas）→ 50_fund_vaults.mjs（v10 无角色绑定步骤）']);
 process.exit(finish({ 模式: execute ? 'EXECUTE' : 'DRY-RUN（online）', 快照: snapshotFile }));

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * 90 — 测试网部署验收：离线不变量 + 链上只读核对（--offline 跳过网络）。
+ * verify_deployment — 部署验收（v10）：离线不变量 + 链上只读核对（--offline 跳过网络）。
  *
- * 默认 STRICT（严格）模式：开轮前必检项必须全部 PASS——协议配置 17 项、Jetton Wallet code hash、
- * teamVault.controller 实际地址比对、pendingQueryId 清零、注资登记等；
+ * 默认 STRICT（严格）模式：开轮前必检项必须全部 PASS——协议配置 17 项 + 5 个地址槽（keeper /
+ * jettonMaster / RC 钱包 / teamWallet）、RC 与 Jetton Wallet code hash、RC 钱包推导一致、
+ * RC 钱包 = 82 亿、注资登记等；
  * getter 失败或返回栈异常一律 FAIL，绝不以 WARN 静默跳过。
  * --lenient 才降级为 WARN（仅排查阶段使用，不可作为开轮依据）。
  */
@@ -14,7 +15,7 @@ import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens, networkName, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress, resolveWalletAddress } from './lib/step.mjs';
-import { addressEquals, addressFromStackItem, findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, parseAddress, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { addressEquals, addressFromStackItem, findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getJettonWalletBalance, getRoundView, getTonBalance, parseAddress, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
 import { CHECK_STATUS, check, verifyAllocationInvariant, verifyFundingPlan, verifyLadder, verifyRegistryStructure } from './lib/verify.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, summary } from './lib/log.mjs';
@@ -112,17 +113,23 @@ for (const item of fundingPlan) {
 
 const controller = resolveContractAddress(registry, 'roundController');
 const jettonMaster = resolveContractAddress(registry, 'jettonMaster');
-const teamVault = resolveContractAddress(registry, 'teamVault');
+const keeper = resolveWalletAddress(registry, 'keeper');
+const teamWallet = resolveWalletAddress(registry, 'teamWallet');
 
 if (!offline) {
-  section('链上只读核对（TON Center testnet）');
+  section('链上只读核对（TON Center ' + networkName() + '）');
   const netCheck = async (name, fn) => {
     try { await fn(); } catch (error) { add(check(name, strict ? CHECK_STATUS.FAIL : CHECK_STATUS.WARN, '读取失败：' + String(error.message || error).slice(0, 200))); }
   };
+  const sameAddress = (stackItem, expected) => {
+    const onchain = addressFromStackItem(stackItem);
+    const parsed = expected ? parseAddress(expected) : null;
+    const same = Boolean(onchain && parsed && parsed.ok && onchain.wc === parsed.workchain && onchain.hashHex.toLowerCase() === parsed.hashHex.toLowerCase());
+    return { same, onchain: onchain ? onchain.wc + ':' + onchain.hashHex : '无法解析', expected: parsed && parsed.ok ? parsed.raw : '未登记' };
+  };
 
   const rcWallet = resolveContractAddress(registry, 'roundControllerJettonWallet');
-  const tvWallet = resolveContractAddress(registry, 'teamVaultJettonWallet');
-  for (const [key, address] of [['jettonMaster', jettonMaster], ['roundController', controller], ['teamVault', teamVault], ['roundControllerJettonWallet', rcWallet], ['teamVaultJettonWallet', tvWallet]]) {
+  for (const [key, address] of [['jettonMaster', jettonMaster], ['roundController', controller], ['roundControllerJettonWallet', rcWallet]]) {
     if (!address) { addRequired('account.' + key, strict ? CHECK_STATUS.FAIL : CHECK_STATUS.SKIP, strict ? '未登记（STRICT：合约地址缺失）' : '未登记（--lenient：跳过）'); continue; }
     await netCheck('account.' + key, async () => {
       const info = await getAddressInformation(params, address);
@@ -131,61 +138,40 @@ if (!offline) {
     });
   }
 
-  const addressHashFromSlice = (item) => {
-    const parsed = addressFromStackItem(item);
-    return parsed ? parsed.hashHex : null;
-  };
-  const tryGetMethod = async (address, methods) => {
-    for (const method of methods) {
-      try {
-        const result = await runGetMethod(params, address, method);
-        if (result.exit_code !== undefined && result.exit_code !== 0) continue;
-        return { method, stack: result.stack || [] };
-      } catch (error) { /* try next */ }
-    }
-    return null;
-  };
-
+  // v10：RC 在链上自行推导 Jetton Wallet；master.get_wallet_address(RC) 与 RC.get_jetton_wallet_address() 必须一致
   if (jettonMaster && controller) {
     await netCheck('jetton.wallet.rc', async () => {
       const wallet = await findJettonWallet(params, jettonMaster, controller);
-      const actual = wallet ? wallet.address : canonicalViaActon(jettonMaster, controller);
-      addRequired('jetton.wallet.rc', gateStatus(Boolean(actual && rcWallet && addressEquals(actual, rcWallet))), actual ? actual + ' vs registry ' + (rcWallet || '未登记') : '未解析（get_wallet_address 与 TON Center 均失败）');
-    });
-    await netCheck('jetton.wallet.tv', async () => {
-      const wallet = await findJettonWallet(params, jettonMaster, teamVault);
-      const actual = wallet ? wallet.address : canonicalViaActon(jettonMaster, teamVault);
-      addRequired('jetton.wallet.tv', gateStatus(Boolean(actual && tvWallet && addressEquals(actual, tvWallet))), actual ? actual + ' vs registry ' + (tvWallet || '未登记') : '未解析（get_wallet_address 与 TON Center 均失败）');
-    });
-    await netCheck('jetton.wallet.teamWallet', async () => {
-      const teamWallet = resolveWalletAddress(registry, 'teamWallet');
-      if (!teamWallet) { addRequired('jetton.wallet.teamWallet', strict ? CHECK_STATUS.FAIL : CHECK_STATUS.WARN, strict ? 'teamWallet 未登记（STRICT：开轮前必须登记）' : 'teamWallet 未登记（--lenient：仅提示）'); return; }
-      const wallet = await findJettonWallet(params, jettonMaster, teamWallet);
-      const actual = wallet ? wallet.address : canonicalViaActon(jettonMaster, teamWallet);
-      const recorded = resolveContractAddress(registry, 'teamWalletJettonWallet');
-      addRequired('jetton.wallet.teamWallet', gateStatus(Boolean(actual && recorded && addressEquals(actual, recorded))), actual ? actual + ' vs registry ' + (recorded || '未登记') : '未解析（get_wallet_address 与 TON Center 均失败）');
+      const viaMaster = wallet ? wallet.address : canonicalViaActon(jettonMaster, controller);
+      const rcSelf = await runGetMethod(params, controller, 'get_jetton_wallet_address');
+      const selfCheck = viaMaster ? sameAddress((rcSelf.stack || [])[0], viaMaster) : { same: false, onchain: '?', expected: '?' };
+      const registryOk = Boolean(viaMaster && rcWallet && addressEquals(viaMaster, rcWallet));
+      addRequired('jetton.wallet.rc', gateStatus(registryOk && selfCheck.same), 'master.get_wallet_address(RC)=' + (viaMaster || '未解析') + '；RC.get_jetton_wallet_address=' + selfCheck.onchain + '；registry=' + (rcWallet || '未登记'));
     });
   }
-  for (const [key, address, buildName] of [['roundController', controller, 'RoundController'], ['teamVault', teamVault, 'TeamVault']]) {
-    if (!address) continue;
-    await netCheck(key + '.code_hash', async () => {
-      const info = await getAddressInformation(params, address);
-      const actual = hexFromCodeHashField(info) || codeHashViaActon(address);
-      const expected = loadBuildCodeHash(buildName);
+  if (controller) {
+    await netCheck('roundController.code_hash', async () => {
+      const info = await getAddressInformation(params, controller);
+      const actual = hexFromCodeHashField(info) || codeHashViaActon(controller);
+      const expected = loadBuildCodeHash('RoundController');
       const same = Boolean(actual && expected && actual === expected);
-      const detailText = same
+      addRequired('roundController.code_hash', same ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, same
         ? '一致：' + actual
-        : '线上 ' + (actual || '无法读取（TON Center 未返回 code_hash 且本机 acton 不可用）') + ' ≠ contracts/build ' + (expected || '?') +
-          '：线上实例与 contracts/build 不一致（可能未重部署），必须重部署到当前构建后再开轮';
-      addRequired(key + '.code_hash', same ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, detailText);
+        : '线上 ' + (actual || '无法读取') + ' ≠ contracts/build ' + (expected || '?') + '：线上实例与当前构建不一致，必须重部署后再开轮');
+    });
+    await netCheck('ton.balance.roundController', async () => {
+      const balance = await getTonBalance(params, controller);
+      const ton = Number(BigInt(balance.balanceNano)) / 1e9;
+      const minTon = Number(params.tonBalances.roundControllerMinTon);
+      add(check('ton.balance.roundController', ton >= minTon ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, ton.toFixed(2) + ' TON（建议 ≥' + minTon + '）'));
     });
   }
-  for (const [key, address, minTon] of [['roundController', controller, 20], ['teamVault', teamVault, 10]]) {
-    if (!address) continue;
-    await netCheck('ton.balance.' + key, async () => {
-      const balance = await getTonBalance(params, address);
+  if (keeper) {
+    await netCheck('ton.balance.keeper', async () => {
+      const balance = await getTonBalance(params, keeper);
       const ton = Number(BigInt(balance.balanceNano)) / 1e9;
-      add(check('ton.balance.' + key, ton >= minTon ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, ton.toFixed(2) + ' TON（建议 ≥' + minTon + '）'));
+      const minTon = Number(params.tonBalances.keeperMinTon);
+      add(check('ton.balance.keeper', ton >= minTon ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, ton.toFixed(2) + ' TON（建议 ≥' + minTon + '）'));
     });
   }
 
@@ -198,7 +184,7 @@ if (!offline) {
         supplySame ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL,
         supplySame
           ? data.totalSupplyRaw
-          : data.totalSupplyRaw + ' vs ' + params.token.totalSupplyRaw + '（差值可能来自已发生的测试销毁，新实例应为 1e19；如为旧实例请核对 burn 记录）'
+          : data.totalSupplyRaw + ' vs ' + params.token.totalSupplyRaw + '（新实例应为 1e19；已有失败轮时差值应等于累计销毁，用 reconcile.mjs --chain 核对）'
       ));
       add(check('jetton.mintable', data.mintable === false ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(data.mintable)));
       add(check('jetton.admin_null', data.adminNull === true ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, data.adminNull ? 'admin = null（mint 已关闭）' : 'admin 非 null：mint-once 未完成'));
@@ -215,6 +201,7 @@ if (!offline) {
     });
   }
 
+  let round1Status = null;
   if (controller) {
     await netCheck('rc.jetton_wallet_code_hash', async () => {
       const expectedHash = expectedJettonWalletCodeHash();
@@ -222,33 +209,25 @@ if (!offline) {
         addRequired('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, '缺少 contracts/build/JettonWallet.json 的 code hash；无法比对 RC.jettonWalletCode');
         return;
       }
-      try {
-        const result = await tryGetMethod(controller, ['get_jetton_wallet_code_hash']);
-        if (!result) {
-          addRequired('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'get_jetton_wallet_code_hash 调用失败（task-30 应提供该 getter）');
-          return;
-        }
-        const actual = stackItemToBigInt(result.stack[0]);
-        if (actual === null) { addRequired('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'getter 返回值无法解析为 uint256'); return; }
-        const actualHex = actual.toString(16).padStart(64, '0').slice(-64).toLowerCase();
-        const sameHash = actualHex === expectedHash;
-        addRequired(
-          'rc.jetton_wallet_code_hash',
-          sameHash ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL,
-          sameHash
-            ? '一致：0x' + actualHex
-            : '线上 0x' + actualHex + ' ≠ contracts/build 0x' + expectedHash + '：线上实例与 contracts/build 不一致（可能未重部署），必须重部署到当前构建后再开轮'
-        );
-      } catch (error) {
-        addRequired('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'get_jetton_wallet_code_hash 调用失败：' + String(error.message || error).slice(0, 160));
-      }
+      const result = await runGetMethod(params, controller, 'get_jetton_wallet_code_hash');
+      const actual = stackItemToBigInt((result.stack || [])[0]);
+      if (actual === null) { addRequired('rc.jetton_wallet_code_hash', CHECK_STATUS.FAIL, 'getter 返回值无法解析为 uint256'); return; }
+      const actualHex = actual.toString(16).padStart(64, '0').slice(-64).toLowerCase();
+      addRequired('rc.jetton_wallet_code_hash', actualHex === expectedHash ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, actualHex === expectedHash
+        ? '一致：0x' + actualHex
+        : '线上 0x' + actualHex + ' ≠ contracts/build 0x' + expectedHash);
     });
     await netCheck('rc.get_protocol_config', async () => {
       const response = await runGetMethod(params, controller, 'get_protocol_config');
       const stack = response.stack || [];
       const shapeOk = stack.length >= 22;
-      addRequired('rc.get_protocol_config.shape', gateStatus(shapeOk), '栈长度 ' + stack.length + '（期望 ≥22）' + (shapeOk ? '' : '：17 个配置项无法比对'));
+      addRequired('rc.get_protocol_config.shape', gateStatus(shapeOk), '栈长度 ' + stack.length + '（期望 ≥22）' + (shapeOk ? '' : '：配置项无法比对'));
       if (!shapeOk) return;
+      // v10 槽位（沿用 v8.9 形状）：0、1 = keeper，2 = jettonMaster，3 = RC 钱包，4 = teamWallet
+      for (const [index, key, expected] of [[0, 'keeper', keeper], [1, 'keeper.oracleSlot', keeper], [2, 'jettonMaster', jettonMaster], [3, 'stakingJettonWallet', rcWallet], [4, 'teamWallet', teamWallet]]) {
+        const result = sameAddress(stack[index], expected);
+        addRequired('rc.address.' + key, gateStatus(result.same), '链上 ' + result.onchain + ' vs registry ' + result.expected);
+      }
       const expected = expectedProtocolConfig(params);
       const indexes = [[5, 'p0UsdE8'], [6, 'priceMultiplier'], [7, 'roundRewardRaw'], [8, 'teamRoundRaw'], [9, 'minStakeRaw'], [10, 'maxStakePerAddressBps'], [11, 'maxTotalStakeRaw'], [12, 'previewSeconds'], [13, 'stakeDurationSeconds'], [14, 'candleSeconds'], [15, 'candleCount'], [16, 'minQualifiedCandles'], [17, 'observationSeconds'], [18, 'techAbortPauseSeconds'], [19, 'techAbortObservationTimeout'], [20, 'riskDisclosureVersion'], [21, 'configVersion']];
       for (const [index, key] of indexes) {
@@ -258,122 +237,35 @@ if (!offline) {
         addRequired('rc.config.' + key, gateStatus(same), '期望 ' + expectedValue + ' 链上 ' + (actual === null ? '?' : actual.toString()));
       }
     });
-  }
-
-  if (controller) {
     await netCheck('rc.round1', async () => {
-      const response = await runGetMethod(params, controller, 'get_round', [1]);
-      const stack = response.stack || [];
-      const shapeOk = stack.length >= 14;
-      addRequired('rc.round1.shape', gateStatus(shapeOk), '栈长度 ' + stack.length + '（期望 ≥14）' + (shapeOk ? '' : '：轮次检查无法进行'));
-      if (!shapeOk) return;
-      const status = Number(stackItemToBigInt(stack[1]));
-      const tier = Number(stackItemToBigInt(stack[2]));
-      const target = stackItemToBigInt(stack[3]);
-      const twap = stackItemToBigInt(stack[4]);
-      const reward = stackItemToBigInt(stack[6]);
-      const stakeOpen = stackItemToBigInt(stack[7]);
-      const stakeClose = stackItemToBigInt(stack[8]);
-      const obsStart = stackItemToBigInt(stack[9]);
-      const obsEnd = stackItemToBigInt(stack[10]);
-      add(check('rc.round1.status', status > 0 ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, 'status=' + status + (status > 0 ? '' : '（R1 未开，开轮前预期；开轮后必须重跑 --online）')));
-      if (status > 0) {
-        const ladderFloor = asBigInt(params.price.ladderRefUsdE8[String(tier)] || '0');
+      const view = await getRoundView(params, controller, 1);
+      addRequired('rc.round1.shape', gateStatus(Boolean(view)), view ? 'RoundView 19+ 字段' : 'get_round(1) 栈长度不足：轮次检查无法进行');
+      if (!view) return;
+      round1Status = view.status;
+      add(check('rc.round1.status', view.status > 0 ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, view.state + (view.status > 0 ? '' : '（R1 未开，开轮前预期；开轮后必须重跑 --online）')));
+      if (view.status > 0) {
+        const ladderFloor = asBigInt(params.price.ladderRefUsdE8[String(view.targetTier)] || '0');
+        const twap = view.targetTwap24hUsdE8;
         const minTarget = twap && twap > 0n ? (2n * twap > ladderFloor ? 2n * twap : ladderFloor) : ladderFloor;
-        addRequired('rc.round1.target_lock', target !== null && target >= minTarget ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, 'target=' + target + ' floor=' + minTarget + ' twap24h=' + twap);
-        addRequired('rc.round1.reward_budget', reward === asBigInt(params.rounds.roundRewardRaw) ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(reward));
-        addRequired('rc.round1.stake_window', stakeClose !== null && stakeOpen !== null && stakeClose - stakeOpen === BigInt(params.timeline.stakeDurationSeconds) ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, (stakeOpen || 0) + ' -> ' + (stakeClose || 0));
-        const obsValid = obsEnd !== null && obsStart !== null && obsEnd - obsStart === BigInt(params.timeline.observationSeconds);
-        const obsNotStarted = status <= 2 && (obsStart === null || obsStart === 0n) && (obsEnd === null || obsEnd === 0n);
-        add(check('rc.round1.observation_window', obsValid ? CHECK_STATUS.PASS : (obsNotStarted ? CHECK_STATUS.WARN : CHECK_STATUS.FAIL), (obsStart || 0) + ' -> ' + (obsEnd || 0) + (obsNotStarted ? '（STAKING_OPEN 尚未开始观察，正常）' : '')));
+        addRequired('rc.round1.target_lock', view.targetPriceUsdE8 !== null && view.targetPriceUsdE8 >= minTarget ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, 'target=' + view.targetPriceUsdE8 + ' floor=' + minTarget + ' twap24h=' + twap);
+        addRequired('rc.round1.reward_budget', view.rewardBudgetRaw === asBigInt(params.rounds.roundRewardRaw) ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(view.rewardBudgetRaw));
+        if (view.stakeOpenAt && view.stakeCloseAt) {
+          addRequired('rc.round1.stake_window', view.stakeCloseAt - view.stakeOpenAt === BigInt(params.timeline.stakeDurationSeconds) ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, view.stakeOpenAt + ' -> ' + view.stakeCloseAt);
+        }
       }
     });
-  }
-
-  if (teamVault) {
-    await netCheck('teamVault.pending_query_ids', async () => {
-      // 合约已冻结（tag v8.6-audit-fixed @ c24809a）：不为验收新增 getter。
-      // 用已有 get_round_state(roundId) 枚举 1..N 轮，等价判定「聚合 pendingQueryId 全为 0」：
-      //   queryId != 0 且既未 released 也未 burned ⇒ 存在卡住的 pending release/burn。
-      const roundCount = Number(params.rounds.roundCount || 10);
-      const pending = [];
-      const shapeIssues = [];
-      for (let roundId = 1; roundId <= roundCount; roundId += 1) {
-        let result;
-        try {
-          result = await runGetMethod(params, teamVault, 'get_round_state', [roundId]);
-        } catch (error) {
-          addRequired('teamVault.pending_query_ids', gateStatus(false), 'get_round_state(' + roundId + ') 调用失败：' + String(error.message || error).slice(0, 160));
+    // RC 注资：未开轮时 RC 钱包余额必须精确等于 82 亿；开轮后由 reconcile.mjs 按公式核对
+    if (rcWallet) {
+      await netCheck('rc.vault.balance', async () => {
+        const balance = await getJettonWalletBalance(params, rcWallet);
+        const expected = asBigInt(params.rounds.rcFundingRaw);
+        if (round1Status !== null && round1Status > 1) {
+          add(check('rc.vault.balance', balance !== null ? CHECK_STATUS.PASS : CHECK_STATUS.WARN, '已开轮：' + (balance === null ? '未读取' : formatTokens(balance.toString())) + ' A9（用 reconcile.mjs --chain 按公式核对）'));
           return;
         }
-        const stack = result.stack || [];
-        if (stack.length < 4) { shapeIssues.push('R' + roundId + ' 栈长度 ' + stack.length); continue; }
-        const released = stackItemToBigInt(stack[0]);
-        const burned = stackItemToBigInt(stack[1]);
-        const queryId = stackItemToBigInt(stack[3]);
-        if (queryId === null) { shapeIssues.push('R' + roundId + ' queryId 无法解析'); continue; }
-        const settled = (released !== null && released !== 0n) || (burned !== null && burned !== 0n);
-        if (queryId !== 0n && !settled) pending.push('R' + roundId + ':' + queryId.toString());
-      }
-      if (shapeIssues.length) {
-        addRequired('teamVault.pending_query_ids', gateStatus(false), 'get_round_state 返回栈异常：' + shapeIssues.slice(0, 3).join('；') + '（无法证明 pending 已清零）');
-        return;
-      }
-      const clear = pending.length === 0;
-      addRequired(
-        'teamVault.pending_query_ids',
-        gateStatus(clear),
-        clear
-          ? '枚举 R1..R' + roundCount + '：queryId=0 或已 released/burned（无卡住的 pending）'
-          : '存在未确认的 pending release/burn：' + pending.slice(0, 6).join('、')
-      );
-    });
-    await netCheck('teamVault.teamWalletJettonWallet', async () => {
-      const teamWalletOwner = resolveWalletAddress(registry, 'teamWallet');
-      const recorded = resolveContractAddress(registry, 'teamWalletJettonWallet');
-      let expectedHash = recorded ? parseAddress(recorded).hashHex : null;
-      if (jettonMaster && teamWalletOwner) {
-        try {
-          const canonical = await findJettonWallet(params, jettonMaster, teamWalletOwner);
-          if (canonical) expectedHash = parseAddress(canonical.address).hashHex;
-        } catch (error) { /* fallback to registry */ }
-      }
-      if (!expectedHash) { addRequired('teamVault.teamWalletJettonWallet', CHECK_STATUS.FAIL, '无法确定期望钱包：registry 未登记且 get_wallet_address(teamWallet) 失败'); return; }
-      try {
-        const response = await runGetMethod(params, teamVault, 'get_team_wallet_jetton_wallet');
-        const stack = response.stack || [];
-        const actualHash = addressHashFromSlice(stack[0]);
-        const same = actualHash && actualHash.toLowerCase() === expectedHash.toLowerCase();
-        addRequired('teamVault.teamWalletJettonWallet', same ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, same ? expectedHash : '链上 ' + (actualHash || '?') + ' vs canonical/get_wallet_address ' + expectedHash);
-      } catch (error) {
-        addRequired('teamVault.teamWalletJettonWallet', CHECK_STATUS.FAIL, 'get_team_wallet_jetton_wallet 调用失败（task-30 getter）：' + String(error.message || error).slice(0, 160));
-      }
-    });
-    await netCheck('teamVault.state', async () => {
-      const response = await runGetMethod(params, teamVault, 'get_team_vault_state');
-      const stack = response.stack || [];
-      const shapeOk = stack.length >= 8;
-      addRequired('teamVault.state.shape', gateStatus(shapeOk), '栈长度 ' + stack.length + '（期望 ≥8）' + (shapeOk ? '' : '：TeamVault 状态无法核对'));
-      if (!shapeOk) return;
-      const controllerSlot = stack[0];
-      const teamRound = stackItemToBigInt(stack[3]);
-      addRequired('teamVault.teamRoundRaw', teamRound === asBigInt(params.rounds.teamRoundRaw) ? CHECK_STATUS.PASS : CHECK_STATUS.FAIL, String(teamRound));
-      // controller 必须是 RC 本体：解析 slice/cell 里的 workchain+hash 与 RC 实际地址比对（不能只看类型）
-      const onchainController = addressFromStackItem(controllerSlot);
-      const rcParsed = controller ? parseAddress(controller) : null;
-      const sameController = Boolean(
-        onchainController && rcParsed && rcParsed.ok &&
-        onchainController.wc === rcParsed.workchain &&
-        onchainController.hashHex.toLowerCase() === rcParsed.hashHex.toLowerCase()
-      );
-      addRequired(
-        'teamVault.controller',
-        gateStatus(sameController),
-        sameController
-          ? 'controller = RC（' + onchainController.wc + ':' + onchainController.hashHex.slice(0, 16) + '…）'
-          : '链上 controller ' + (onchainController ? onchainController.wc + ':' + onchainController.hashHex : '无法解析（非地址 slice）') + ' vs RC ' + (rcParsed && rcParsed.ok ? rcParsed.raw : '未登记')
-      );
-    });
+        addRequired('rc.vault.balance', gateStatus(balance === expected), 'RC 钱包 ' + (balance === null ? '未读取' : balance.toString()) + ' vs 期望 82 亿 ' + expected + '（forward_ton_amount = 0 注资）');
+      });
+    }
   }
 }
 
@@ -385,8 +277,9 @@ const REQUIRED_FAMILIES = [
   { key: 'rc.config.', min: 17, label: '协议配置 17 项', prefix: true },
   { key: 'rc.jetton_wallet_code_hash', min: 1, label: 'Jetton Wallet code hash' },
   { key: 'rc.round1.shape', min: 1, label: 'get_round(1) 结构' },
-  { key: 'teamVault.controller', min: 1, label: 'teamVault.controller 地址比对' },
-  { key: 'teamVault.pending_query_ids', min: 1, label: 'pendingQueryId 清零' },
+  { key: 'rc.address.', min: 5, label: 'keeper / jettonMaster / RC 钱包 / teamWallet 地址比对', prefix: true },
+  { key: 'jetton.wallet.rc', min: 1, label: 'RC 钱包推导一致' },
+  { key: 'rc.vault.balance', min: 1, label: 'RC 82 亿注资' },
 ];
 if (offline) {
   info('OFFLINE：链上必检项未执行（离线验收不构成开轮依据，开轮前必须再跑 --online）。');

@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-/** 80 — 管理员/keeper 操作：开轮/关窗/暂停恢复/结算/技术终止/K 线提交（最小权限，默认 dry-run）。 */
+/** 80 — keeper / 运维操作（v10）：开轮、关窗、K 线、技术终止、结算重试（默认 dry-run；无 admin）。 */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { requireConfirm, flag, str } from './lib/cli.mjs';
 import { resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveAddress, signerWallet } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
-import { getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
+import { decodeRoundView, getTonBalance, runGetMethod } from './lib/ton.mjs';
+import { pendingSettlementActions } from './lib/ledger.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
 
 const { args, execute, params, registry } = bootstrap({
   id: '80',
-  title: '管理员/keeper 操作（最小权限）',
+  title: 'keeper / 运维操作（v10）',
   dependsOn: ['register'],
 });
 
@@ -24,25 +25,20 @@ const CANDLE_SECONDS = Number(params.timeline.candleSeconds);
 
 const ACTIONS = {
   status: { op: null, mutating: false, desc: '读取协议/轮次状态（只读）' },
-  'open-round': { op: opcodes.OpenRound, mutating: true, desc: '开轮：锁定 target = max(P0×2^tier, 2×开窗 24h TWAP)，仅 owner' },
-  'close-staking': { op: opcodes.CloseStaking, mutating: true, desc: '关报名：正常到点或触价提前关窗' },
-  'pause-oracle': { op: opcodes.PauseOracle, mutating: true, desc: '暂停预言机（技术故障，不判负、不销毁）' },
-  'resume-oracle': { op: opcodes.ResumeOracle, mutating: true, desc: '恢复预言机：重新收满 24 根 K 线' },
-  'finalize-round': { op: opcodes.FinalizeRound, mutating: true, desc: '结算：成功/失败/无质押分支' },
-  'start-observation': { op: opcodes.StartObservation, mutating: true, desc: '开始观察（测试网手动入口）' },
-  'submit-candle': { op: opcodes.SubmitCandle, mutating: true, desc: '提交单根/多根 1h K 线（测试网手动模式，body 0x52540003）' },
-  'oracle-candle': { op: opcodes.OracleCandleVerified, mutating: true, unsupported: true, desc: 'OracleCandleVerified（0x52540004）；当前 RC 无 handler，仅 phase-2；本版本禁止广播' },
-  'abort-technical': { op: opcodes.AbortTechnical, mutating: true, desc: '技术终止：连续暂停 14 天或观察超时 7 天，任何人可触发' },
-  'retry-pending': { op: opcodes.RetryPendingActions, mutating: true, desc: '重试 pending 的跨合约动作（RetryPendingActions 无权限校验，任何人可触发）' },
+  'open-round': { op: opcodes.OpenRound, mutating: true, signer: 'keeper', desc: '开轮（仅 keeper）：预告结束后，锁定 target = max(P0×2^tier, 2×开窗 24h TWAP)' },
+  'close-staking': { op: opcodes.CloseStaking, mutating: true, signer: 'anyone', desc: '关报名（任何人）：36h 报名窗口到期后才可调' },
+  'submit-candle': { op: opcodes.SubmitCandle, mutating: true, signer: 'keeper', desc: '提交 1h K 线（仅 keeper，body 0x52540003）；第 24 根提交即判定' },
+  'abort-technical': { op: opcodes.AbortTechnical, mutating: true, signer: 'anyone', desc: '技术终止（任何人）：观察应结束后 7 天未判定，或预告结束后 7 天未开轮' },
+  'retry-settlement': { op: opcodes.RetrySettlement, mutating: true, signer: 'anyone', desc: '重试结算动作（任何人，≥ 0.3 TON）：出现 SettlementBounced 事件后对该轮调用' },
 };
 
 const FORBIDDEN = {
-  'modify-target': '禁止：管理员不得修改已开轮目标价（D-24 / docs/00 §1）',
-  'cancel-stake': '禁止：不存在取消质押通道（V5.3）；唯一退款路径是 TECHNICAL_ABORTED',
-  'manual-refund': '禁止：管理员不得手工退款/转移用户质押本金（D-24）',
-  'set-code': '禁止：RoundController 不可升级（D-24，无代理/setCode）',
-  'force-succeed': '禁止：管理员不得把失败轮改为成功，终态不可逆（docs/02 §1）',
-  'skip-round': '禁止：不允许跳过未终态轮次（docs/02 §3）',
+  'modify-target': '禁止：v10 没有 admin，任何人都不能修改已开轮目标价（D-42）',
+  'cancel-stake': '禁止：不存在取消质押通道；技术终止轮的本金由用户自行 Claim',
+  'manual-refund': '禁止：没有任何人能转移用户质押本金或提走 RC 资金（D-42）',
+  'set-code': '禁止：RoundController 不可升级（无代理/setCode）',
+  'force-succeed': '禁止：终态不可逆，失败轮不能改为成功',
+  'skip-round': '禁止：不允许跳过未终态轮次',
 };
 
 section('操作请求');
@@ -60,16 +56,13 @@ if (FORBIDDEN[action]) {
 }
 const spec = ACTIONS[action];
 if (!spec) {
-  fail('未知动作：' + action + '；可用：' + Object.keys(ACTIONS).join(', '));
-  process.exit(finish());
-}
-if (spec.unsupported) {
-  fail(spec.desc);
-  info('oracle-candle 仅可用于消息体/对账联调，当前 RC 不可升级且无该 handler；禁止广播。');
-  process.exit(finish({ 结果: 'UNSUPPORTED' }));
+  fail('未知动作：' + action + '（v10 只保留：' + Object.keys(ACTIONS).join(', ') + '）');
+  finish({ 结果: 'UNKNOWN_ACTION' });
+  process.exit(1);
 }
 kv('说明', spec.desc);
 kv('opcode', spec.op || '（只读）');
+if (spec.signer) kv('谁可以发', spec.signer === 'keeper' ? 'keeper（A9_SIGNER_WALLET 必须是 keeper 钱包）' : '任何人');
 if (!controller) {
   fail('RoundController 未登记：先完成部署或 --adopt');
   process.exit(finish());
@@ -86,9 +79,12 @@ if (execute || flag(args, 'online')) {
       const stack = (response.stack || []).map((item) => (item && item.type === 'num' ? item.value : item && item.type));
       kv('get_round(' + roundId + ') stack', JSON.stringify(stack).slice(0, 600));
       if (stack.length > 0) {
-        const statuses = ['UNOPENED', 'PREVIEW', 'STAKING_OPEN', 'STAKING_CLOSED', 'OBSERVING', 'ORACLE_PAUSED', 'SETTLING_SUCCESS', 'SETTLING_FAILURE', 'SUCCEEDED', 'FAILED_PERMANENT', 'TECHNICAL_ABORTED'];
-        const statusIndex = Number(stackItemToBigInt({ value: stack[1] }));
-        if (!Number.isNaN(statusIndex) && statuses[statusIndex]) kv('轮次状态', statuses[statusIndex]);
+        const view = decodeRoundView(response.stack || []);
+        if (view) {
+          kv('轮次状态', view.state);
+          const pending = pendingSettlementActions(view);
+          if (pending && pending.length) warn('结算动作未确认：' + pending.join(', ') + ' → node scripts/80_admin_ops.mjs --action retry-settlement --round ' + roundId);
+        }
       }
     }
   } catch (error) {
@@ -99,23 +95,24 @@ if (execute || flag(args, 'online')) {
 }
 
 if (action === 'status') {
-  printNextSteps(['写操作示例：node scripts/80_admin_ops.mjs --action pause-oracle --round 3（需 OPS_EXECUTE=1 与 OPS_CONFIRM=YES）']);
+  printNextSteps(['写操作示例：node scripts/80_admin_ops.mjs --action retry-settlement --round 3（需 OPS_EXECUTE=1 与 OPS_CONFIRM=YES）']);
   process.exit(finish({ 结果: 'READ_ONLY' }));
 }
 
 section('执行前检查');
 if (spec.mutating && execute) requireConfirm('管理员操作 ' + action);
-if (roundId < 1 && !['abort-technical', 'retry-pending', 'pause-oracle', 'resume-oracle'].includes(action)) {
+if (roundId < 1 && ['submit-candle', 'retry-settlement'].includes(action)) {
   fail('该动作需要 --round <1..10>');
   process.exit(finish());
 }
-if (action === 'retry-pending') {
-  detail('RetryPendingActions 无权限校验，任何人可触发；入口要求消息 value ≥ 0.3 TON（admin_op 统一按 0.3 TON 发送）。');
+if (action === 'retry-settlement') {
+  detail('RetrySettlement 任何人可触发；入口要求消息 value ≥ 0.3 TON（admin_op 统一按 0.3 TON 发送）。触发依据：SettlementBounced(roundId, action) 事件。');
 }
 if (action === 'abort-technical') {
-  detail('技术终止的合法条件：连续暂停 >= 14 天，或观察结束超时 >= 7 天。');
-  detail('不满足条件时合约会 revert；提前触发失败会被审计日志记录。任何地址均可触发，owner 不独占。');
+  detail('技术终止的合法条件：观察应结束后 7 天仍未判定，或预告结束后 7 天仍未开轮（keeper 失联）。');
+  detail('不满足条件时合约会拒绝；任何地址均可触发。终止轮本金可领，7 亿奖励 + 1.2 亿团队额度留在 RC。');
 }
+if (spec.signer === 'keeper') detail('该动作只接受 keeper 签名：A9_SIGNER_WALLET 必须是登记表 wallets.keeper 对应的 Acton 钱包，否则合约报 NotKeeper。');
 
 function toInt(value, label) {
   const text = String(value ?? '').trim();
@@ -307,8 +304,8 @@ if (action === 'open-round') {
   extraParts.push(twap);
   detail('admin_op 位置参数：open-round <roundId> <twap24h>；target = max(P0×2^tier, 2×TWAP24h)，TWAP24h 由 keeper 提供。');
 }
-if (action === 'close-staking') extraParts.push(str(args, 'twap1h', '0'));
-if (action === 'pause-oracle') extraParts.push(str(args, 'reason', '0'));
+if (action === 'close-staking') extraParts.push('0'); // v10 忽略 twap1h
+if (action === 'abort-technical' || action === 'retry-settlement') extraParts.push('0');
 detail('dest=' + controller + ' op=' + action + ' round=' + (roundId || 0) + ' value/extra=' + (extraParts.join(' ') || '（无）') + ' signer=' + signer);
 
 if (!hasCommand(params, 'adminOp')) {
@@ -338,7 +335,7 @@ if (result.status !== 0) {
   process.exit(finish({ 结果: 'FAILED', 动作: action }));
 }
 ok('操作已提交：' + action + '（等待链上确认后核对事件/状态）');
-const note = new Date().toISOString() + ' admin op ' + action + ' round=' + roundId + ' tx=' + (str(args, 'tx') || 'unknown');
+const note = new Date().toISOString() + ' ops action ' + action + ' round=' + roundId + ' tx=' + (str(args, 'tx') || 'unknown');
 registry.notes = Array.isArray(registry.notes) ? registry.notes : (registry.notes ? [String(registry.notes)] : []);
 registry.notes.push(note);
 process.exit(finish({ 结果: 'SUBMITTED', 动作: action }));

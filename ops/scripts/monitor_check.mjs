@@ -1,9 +1,20 @@
 #!/usr/bin/env node
-/** monitor_check — 监控检查与告警：worker 健康、K 线缺失、预言机暂停、销毁 pending、供应量漂移、管理员操作。 */
+/**
+ * monitor_check — 监控检查与告警（v10）：worker 健康、K 线缺失、报名/判定超时、结算退回（SettlementBounced →
+ * RetrySettlement）、UnexpectedBounce、一笔销毁金额、团队释放、供应量漂移、RC 钱包公式、keeper gas、运维事件。
+ *
+ * 数据源：--snapshot <json>（离线）或 worker API；--chain 额外读链上（RC 事件、get_round 结算标志、RC 钱包余额、keeper TON）。
+ * --auto-retry：对待重试的轮次调用 80_admin_ops.mjs --action retry-settlement（仍需 OPS_EXECUTE=1 OPS_CONFIRM=YES 才广播）。
+ */
 
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { loadAndValidate } from './lib/config.mjs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { asBigInt, loadAndValidate } from './lib/config.mjs';
 import { loadRegistry } from './lib/registry.mjs';
+import { expectedRcVault, expectedSettlement, pendingSettlementActions } from './lib/ledger.mjs';
+import { fetchRcEvents, getJettonWalletBalance, getRoundView, getTonBalance } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, table, summary, detail } from './lib/log.mjs';
 
 const args = process.argv.slice(2);
@@ -18,6 +29,8 @@ const snapshotPath = getArg('snapshot');
 const apiBase = getArg('api', process.env.OPS_WORKER_BASE_URL || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const notify = args.includes('--notify');
 const jsonOut = args.includes('--json');
+const withChain = args.includes('--chain');
+const autoRetry = args.includes('--auto-retry');
 
 const { params, errors } = loadAndValidate();
 if (errors.length) { for (const message of errors) fail(message); process.exit(2); }
@@ -41,6 +54,7 @@ if (snapshotPath) {
     stats: snapshot.stats || {},
     rounds: snapshot.rounds || [],
     admin: snapshot.admin || null,
+    chain: snapshot.chain || null,
     now: snapshot.now || (snapshot.health && snapshot.health.now) || Date.now(),
   };
 } else {
@@ -66,6 +80,29 @@ if (snapshotPath) {
   }
 }
 
+// 链上补充数据：RC 事件、每轮结算标志、RC 钱包余额、keeper TON（快照里用 chain 字段模拟）
+if (withChain && !snapshotPath) {
+  const rc = registry.contracts.roundController && registry.contracts.roundController.address;
+  const rcWallet = registry.contracts.roundControllerJettonWallet && registry.contracts.roundControllerJettonWallet.address;
+  const keeper = registry.wallets.keeper && registry.wallets.keeper.address;
+  const chain = { events: [], pendingSettlement: {} };
+  try {
+    if (rc) {
+      chain.events = await fetchRcEvents(params, rc, { limit: 50 });
+      for (const round of data.rounds || []) {
+        if (!['SUCCEEDED', 'FAILED_PERMANENT'].includes(String(round.state))) continue;
+        const pending = pendingSettlementActions(await getRoundView(params, rc, Number(round.roundId)));
+        if (pending && pending.length) chain.pendingSettlement[round.roundId] = pending;
+      }
+    }
+    if (rcWallet) { const balance = await getJettonWalletBalance(params, rcWallet); chain.rcJettonBalanceRaw = balance === null ? null : balance.toString(); }
+    if (keeper) chain.keeperTonNano = (await getTonBalance(params, keeper)).balanceNano;
+  } catch (error) {
+    warn('链上读取失败（继续用 API 数据）：' + String(error.message || error));
+  }
+  data.chain = chain;
+}
+
 const now = Number(data.now);
 const health = data.health || {};
 const stats = data.stats || {};
@@ -78,7 +115,8 @@ const levelRank = { P0: 4, P1: 3, P2: 2, P3: 1 };
 section('监控检查');
 kv('数据源', snapshotPath ? 'snapshot: ' + snapshotPath : 'API: ' + apiBase);
 kv('模拟时间', new Date(now).toISOString());
-kv('阈值', 'health stale ' + thresholds.healthStaleMinutes + 'm / candle lag ' + thresholds.candleLagAllowed + ' / burn pending ' + thresholds.burnPendingMinutes + 'm');
+kv('阈值', 'health stale ' + thresholds.healthStaleMinutes + 'm / candle lag ' + thresholds.candleLagAllowed + ' / keeper ≥ ' + thresholds.keeperMinTon + ' TON');
+kv('链上数据', data.chain ? '已加载' : '未启用（--chain 开启）');
 
 const checks = [];
 function record(name, healthy, conditional) {
@@ -91,8 +129,6 @@ record('worker.db', health.db !== false, () => add('worker.db', 'P0', 'D1 数据
 const ageMinutes = (Date.now() - Number(health.now || 0)) / 60000;
 record('worker.clock', snapshotPath ? true : ageMinutes < thresholds.healthStaleMinutes, () => add('cron.heartbeat', 'P1', 'worker 心跳过期', 'health.now 距今 ' + ageMinutes.toFixed(1) + ' 分钟（> ' + thresholds.healthStaleMinutes + '）', 'runbooks/03_monitoring_alerting.md#P1'));
 
-const oracle = stats.oracle || {};
-record('oracle.online', oracle.paused !== true && oracle.online !== false, () => add('oracle.paused', 'P1', '预言机暂停/离线', 'paused=' + oracle.paused + ' online=' + oracle.online + ' validSources=' + oracle.validSources, 'runbooks/03_monitoring_alerting.md#pause'));
 
 const supplyLedger = stats.supplyRaw === undefined ? null : BigInt(String(stats.supplyRaw));
 const totalSupply = BigInt(String(config.totalSupplyRaw || params.token.totalSupplyRaw));
@@ -110,59 +146,98 @@ if (chainSupply !== null && supplyLedger !== null) {
 
 const CANDLE_MS = Number(params.timeline.candleSeconds) * 1000;
 const GRACE_MS = 60 * 60 * 1000;
+const ABORT_MS = Number(params.techAbort.abortTimeoutSeconds) * 1000;
+const RB = 'runbooks/03_monitoring_alerting.md';
+const retryRounds = new Set();
 for (const round of rounds) {
   const state = String(round.state);
   const roundId = round.roundId;
-  if (['STAKING_OPEN', 'STAKING_CLOSED', 'OBSERVING', 'ORACLE_PAUSED', 'SETTLING_SUCCESS', 'SETTLING_FAILURE'].includes(state)) {
-    if (state === 'STAKING_OPEN' && round.stakeCloseAt && now > Number(round.stakeCloseAt) + GRACE_MS) {
-      add('round.' + roundId + '.close_overdue', 'P1', 'R' + roundId + ' 报名窗口未按时关闭', 'stakeCloseAt=' + new Date(Number(round.stakeCloseAt)).toISOString() + ' 已超过 1h 仍为 STAKING_OPEN', 'runbooks/03_monitoring_alerting.md#P1');
+  if (state === 'STAKING_OPEN' && round.stakeCloseAt && now > Number(round.stakeCloseAt) + GRACE_MS) {
+    add('round.' + roundId + '.close_overdue', 'P2', 'R' + roundId + ' 报名窗口到期未关', 'stakeCloseAt 已过 1h 仍为 STAKING_OPEN：任何人可 CloseStaking（keeper 的第一根 K 线也会隐式关窗）', RB + '#P2');
+  }
+  if (state === 'OBSERVING' && round.observationStart) {
+    const expected = Math.min(Number(params.timeline.candleCount), Math.floor((now - Number(round.observationStart)) / CANDLE_MS));
+    const lag = expected - Number(round.candlesSeen || 0);
+    if (lag > thresholds.candleLagAllowed) {
+      add('round.' + roundId + '.candle_missing', 'P1', 'R' + roundId + ' K 线缺失', 'expected=' + expected + ' seen=' + round.candlesSeen + ' lag=' + lag + '：检查 keeper 进程与 keeper 钱包 gas', RB + '#P1');
     }
-    if (state === 'OBSERVING' && round.observationStart) {
-      const expected = Math.min(Number(params.timeline.candleCount), Math.floor((now - Number(round.observationStart)) / CANDLE_MS));
-      const lag = expected - Number(round.candlesSeen || 0);
-      if (lag > thresholds.candleLagAllowed) {
-        add('round.' + roundId + '.candle_missing', 'P1', 'R' + roundId + ' K 线缺失', 'expected=' + expected + ' seen=' + round.candlesSeen + ' lag=' + lag, 'runbooks/03_monitoring_alerting.md#P1');
-      }
-      if (round.observationEnd && now > Number(round.observationEnd) + GRACE_MS) {
-        add('round.' + roundId + '.finalize_overdue', 'P1', 'R' + roundId + ' 观察结束未结算', 'observationEnd 已过 1h 仍为 OBSERVING', 'runbooks/03_monitoring_alerting.md#P1');
-      }
-    }
-    if (state === 'ORACLE_PAUSED') add('round.' + roundId + '.paused', 'P1', 'R' + roundId + ' 预言机暂停', '暂停期间不得判定失败；连续 14 天可技术终止', 'runbooks/04_key_custody_admin.md#tech-abort');
-    if (state === 'SETTLING_FAILURE' || state === 'SETTLING_SUCCESS') {
-      const updated = Number(round.updatedAt || 0);
-      if (updated && now - updated > thresholds.burnPendingMinutes * 60000) {
-        add('round.' + roundId + '.settling_timeout', 'P0', 'R' + roundId + ' 结算卡住', '处于 ' + state + ' 超过 ' + thresholds.burnPendingMinutes + ' 分钟', 'runbooks/03_monitoring_alerting.md#P0');
-      }
-    }
-    if ((round.updatedAt || 0) && now - Number(round.updatedAt) > 15 * 60000) {
-      add('round.' + roundId + '.stale', 'P2', 'R' + roundId + ' 数据 15 分钟未更新', '前端/索引可能停更', 'runbooks/03_monitoring_alerting.md#P2');
+    if (round.observationEnd && now > Number(round.observationEnd) + GRACE_MS) {
+      const abortable = now > Number(round.observationEnd) + ABORT_MS;
+      add('round.' + roundId + '.settle_overdue', abortable ? 'P0' : 'P1', 'R' + roundId + ' 观察结束未判定', abortable ? '已超过 7 天：任何人可 AbortTechnical（本金可领）' : 'observationEnd 已过 1h 仍为 OBSERVING：keeper 未提交满 24 根 K 线', RB + '#P1');
     }
   }
-  if (state === 'FAILED_PERMANENT' && (!round.burnedRaw || BigInt(String(round.burnedRaw)) === 0n)) {
-    add('round.' + roundId + '.burn_pending', 'P0', 'R' + roundId + ' 失败但销毁未确认', 'FAILED_PERMANENT 且 burnedRaw=0：三笔销毁必须链上确认', 'runbooks/03_monitoring_alerting.md#P0');
+  if (['STAKING_OPEN', 'OBSERVING'].includes(state) && (round.updatedAt || 0) && now - Number(round.updatedAt) > 15 * 60000) {
+    add('round.' + roundId + '.stale', 'P2', 'R' + roundId + ' 数据 15 分钟未更新', '前端/索引可能停更', RB + '#P2');
   }
-  if (state === 'FAILED_PERMANENT' && round.burnedRaw && BigInt(String(round.burnedRaw)) > 0n) {
-    const expected = BigInt(String(params.rounds.roundRewardRaw)) + BigInt(String(params.rounds.teamRoundRaw)) + BigInt(String(round.totalAcceptedStakeRaw || 0));
-    if (BigInt(String(round.burnedRaw)) !== expected) {
-      add('round.' + roundId + '.burn_mismatch', 'P0', 'R' + roundId + ' 销毁金额异常', 'recorded=' + round.burnedRaw + ' expected=' + expected, 'runbooks/03_monitoring_alerting.md#reconcile');
+  const settlement = expectedSettlement(params, state, round.totalAcceptedStakeRaw);
+  if (settlement) {
+    const burned = round.burnedRaw === null || round.burnedRaw === undefined ? null : asBigInt(round.burnedRaw);
+    if (burned !== null && burned !== settlement.burnRaw) {
+      const level = settlement.burnRaw > 0n && burned === 0n ? 'P1' : 'P0';
+      add('round.' + roundId + '.burn_mismatch', level, 'R' + roundId + ' 销毁金额异常', state + ' recorded=' + burned + ' expected=' + settlement.burnRaw + (burned === 0n ? '：销毁可能被退回 → 查 SettlementBounced，RetrySettlement' : ''), RB + '#reconcile');
+      if (burned === 0n) retryRounds.add(roundId);
+    }
+    const released = round.teamReleasedRaw === null || round.teamReleasedRaw === undefined ? null : asBigInt(round.teamReleasedRaw);
+    if (released !== null && released !== settlement.teamReleaseRaw) {
+      add('round.' + roundId + '.team_release_mismatch', released === 0n ? 'P1' : 'P0', 'R' + roundId + ' 团队释放异常', state + ' recorded=' + released + ' expected=' + settlement.teamReleaseRaw + (released === 0n ? '：团队转账可能被退回 → RetrySettlement' : ''), RB + '#reconcile');
+      if (released === 0n) retryRounds.add(roundId);
+    }
+  }
+}
+
+// 链上事件：SettlementBounced → RetrySettlement；UnexpectedBounce → 人工核查
+const chain = data.chain || null;
+if (chain) {
+  const events = chain.events || [];
+  const pendingByRound = chain.pendingSettlement || {};
+  for (const event of events.filter((item) => item.type === 'SettlementBounced')) {
+    const pending = pendingByRound[event.roundId];
+    // 链上 *Confirmed 标志已恢复 = 已重试成功；快照可用 resolved: true 表示
+    if (event.resolved === true || (chain.pendingSettlement && pending === undefined && !snapshotPath)) continue;
+    retryRounds.add(event.roundId);
+    add('settlement.bounced.R' + event.roundId, 'P1', 'R' + event.roundId + ' 结算动作被退回（' + (event.action === 1 ? '团队转账' : event.action === 2 ? '销毁' : 'action ' + event.action) + '）', '处理：node ops/scripts/80_admin_ops.mjs --action retry-settlement --round ' + event.roundId + '（任何人可调，≥ 0.3 TON）', RB + '#settlement-bounced');
+  }
+  for (const [roundId, pending] of Object.entries(pendingByRound)) {
+    if (retryRounds.has(Number(roundId))) continue;
+    retryRounds.add(Number(roundId));
+    add('settlement.pending.R' + roundId, 'P1', 'R' + roundId + ' 结算动作未确认：' + pending.join(','), '处理：80_admin_ops.mjs --action retry-settlement --round ' + roundId, RB + '#settlement-bounced');
+  }
+  for (const event of events.filter((item) => item.type === 'UnexpectedBounce' && item.resolved !== true)) {
+    add('unexpected.bounce.' + (event.queryId || event.txHash || 'x'), 'P1', 'RC 收到意外退回（UnexpectedBounce）', 'op=' + event.op + ' queryId=' + event.queryId + '：领取/退款转账被退回，代币仍在 RC 钱包；人工核查对应用户与交易', RB + '#unexpected-bounce');
+  }
+  if (chain.keeperTonNano !== undefined && chain.keeperTonNano !== null) {
+    const ton = Number(BigInt(String(chain.keeperTonNano))) / 1e9;
+    record('keeper.ton', ton >= Number(thresholds.keeperMinTon), () => add('keeper.ton_low', 'P1', 'keeper 钱包 gas 不足', ton.toFixed(3) + ' TON < ' + thresholds.keeperMinTon + '：K 线 / 开轮会失败', RB + '#P1'));
+  }
+  if (chain.rcJettonBalanceRaw !== undefined && chain.rcJettonBalanceRaw !== null) {
+    const vault = expectedRcVault(params, rounds, stats);
+    if (vault.expected === null) {
+      info('RC 钱包公式跳过：stats 缺少 ' + vault.missing.join(' / '));
+    } else {
+      const drift = asBigInt(chain.rcJettonBalanceRaw) - vault.expected;
+      // 正偏差 = 零头 / 奖励尾差（合约内留存，允许）；负偏差 = 资金缺口
+      record('rc.vault', drift >= 0n, () => add('rc.vault.drift', 'P0', 'RC 钱包余额低于公式值', 'actual=' + chain.rcJettonBalanceRaw + ' expected=' + vault.expected + ' drift=' + drift, RB + '#reconcile'));
+      if (drift > 0n) info('RC 钱包比公式多 ' + drift + ' raw（低于 10 万零头 / 奖励尾差，留在 RC，属预期）');
     }
   }
 }
 
 if (stats.nextStakeOpenAt && now > Number(stats.nextStakeOpenAt) + GRACE_MS) {
-  add('next_round.overdue', 'P1', '下一轮未按预告开启', 'nextStakeOpenAt 已过 1h', 'runbooks/03_monitoring_alerting.md#P1');
+  const abortable = now > Number(stats.nextStakeOpenAt) + ABORT_MS;
+  add('next_round.overdue', abortable ? 'P0' : 'P1', '下一轮未按预告开启', abortable ? '预告结束已超过 7 天：任何人可 AbortTechnical（keeper 失联）' : 'nextStakeOpenAt 已过 1h：keeper 未发 OpenRound', 'runbooks/03_monitoring_alerting.md#P1');
 }
 
 if (data.admin) {
   const events = data.admin.events || [];
-  const quietMs = thresholds.adminQuietWindowMinutes * 60000;
+  const windowMinutes = Number(thresholds.opsEventWindowMinutes || 15);
+  const quietMs = windowMinutes * 60000;
   const recent = events.filter((event) => now - Number(event.ts) <= quietMs);
   const errors = recent.filter((event) => event.level === 'error');
   const warnings = recent.filter((event) => event.level === 'warn');
-  if (errors.length) add('admin.error_events', 'P1', '管理员操作报错', errors.length + ' 条 error 事件（近 ' + thresholds.adminQuietWindowMinutes + ' 分钟）', 'runbooks/04_key_custody_admin.md#incident');
-  if (warnings.length) add('admin.warn_events', 'P2', '管理员操作告警', warnings.length + ' 条 warn 事件', 'runbooks/04_key_custody_admin.md#incident');
-  if (recent.length && !errors.length && !warnings.length) add('admin.activity', 'P3', '管理员操作活动', recent.length + ' 条事件（近 ' + thresholds.adminQuietWindowMinutes + ' 分钟），确认是否为计划内操作', 'runbooks/04_key_custody_admin.md#audit');
-  checks.push({ name: 'admin.events', ok: errors.length === 0 });
+  if (errors.length) add('ops.error_events', 'P1', '运维/keeper 操作报错', errors.length + ' 条 error 事件（近 ' + windowMinutes + ' 分钟）', 'runbooks/04_key_custody_admin.md#incident');
+  if (warnings.length) add('ops.warn_events', 'P2', '运维/keeper 操作告警', warnings.length + ' 条 warn 事件', 'runbooks/04_key_custody_admin.md#incident');
+  if (recent.length && !errors.length && !warnings.length) add('ops.activity', 'P3', '运维/keeper 操作活动', recent.length + ' 条事件（近 ' + windowMinutes + ' 分钟），确认是否为计划内操作', 'runbooks/04_key_custody_admin.md#audit');
+  checks.push({ name: 'ops.events', ok: errors.length === 0 });
 }
 
 const sorted = alerts.sort((a, b) => (levelRank[b.level] || 0) - (levelRank[a.level] || 0));
@@ -189,7 +264,7 @@ if (notify && alerts.length) {
     warn('--notify 需要 ' + params.notifications.telegram.botTokenEnv + ' 与 ' + params.notifications.telegram.chatIdEnv + '（未设置，跳过发送）');
   } else {
     const lines = sorted.map((alert) => '[' + alert.level + '] ' + alert.title + ' — ' + alert.detail);
-    const text = 'A9 测试网告警\n' + new Date().toISOString() + '\n' + lines.join('\n');
+    const text = 'A9 ' + (params.__net || 'testnet') + ' 告警\n' + new Date().toISOString() + '\n' + lines.join('\n');
     try {
       const response = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
         method: 'POST',
@@ -201,6 +276,20 @@ if (notify && alerts.length) {
       else warn('Telegram 发送失败：HTTP ' + response.status);
     } catch (error) {
       warn('Telegram 发送异常：' + String(error.message || error));
+    }
+  }
+}
+
+if (retryRounds.size) {
+  const list = [...retryRounds].sort((x, y) => x - y);
+  section('结算重试');
+  for (const roundId of list) detail('R' + roundId + '：node ops/scripts/80_admin_ops.mjs --action retry-settlement --round ' + roundId);
+  if (autoRetry) {
+    const script = join(dirname(fileURLToPath(import.meta.url)), '80_admin_ops.mjs');
+    for (const roundId of list) {
+      const extra = process.env.OPS_EXECUTE === '1' ? ['--execute'] : [];
+      const result = spawnSync(process.execPath, [script, '--action', 'retry-settlement', '--round', String(roundId), ...extra], { encoding: 'utf8', env: process.env, timeout: 300000 });
+      (result.status === 0 ? ok : warn)('auto-retry R' + roundId + '：exit ' + result.status + (extra.length ? '' : '（dry-run；广播需 OPS_EXECUTE=1 OPS_CONFIRM=YES）'));
     }
   }
 }
