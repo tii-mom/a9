@@ -68,9 +68,9 @@ fun onInternalMessage(in: InMessage) {
         CloseStaking => { handleCloseStaking(in.senderAddress, msg); }
         SubmitCandle => { handleSubmitCandle(in.senderAddress, msg); }
         FinalizeRound => { handleFinalizeRound(in.senderAddress, msg); }
-        ClaimPrincipal => { handleClaimPrincipal(in.senderAddress, msg); }
-        ClaimReward => { handleClaimReward(in.senderAddress, msg); }
-        ClaimAll => { handleClaimAll(in.senderAddress, msg); }
+        ClaimPrincipal => { handleClaimPrincipal(in.senderAddress, msg, in.valueCoins); }
+        ClaimReward => { handleClaimReward(in.senderAddress, msg, in.valueCoins); }
+        ClaimAll => { handleClaimAll(in.senderAddress, msg, in.valueCoins); }
         PauseOracle => { handlePauseOracle(in.senderAddress, msg); }
         ResumeOracle => { handleResumeOracle(in.senderAddress, msg); }
         AbortTechnical => { handleAbortTechnical(in.senderAddress, msg); }
@@ -82,10 +82,10 @@ fun onInternalMessage(in: InMessage) {
         TeamReleasedAck => { handleTeamReleasedAck(in.senderAddress, msg); }
         TeamBurnedAck => { handleTeamBurnedAck(in.senderAddress, msg); }
         TransferNotification => { handleTransferNotification(in.senderAddress, msg, in.valueCoins); }
-        ClaimRewardEarly => { handleClaimRewardEarly(in.senderAddress, msg); }
+        ClaimRewardEarly => { handleClaimRewardEarly(in.senderAddress, msg, in.valueCoins); }
         RollReward => { handleRollReward(in.senderAddress, msg); }
         SetReferrer => { handleSetReferrer(in.senderAddress, msg); }
-        ClaimUnlocked => { handleClaimUnlocked(in.senderAddress, msg); }
+        ClaimUnlocked => { handleClaimUnlocked(in.senderAddress, msg, in.valueCoins); }
         ReturnExcessesBack => { handleReturnExcesses(in.senderAddress, msg); }
         TransferBounced => { handleTransferBounced(in.senderAddress, msg); }
         TopUpTons => {}
@@ -1116,7 +1116,9 @@ fun handleClaimRefund(sender: address) {
     );
 }
 
-fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal) {
+fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal, valueCoins: coins) {
+    // A9-F6: refuse gas-griefing claims that cannot cover the outbound transfer.
+    assert (valueCoins >= ton("0.15")) throw Errors.BadConfig;
     var s = lazy Storage.load();
     if (msg.roundId == 0) {
         handleClaimRefund(sender);
@@ -1167,7 +1169,8 @@ fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal) {
     );
 }
 
-fun handleClaimAll(sender: address, msg: ClaimAll) {
+fun handleClaimAll(sender: address, msg: ClaimAll, valueCoins: coins) {
+    assert (valueCoins >= ton("0.15")) throw Errors.BadConfig;
     var s = lazy Storage.load();
     val v = vaults(s);
     var ex = s.extras.load();
@@ -1460,7 +1463,8 @@ fun applyEarlyReward(pos: StakePosition, reward: uint128): EarlyRewardApplied {
     return { position: updated, paidRaw: paid, lockedRaw: reward - paid };
 }
 
-fun payEarlyReward(sender: address, roundId: uint8): uint128 {
+fun payEarlyReward(sender: address, roundId: uint8, valueCoins: coins): uint128 {
+    assert (valueCoins >= ton("0.15")) throw Errors.BadConfig;
     var s = lazy Storage.load();
     val rd = ensureRoundExists(s, roundId);
     assert (rd.status == STATUS_SUCCEEDED) throw Errors.NotClaimable;
@@ -1517,12 +1521,12 @@ fun payEarlyReward(sender: address, roundId: uint8): uint128 {
     return applied.paidRaw;
 }
 
-fun handleClaimReward(sender: address, msg: ClaimReward) {
-    payEarlyReward(sender, msg.roundId);
+fun handleClaimReward(sender: address, msg: ClaimReward, valueCoins: coins) {
+    payEarlyReward(sender, msg.roundId, valueCoins);
 }
 
-fun handleClaimRewardEarly(sender: address, msg: ClaimRewardEarly) {
-    payEarlyReward(sender, msg.roundId);
+fun handleClaimRewardEarly(sender: address, msg: ClaimRewardEarly, valueCoins: coins) {
+    payEarlyReward(sender, msg.roundId, valueCoins);
 }
 fun handleRollReward(sender: address, msg: RollReward) {
     var s = lazy Storage.load();
@@ -1666,7 +1670,8 @@ fun handleRollReward(sender: address, msg: RollReward) {
     });
 }
 
-fun handleClaimUnlocked(sender: address, _msg: ClaimUnlocked) {
+fun handleClaimUnlocked(sender: address, _msg: ClaimUnlocked, valueCoins: coins) {
+    assert (valueCoins >= ton("0.15")) throw Errors.BadConfig;
     var s = lazy Storage.load();
     val now: uint64 = blockchain.now() as uint64;
     var ex = s.extras.load();

@@ -733,3 +733,19 @@ get fun `test F5 resume with admin oracle skips OA notification and still succee
     expect(resumeOracle(rc, admin.address)).toHaveSuccessfulTx<ResumeOracle>({ from: admin.address, to: rc.address });
     expect(rcRound(rc, 1).candlesSeen).toEqual(0);
 }
+
+
+get fun `test F6 low-value signed submission is rejected`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val receiver = deployReceiver();
+    expect(setController(adapter, admin.address, receiver.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    val h = signedHash(CHAIN_ID, receiver.address, SIGNED_ACTION_OPEN, 1, 0, 0, 0, 300000 as uint128, 0 as uint256, T0 as uint64);
+    val body = signedOpenBody(h, keys, eqArray3(), 1, 300000, T0 as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.1"), dest: adapter.address, body })))
+        .toHaveFailedTx<SubmitSignedOpenRound>({ from: admin.address, to: adapter.address, exitCode: Errors.BadConfig });
+}

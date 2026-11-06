@@ -253,6 +253,8 @@ fun onInternalMessage(in: InMessage) {
             st.save();
         }
         SubmitSignedOpenRound => {
+            // A9-F6: signed submissions must pay for the 0.2 TON forward.
+            assert (in.valueCoins >= ton("0.25")) throw Errors.BadConfig;
             var st = lazy OracleAdapterStorage.load();
             val cfg = st.config.load();
             val controller = requireController(cfg);
@@ -286,6 +288,8 @@ fun onInternalMessage(in: InMessage) {
                 .endCell());
         }
         SubmitSignedCloseStaking => {
+            // A9-F6: signed submissions must pay for the 0.2 TON forward.
+            assert (in.valueCoins >= ton("0.25")) throw Errors.BadConfig;
             var st = lazy OracleAdapterStorage.load();
             val cfg = st.config.load();
             val controller = requireController(cfg);
@@ -319,6 +323,8 @@ fun onInternalMessage(in: InMessage) {
                 .endCell());
         }
         SubmitSignedCandle => {
+            // A9-F6: signed submissions must pay for the 0.2 TON forward.
+            assert (in.valueCoins >= ton("0.25")) throw Errors.BadConfig;
             var st = lazy OracleAdapterStorage.load();
             val cfg = st.config.load();
             val controller = requireController(cfg);
