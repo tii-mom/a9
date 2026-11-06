@@ -17,6 +17,7 @@ import "@acton/io"
 import "@acton/testing/assert"
 import "@acton/emulation/network"
 import "@contracts/types"
+import "@contracts/junxiang"
 
 // TEP-74 transfer body (same layout as tests/helpers.tolk AskToTransferMsg).
 struct (0x0f8a7ea5) AskToTransferMsg {
@@ -193,6 +194,26 @@ fun buildRetrySettlement(target: address, roundId: uint8): OutMessage {
         value: ton("0.3"),
         dest: target,
         body: RetrySettlement { queryId: 0, roundId },
+    });
+}
+
+// v11: anyone, 30 days after round 10 ended (contracts/README §5.1: >= 0.1 TON).
+fun buildReleaseTeam(target: address): OutMessage {
+    return createMessage({
+        bounce: true,
+        value: ton("0.3"),
+        dest: target,
+        body: ReleaseTeam { queryId: 0 },
+    });
+}
+
+// Distributor publisher: SetRoot(listId, root). Caller must have funded the distributor first.
+fun buildJunxiangSetRoot(target: address, listId: uint32, root: uint256): OutMessage {
+    return createMessage({
+        bounce: true,
+        value: ton("0.1"),
+        dest: target,
+        body: SetRoot { queryId: 0, listId, root },
     });
 }
 

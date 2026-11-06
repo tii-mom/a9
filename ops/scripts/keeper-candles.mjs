@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-/** keeper-candles.mjs — v10 keeper 循环：OpenRound → （到期）CloseStaking → 24 根 SubmitCandle（第 24 根即判定）
- * → 结算动作被退回（SettlementBounced / *Confirmed=false）时自动 RetrySettlement → 预告结束后开下一轮。
+/** keeper-candles.mjs — v11 keeper 循环：OpenRound → （到期）CloseStaking → 24 根 SubmitCandle（第 24 根即判定）
+ * → 失败轮的销毁动作未确认（连续 3 次视图仍未确认，视为被退回）时自动 RetrySettlement → 预告结束后开下一轮。
+ * 破城轮的团队额度退回不由本脚本重试（RoundView 无法区分「未发出」与「被退回」）：由 SettlementBounced 事件 → monitor 告警 → 80 --action retry-settlement。
+ * 时序（candleSeconds / candleCount）从 get_protocol_config 读取，快测档自动适配。
  *
  * 用法：
  *   OPS_EXECUTE=1 node ops/scripts/keeper-candles.mjs --rc <RC> --signer a9-keeper --rounds 1 --mode success
@@ -134,11 +136,22 @@ async function ensureOpen(roundId) {
   await sleep(1500);
 }
 
-/** 已判定轮的结算动作被退回（SettlementBounced）时调用 RetrySettlement；返回是否仍待确认。 */
+/**
+ * 已判定轮的销毁动作未确认时调用 RetrySettlement；返回是否仍待确认。
+ * 去抖：结算交易刚发出时视图尚未确认，连续 3 次仍未确认才视为被退回（RC 对 retryMask=0 会报 NothingToRetry）。
+ */
+const pendingStreak = new Map();
 async function retrySettlementIfNeeded(roundId) {
   const rd = await round(roundId);
   const pending = pendingSettlementActions(rd.view);
-  if (!pending || pending.length === 0) return false;
+  if (!pending || pending.length === 0) { pendingStreak.delete(roundId); return false; }
+  const streak = (pendingStreak.get(roundId) || 0) + 1;
+  pendingStreak.set(roundId, streak);
+  if (streak < 3) {
+    log({ event: 'settlement-unconfirmed', roundId, pending, streak });
+    return true;
+  }
+  pendingStreak.set(roundId, 0);
   log({ event: 'settlement-pending', roundId, pending });
   try { await runAdmin('retry-settlement', [String(roundId), '0'], {}, 'retry-settlement(' + roundId + ')'); }
   catch (error) { log({ event: 'retry-settlement-failed', roundId, error: String(error.message).slice(0, 200) }); }

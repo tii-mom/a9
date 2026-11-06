@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 90 — 主网部署仪式（v10 / D-42）：分阶段、可断点续跑、失败即停。
+ * 90 — 主网部署仪式（v11）：分阶段、可断点续跑、失败即停。
  *
  *   P0    worker/scripts/preflight-mainnet.mjs
  *   P0.5  treasury（mint 接收钱包）与 keeper 钱包：active、≥ 2 TON、A9 = 0（全新钱包）
@@ -171,7 +171,7 @@ async function P1() {
     must(/Funded RC Jetton Wallet with \d+ raw A9/.test(text), '已有部署日志缺少 Funded RC Jetton Wallet');
     must(contractAddress('jettonMaster') && contractAddress('roundController'), 'adopt-existing 需要 registry 已登记 jettonMaster / roundController');
     state.addresses = Object.fromEntries(Object.entries(registry.contracts).map(([k, v]) => [k, v.address]));
-    console.log('[P1] ADOPTED 已有 v10 部署：' + log);
+    console.log('[P1] ADOPTED 已有 v11 部署：' + log);
     return 'ADOPTED';
   }
   const env = {
@@ -200,7 +200,7 @@ async function P1() {
   must(log, '找不到 deploy-emulation 日志');
   const text = readFileSync(log, 'utf8');
   must(/Funded RC Jetton Wallet with \d+ raw A9/.test(text), '部署日志缺少 Funded RC Jetton Wallet（成功判据）');
-  must(/=== A9 v10 deploy summary ===/.test(text), '部署日志缺少 v10 deploy summary');
+  must(/=== A9 v11 deploy summary ===/.test(text), '部署日志缺少 v11 deploy summary');
   registry = loadRegistry({ create: false });
   state.addresses = Object.fromEntries(Object.entries(registry.contracts).map(([k, v]) => [k, v.address]));
   console.log('[P1] PASS，部署日志：' + log);

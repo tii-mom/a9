@@ -44,6 +44,10 @@ test('timingBps 三档边界：0-12h ×1.5，12-24h ×1.2，之后 ×1.0', () =>
 
 test('timingBps：stakeOpenAt 为空时统一 ×1.0', () => {
   eq(timingBps(1, null), 10_000n, 'null window');
+  // fast testnet profile: 30-minute window -> 10-minute thirds
+  eq(timingBps(9 * 60_000, 0, 30 * 60_000), 15_000n, 'fast: first third');
+  eq(timingBps(10 * 60_000, 0, 30 * 60_000), 12_000n, 'fast: second third');
+  eq(timingBps(20 * 60_000, 0, 30 * 60_000), 10_000n, 'fast: last third');
 });
 
 test('powerOf 按笔求和：100@1h + 200@13h + 300@30h = 150 + 240 + 300', () => {

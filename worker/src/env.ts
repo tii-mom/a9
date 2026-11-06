@@ -58,6 +58,8 @@ export interface Env {
   /** 'mainnet' | 'testnet' */
   CHAIN_NETWORK?: string;
   ROUND_CONTROLLER_ADDRESS?: string;
+  /** v11 军饷分发合约（可选；未配置或占位符时前端隐藏领取入口） */
+  JUNXIANG_DISTRIBUTOR_ADDRESS?: string;
   /** v10：团队收款钱包（与 get_protocol_config 的 teamVault 槽比对） */
   TEAM_WALLET_ADDRESS?: string;
   /** v10：唯一 keeper（与 get_protocol_config 的 admin/oracle 槽比对） */

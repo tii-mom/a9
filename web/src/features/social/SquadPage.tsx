@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { ApiError, socialApi, useQuery } from '../../lib/api';
+import { JunxiangCard } from '../chain';
 import { useWallet } from '../wallet';
 import { ErrorState, Loading, PageHead } from '../app/ui';
 import { a9Compact } from './format';
@@ -229,6 +230,7 @@ export default function SquadPage() {
       <main id="main-content" tabIndex={-1} className="sx-page">
         <PageHead lbl="战队" title="我的战队" desc="全队人数越多，全队军饷加成越高。团长另得全队本金 1% 军饷。" />
         {body}
+        {address ? <JunxiangCard address={address} demo={wallet.demo} /> : null}
         {me.data ? (
           <ShareSheet
             open={shareOpen}

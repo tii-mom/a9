@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * monitor_check — 监控检查与告警（v10）：worker 健康、K 线缺失、报名/判定超时、结算退回（SettlementBounced →
+ * monitor_check — 监控检查与告警（v11）：worker 健康、K 线缺失、报名/判定超时、结算退回（SettlementBounced →
  * RetrySettlement）、UnexpectedBounce、一笔销毁金额、团队释放、供应量漂移、RC 钱包公式、keeper gas、运维事件。
  *
  * 数据源：--snapshot <json>（离线）或 worker API；--chain 额外读链上（RC 事件、get_round 结算标志、RC 钱包余额、keeper TON）。
@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { asBigInt, loadAndValidate } from './lib/config.mjs';
 import { loadRegistry } from './lib/registry.mjs';
-import { expectedRcVault, expectedSettlement, pendingSettlementActions } from './lib/ledger.mjs';
+import { expectedRcVault, expectedSettlementFor, pendingSettlementActions } from './lib/ledger.mjs';
 import { fetchRcEvents, getJettonWalletBalance, getRoundView, getTonBalance } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, table, summary, detail } from './lib/log.mjs';
 
@@ -163,13 +163,13 @@ for (const round of rounds) {
     }
     if (round.observationEnd && now > Number(round.observationEnd) + GRACE_MS) {
       const abortable = now > Number(round.observationEnd) + ABORT_MS;
-      add('round.' + roundId + '.settle_overdue', abortable ? 'P0' : 'P1', 'R' + roundId + ' 观察结束未判定', abortable ? '已超过 7 天：任何人可 AbortTechnical（本金可领）' : 'observationEnd 已过 1h 仍为 OBSERVING：keeper 未提交满 24 根 K 线', RB + '#P1');
+      add('round.' + roundId + '.settle_overdue', abortable ? 'P0' : 'P1', 'R' + roundId + ' 观察结束未判定', abortable ? '已超过技术终止超时：任何人可 AbortTechnical（本金经攻城令领取）' : 'observationEnd 已过 1h 仍为 OBSERVING：keeper 未提交满 24 根 K 线', RB + '#P1');
     }
   }
   if (['STAKING_OPEN', 'OBSERVING'].includes(state) && (round.updatedAt || 0) && now - Number(round.updatedAt) > 15 * 60000) {
     add('round.' + roundId + '.stale', 'P2', 'R' + roundId + ' 数据 15 分钟未更新', '前端/索引可能停更', RB + '#P2');
   }
-  const settlement = expectedSettlement(params, state, round.totalAcceptedStakeRaw);
+  const settlement = expectedSettlementFor(params, rounds, round);
   if (settlement) {
     const burned = round.burnedRaw === null || round.burnedRaw === undefined ? null : asBigInt(round.burnedRaw);
     if (burned !== null && burned !== settlement.burnRaw) {
@@ -217,14 +217,14 @@ if (chain) {
       const drift = asBigInt(chain.rcJettonBalanceRaw) - vault.expected;
       // 正偏差 = 零头 / 奖励尾差（合约内留存，允许）；负偏差 = 资金缺口
       record('rc.vault', drift >= 0n, () => add('rc.vault.drift', 'P0', 'RC 钱包余额低于公式值', 'actual=' + chain.rcJettonBalanceRaw + ' expected=' + vault.expected + ' drift=' + drift, RB + '#reconcile'));
-      if (drift > 0n) info('RC 钱包比公式多 ' + drift + ' raw（低于 10 万零头 / 奖励尾差，留在 RC，属预期）');
+      if (drift > 0n) info('RC 钱包比公式多 ' + drift + ' raw（奖励按战力分配的向下取整尾差，留在 RC，属预期）');
     }
   }
 }
 
 if (stats.nextStakeOpenAt && now > Number(stats.nextStakeOpenAt) + GRACE_MS) {
   const abortable = now > Number(stats.nextStakeOpenAt) + ABORT_MS;
-  add('next_round.overdue', abortable ? 'P0' : 'P1', '下一轮未按预告开启', abortable ? '预告结束已超过 7 天：任何人可 AbortTechnical（keeper 失联）' : 'nextStakeOpenAt 已过 1h：keeper 未发 OpenRound', 'runbooks/03_monitoring_alerting.md#P1');
+  add('next_round.overdue', abortable ? 'P0' : 'P1', '下一轮未按预告开启', abortable ? '预告结束已超过技术终止超时：任何人可 AbortTechnical（keeper 失联）' : 'nextStakeOpenAt 已过 1h：keeper 未发 OpenRound', 'runbooks/03_monitoring_alerting.md#P1');
 }
 
 if (data.admin) {

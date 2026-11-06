@@ -6,7 +6,7 @@
 import type { ApiError } from '../../lib/api';
 import { api, useQuery } from '../../lib/api';
 import type { DataSource, ProtocolConfig } from '@shared/types';
-import { base64Decode, base64UrlEncode } from './address';
+import { base64Decode, base64UrlEncode, parseTonAddress } from './address';
 import { DEFAULT_MIN_STAKE_TOKENS, DEFAULT_TOKEN_DECIMALS } from './protocol';
 
 export type ChainNetwork = 'mainnet' | 'testnet';
@@ -29,6 +29,8 @@ export interface ChainConfig {
   jettonMaster: string | null;
   /** v10：团队收款钱包（RC 成功轮直接转入） */
   teamWallet: string | null;
+  /** 军饷分发合约（JUNXIANG_DISTRIBUTOR_ADDRESS）；未配置、占位符或非法时为 null，领取入口隐藏 */
+  junxiangDistributor: string | null;
   /** v10：唯一 keeper（开轮 / 提交价格） */
   keeper: string | null;
   riskDisclosureVersion: number;
@@ -71,6 +73,17 @@ function parseBpsExtra(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 && parsed <= 10000 ? Math.floor(parsed) : fallback;
 }
 
+/** 地址型配置：占位符（含 `__`）或无法解析时视为未配置。 */
+export function usableAddressOrNull(value: string | null): string | null {
+  if (!value || value.includes('__')) return null;
+  try {
+    parseTonAddress(value);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 /** 后端配置 → 前端链上配置。 */
 export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
   const decimals = config?.token.decimals ?? DEFAULT_TOKEN_DECIMALS;
@@ -105,6 +118,7 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     roundController,
     jettonMaster,
     teamWallet: contractExtra(config, 'teamWallet'),
+    junxiangDistributor: usableAddressOrNull(contractExtra(config, 'junxiangDistributor')),
     keeper: contractExtra(config, 'keeper') ?? contractExtra(config, 'adminOwner'),
     riskDisclosureVersion: config?.riskDisclosureVersion ?? 1,
     tokenDecimals: decimals,

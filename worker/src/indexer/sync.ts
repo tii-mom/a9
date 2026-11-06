@@ -299,6 +299,7 @@ async function ensureConfig(ctx: TickContext): Promise<{ changed: boolean }> {
     stake_gap_seconds: fields.previewSeconds,
     risk_disclosure_version: fields.riskDisclosureVersion,
     contract_round_controller: config.addresses.roundController.raw,
+    contract_junxiang_distributor: config.addresses.junxiangDistributor?.raw ?? '',
     contract_jetton_master: config.addresses.jettonMaster.raw,
     contract_team_wallet: config.addresses.teamWallet.raw,
     contract_keeper: config.addresses.keeper.raw,

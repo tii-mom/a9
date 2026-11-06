@@ -71,7 +71,7 @@ function apiKeyHeaders(chain: ChainConfig): Record<string, string> {
 /* Jetton Wallet 解析                                                  */
 /* ------------------------------------------------------------------ */
 
-function rawFromStackValue(value: unknown): string | null {
+export function rawFromStackValue(value: unknown): string | null {
   if (typeof value !== 'string' || !value.trim()) return null;
   const text = value.trim();
   if (looksLikeRawAddress(text)) return toRawAddress(parseTonAddress(text));
@@ -391,7 +391,7 @@ export interface RewardPreviewView {
 }
 
 /** owner 入参的几种编码（toncenter 对 slice / cell 的接受度不同，依次尝试）。 */
-function ownerStackArgs(owner: TonAddress): { type: 'slice' | 'cell'; value: string }[][] {
+export function ownerStackArgs(owner: TonAddress): { type: 'slice' | 'cell'; value: string }[][] {
   const ownerRaw = toRawAddress(owner);
   const ownerBoc = toBocBase64(beginCell().writeAddress(owner).end());
   return [
@@ -401,12 +401,12 @@ function ownerStackArgs(owner: TonAddress): { type: 'slice' | 'cell'; value: str
   ];
 }
 
-interface GetterCall {
+export interface GetterCall {
   items: unknown[];
   exitCode: number;
 }
 
-async function callGetter(chain: ChainConfig, address: string, method: string, stack: unknown[]): Promise<GetterCall> {
+export async function callGetter(chain: ChainConfig, address: string, method: string, stack: unknown[]): Promise<GetterCall> {
   const response = (await fetchJson(chain.toncenterBaseUrl + '/api/v2/runGetMethod', {
     method: 'POST',
     headers: apiKeyHeaders(chain),
@@ -419,7 +419,7 @@ async function callGetter(chain: ChainConfig, address: string, method: string, s
 }
 
 /** toncenter 栈数字（{type:'num', value:'0x…' | '…'}）→ bigint；无法解析返回 null。 */
-function stackNum(item: unknown): bigint | null {
+export function stackNum(item: unknown): bigint | null {
   const value = (item as { value?: unknown } | undefined)?.value;
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return BigInt(value);

@@ -6,8 +6,8 @@
  */
 
 const HOUR_MS = 3_600_000;
-const EARLY_END_MS = 12 * HOUR_MS;
-const MID_END_MS = 24 * HOUR_MS;
+/** 默认攻城期 36h；快速测试网档位会更短，buckets 按窗口三等分（与合约 timingBps 一致）。 */
+export const DEFAULT_STAKE_WINDOW_MS = 36 * HOUR_MS;
 
 /** 时机系数（bps，10000 = ×1.0） */
 export const TIMING_BPS_EARLY = 15_000n;
@@ -28,16 +28,17 @@ export interface PowerDeposit {
  * stakeOpenAt 为空（链上未给出开窗时间）时统一 ×1.0，避免伪造加成。
  * 开窗前的记录（理论上不应出现）归入前 12h 档。
  */
-export function timingBps(acceptedAt: number, stakeOpenAt: number | null): bigint {
+export function timingBps(acceptedAt: number, stakeOpenAt: number | null, windowMs: number = DEFAULT_STAKE_WINDOW_MS): bigint {
   if (stakeOpenAt === null) return TIMING_BPS_LATE;
+  const third = Math.floor((windowMs > 0 ? windowMs : DEFAULT_STAKE_WINDOW_MS) / 3);
   const elapsed = acceptedAt - stakeOpenAt;
-  if (elapsed < EARLY_END_MS) return TIMING_BPS_EARLY;
-  if (elapsed < MID_END_MS) return TIMING_BPS_MID;
+  if (elapsed < third) return TIMING_BPS_EARLY;
+  if (elapsed < third * 2) return TIMING_BPS_MID;
   return TIMING_BPS_LATE;
 }
 
 /** 某钱包在某一轮的战力（raw）。每笔按 floor(amount × bps / 10000) 计，再求和。 */
-export function powerOf(deposits: readonly PowerDeposit[], stakeOpenAt: number | null): bigint {
+export function powerOf(deposits: readonly PowerDeposit[], stakeOpenAt: number | null, windowMs: number = DEFAULT_STAKE_WINDOW_MS): bigint {
   let total = 0n;
   for (const deposit of deposits) {
     if (deposit.amountRaw <= 0n) continue;
@@ -45,7 +46,7 @@ export function powerOf(deposits: readonly PowerDeposit[], stakeOpenAt: number |
       if (deposit.weightRaw > 0n) total += deposit.weightRaw;
       continue;
     }
-    total += (deposit.amountRaw * timingBps(deposit.acceptedAt, stakeOpenAt)) / 10_000n;
+    total += (deposit.amountRaw * timingBps(deposit.acceptedAt, stakeOpenAt, windowMs)) / 10_000n;
   }
   return total;
 }

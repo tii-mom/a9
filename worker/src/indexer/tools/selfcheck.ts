@@ -88,7 +88,7 @@ async function main(): Promise<void> {
       v3FallbackUrl: null,
       apiKey,
       allowPublic: !apiKey,
-      addresses: { roundController: rc, jettonMaster: jm, teamWallet: tw, keeper },
+      addresses: { roundController: rc, jettonMaster: jm, teamWallet: tw, keeper, junxiangDistributor: null },
       expectedConfigVersion: null,
       expectedConfigHash: null,
       leaseSeconds: 120,

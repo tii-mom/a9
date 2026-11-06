@@ -265,3 +265,33 @@ export const socialApi = {
   },
   gate: () => request<GateState>('/api/social/gate'),
 };
+
+/* ------------------------------------------------------------------ */
+/* 军饷（累计清单，v11）：/api/social/payout/*（只读，无需会话）          */
+/* ------------------------------------------------------------------ */
+
+/** GET /api/social/payout/latest：最新累计清单的摘要（root 与链上 get_distributor().root 比对）。 */
+export interface PayoutLatest {
+  listId: number;
+  root: string;
+  fromRound: number;
+  toRound: number;
+  leafCount: number;
+  totalRaw: string;
+  createdAt: number;
+}
+
+/** GET /api/social/payout/proof?wallet=：该钱包在最新清单中的终身累计金额与证明（proof 自底向上）。 */
+export interface PayoutProof {
+  listId: number;
+  root: string;
+  cumulativeRaw: string;
+  proof: string[];
+  index: number;
+  leafCount: number;
+}
+
+export const payoutApi = {
+  latest: () => request<PayoutLatest>('/api/social/payout/latest'),
+  proof: (wallet: string) => request<PayoutProof>(`/api/social/payout/proof?wallet=${encodeURIComponent(wallet)}`),
+};

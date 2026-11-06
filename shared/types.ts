@@ -52,6 +52,8 @@ export interface ProtocolConfig {
   contracts: {
     jettonMaster: string | null;
     roundController: string | null;
+    /** v11 军饷分发合约（未部署为 null） */
+    junxiangDistributor: string | null;
     stakingVault: string | null;
     rewardVault: string | null;
     codeHash: string | null;

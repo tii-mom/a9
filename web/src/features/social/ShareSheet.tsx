@@ -12,6 +12,7 @@ const MOMENT_TITLE: Record<ShareMoment, string> = {
   squad: '成团',
   breach: '破城',
   fallen: '阵亡',
+  claim: '领军饷',
 };
 
 export interface ShareSheetProps {

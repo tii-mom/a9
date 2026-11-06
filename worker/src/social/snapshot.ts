@@ -128,6 +128,8 @@ export function powerTable(snap: Snapshot, roundId: number): Map<string, bigint>
   if (!perKey) return out;
   const round = snap.rounds.find((row) => row.round_id === roundId);
   const openAt = round?.stake_open_at ?? null;
+  const closeAt = (round as { stake_close_at?: number | null } | undefined)?.stake_close_at ?? null;
+  const windowMs = openAt !== null && closeAt !== null && closeAt > openAt ? closeAt - openAt : undefined;
   for (const [key, rows] of perKey) {
     // chain 模式：索引器落库的 weight_raw 即链上权重（含时机系数）；demo 行的 weight_raw 不是权重，走时机表
     const deposits: PowerDeposit[] = rows.map((row) => ({
@@ -135,7 +137,7 @@ export function powerTable(snap: Snapshot, roundId: number): Map<string, bigint>
       acceptedAt: row.accepted_at,
       weightRaw: snap.chain ? toBigInt(row.weight_raw) : null,
     }));
-    out.set(key, powerOf(deposits, openAt));
+    out.set(key, powerOf(deposits, openAt, windowMs));
   }
   return out;
 }

@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ALLOWED_OPCODE_NAMES, V10_OPCODES, asBigInt, expectedLadder, loadAndValidate, loadParams, paramsDigest, rawAmount, validateParams } from './lib/config.mjs';
+import { ALLOWED_OPCODE_NAMES, TIMING_PROFILES, V11_EVENTS, V11_OPCODES, asBigInt, expectedLadder, loadAndValidate, loadParams, paramsDigest, rawAmount, validateParams } from './lib/config.mjs';
 import { FUNDING_KINDS, emptyRegistry, recordFunding, setContract, setWallet, writeRegistry } from './lib/registry.mjs';
 import { crc16, decodeRcEvent, formatAddress, parseAddress } from './lib/ton.mjs';
 import { expectedSettlement, pendingSettlementActions } from './lib/ledger.mjs';
@@ -58,35 +58,39 @@ test('allocation.sum', () => {
   assert(result.ok, '分配总和 != 100 亿');
   return result.sumRaw + ' raw';
 });
-test('params.v10_contracts', () => {
+test('params.v11_contracts', () => {
   const opcodes = params.permissions.opcodes;
-  for (const [name, code] of Object.entries(V10_OPCODES)) assert(String(opcodes[name] || '').toUpperCase() === code.toUpperCase(), 'opcode ' + name + ' 必须为 ' + code);
-  assert(Object.keys(opcodes).every((name) => ALLOWED_OPCODE_NAMES.includes(name)), '存在 v10 ABI 以外的 opcode');
+  for (const [name, code] of Object.entries(V11_OPCODES)) assert(String(opcodes[name] || '').toUpperCase() === code.toUpperCase(), 'opcode ' + name + ' 必须为 ' + code);
+  assert(Object.keys(opcodes).every((name) => ALLOWED_OPCODE_NAMES.includes(name)), '存在 v11 ABI 以外的 opcode');
+  assert(opcodes.Claim === undefined && opcodes.ClaimAll === undefined, 'v11 已删除 Claim / ClaimAll，不得再出现在参数文件');
+  for (const [name, code] of Object.entries(V11_EVENTS)) assert(String(params.permissions.events[name] || '').toUpperCase() === code.toUpperCase(), 'event ' + name + ' 必须为 ' + code);
   assert(params.permissions.events.SettlementBounced === '0x52540110' && params.permissions.events.UnexpectedBounce === '0x52540111', '缺少 SettlementBounced / UnexpectedBounce 事件');
-  assert(params.stakeLimits.minStakeRaw === '100000000000000', '最低质押必须为 100,000 A9');
+  assert(params.stakeLimits.minStakeRaw === '1000000000000', '最低质押必须为 1,000 A9');
   assert(params.rounds.rcFundingRaw === '8200000000000000000' && params.rounds.rcFundingForwardTonNano === '0', 'RC 注资必须为 82 亿且 forward 0');
-  assert(params.roles.keeper && params.roles.teamWallet && Object.keys(params.roles).length === 6, 'roles 必须是 keeper/treasury/teamWallet/营销/流动性/内盘');
+  assert(params.roles.keeper && params.roles.teamWallet && params.roles.junxiangPublisher && Object.keys(params.roles).length === 7, 'roles 必须是 keeper/treasury/teamWallet/junxiangPublisher/营销/流动性/内盘');
   const commands = params.toolchain.adapters.acton.commands;
-  assert(commands.deployAllContracts.includes('A9_KEEPER_ADDRESS={keeper}') && commands.deployAllContracts.includes('A9_TEAM_WALLET_ADDRESS={teamWallet}'), 'deployAllContracts 必须传 keeper / teamWallet');
+  assert(commands.deployAllContracts.includes('A9_KEEPER_ADDRESS={keeper}') && commands.deployAllContracts.includes('A9_TEAM_WALLET_ADDRESS={teamWallet}') && commands.deployAllContracts.includes('A9_JUNXIANG_PUBLISHER_ADDRESS={junxiangPublisher}'), 'deployAllContracts 必须传 keeper / teamWallet / junxiangPublisher');
+  assert(commands.junxiangSetRoot && commands.junxiangSetRoot.includes('junxiang_op.tolk junxiang-set-root {listId} {rootHex}'), 'junxiangSetRoot 命令模板缺失或错误');
   const ids = params.deployPlan.map((item) => item.id);
   assert(JSON.stringify(ids) === JSON.stringify(['preflight', 'jettonMaster', 'jettonMint', 'contracts', 'params', 'tonGas', 'funding', 'register', 'verify']), 'deployPlan 不是 v10 顺序：' + ids.join(','));
-  for (const file of ['testnet', 'mainnet', 'ceremony', 'prodtest']) {
+  for (const file of ['testnet', 'mainnet', 'ceremony', 'prodtest', 'testnet-fast', 'ceremony-rehearsal']) {
     const other = loadParams(join(OPS_ROOT, 'config', file + '.params.json'));
     const result = validateParams(other);
     assert(result.errors.length === 0, file + '.params.json：' + result.errors.join('; '));
   }
-  return 'opcode/事件/最低质押/RC 82 亿 forward 0/keeper + teamWallet；4 个生产时序参数文件通过';
+  return 'opcode/事件/最低质押 1,000 A9/RC 82 亿 forward 0/keeper + teamWallet + publisher；6 个参数文件通过';
 });
 test('ledger.formulas', () => {
   const failed = expectedSettlement(params, 'FAILED_PERMANENT', '241500000000000000');
-  assert(failed.burnRaw === 1061500000000000000n && failed.teamReleaseRaw === 0n, '失败轮一笔销毁 = 7 亿 + 1.2 亿 + 本金');
-  const success = expectedSettlement(params, 'SUCCEEDED', '1');
-  assert(success.burnRaw === 0n && success.teamReleaseRaw === 120000000000000000n, '成功轮释放 1.2 亿、不销毁');
-  assert(expectedSettlement(params, 'SUCCEEDED', '0').burnRaw === 700000000000000000n, '0 人质押成功：销毁 7 亿奖励');
-  assert(expectedSettlement(params, 'TECHNICAL_ABORTED', '5').burnRaw === 0n, '技术终止不销毁');
+  assert(failed.burnRaw === 711500000000000000n && failed.teamReleaseRaw === 0n, '失败轮一笔销毁 = 奖池一半 3.5 亿 + 1.2 亿 + 本金');
+  assert(failed.carryRaw === 350000000000000000n, '失败轮另一半奖池滚入下一城');
+  const success = expectedSettlement(params, 'SUCCEEDED', '1', null, '120000000000000000');
+  assert(success.burnRaw === 0n && success.teamReleaseRaw === 120000000000000000n && success.carryRaw === 0n, '破城轮不销毁；上一次破城的团队额度 1.2 亿此时转出');
+  assert(expectedSettlement(params, 'SUCCEEDED', '0').carryRaw === 700000000000000000n, '0 人质押破城：整笔奖池滚存');
+  assert(expectedSettlement(params, 'TECHNICAL_ABORTED', '5').burnRaw === 0n && expectedSettlement(params, 'TECHNICAL_ABORTED', '5').carryRaw === 700000000000000000n, '技术终止不销毁，整笔滚存');
   assert(pendingSettlementActions({ state: 'FAILED_PERMANENT', totalAcceptedStakeRaw: 1n, rewardBurnConfirmed: false, teamBurnConfirmed: false, principalBurnConfirmed: false }).length === 1, '销毁被退回应待重试');
   assert(pendingSettlementActions({ state: 'SUCCEEDED', totalAcceptedStakeRaw: 1n, teamReleaseConfirmed: true }).length === 0, '团队转账已确认');
-  return '一笔销毁 / 团队释放 / *Confirmed → RetrySettlement';
+  return 'v11：失败一笔销毁（奖池一半）/ 破城不销毁 / 0 人滚存 / 失败 *Confirmed → RetrySettlement';
 });
 test('ton.decode_rc_event', () => {
   const data = Buffer.from([0x52, 0x54, 0x01, 0x10, 3, 2]);
@@ -123,9 +127,26 @@ test('timeline.invariants', () => {
 test('protocol.config.expected', () => {
   const expected = expectedProtocolConfig(params);
   assert(expected.p0UsdE8 === '116000' && expected.priceMultiplier === 2, 'P0/倍数错误');
-  assert(expected.techAbortPauseSeconds === 604800 && expected.techAbortObservationTimeout === 604800, '技术终止超时必须统一为 7 天（v10）');
-  assert(expected.minStakeRaw === '100000000000000', '最低质押必须为 100,000 A9');
-  return '22 个字段与 V7 一致';
+  assert(expected.techAbortPauseSeconds === 604800 && expected.techAbortObservationTimeout === 604800, '技术终止超时必须统一为 abortTimeoutSeconds（生产 7 天）');
+  assert(expected.minStakeRaw === '1000000000000', '最低质押必须为 1,000 A9');
+  assert(expected.maxStakePerAddressBps === 0 && expected.maxTotalStakeRaw === '0', 'v11 无上限：maxStakePerAddressBps / maxTotalStakeRaw 必须为 0');
+  return 'v11 字段与生产时序一致（无上限）';
+});
+test('timing.profiles', () => {
+  const fast = loadParams(join(OPS_ROOT, 'config', 'testnet-fast.params.json'));
+  const fastResult = validateParams(fast);
+  assert(fastResult.errors.length === 0, 'testnet-fast：' + fastResult.errors.join('; '));
+  assert(fast.meta.timingProfile === 'fast-cycle' && fast.techAbort.abortTimeoutSeconds === 900, 'fast-cycle 必须 abortTimeout=900s');
+  assert(Number(fast.timeline.previewSeconds) === 600 && Number(fast.timeline.stakeDurationSeconds) === 1800 && Number(fast.timeline.candleSeconds) === 60 && Number(fast.timeline.candleCount) === 24 && Number(fast.timeline.minQualifiedCandles) === 16, 'fast-cycle 时序应为 600/1800/60×24/16');
+  assert(Number(fast.timeline.roundsTotalSeconds) === 38400, 'fast-cycle 10 轮应为 38400s');
+  const mislabeled = JSON.parse(JSON.stringify(fast));
+  mislabeled.network = { ...mislabeled.network, net: 'mainnet', chainId: -239 };
+  assert(validateParams(mislabeled).errors.some((message) => message.includes('fast-cycle')), 'fast-cycle 档不得用于主网');
+  const wrongTimer = JSON.parse(JSON.stringify(params));
+  wrongTimer.techAbort.abortTimeoutSeconds = 900;
+  assert(validateParams(wrongTimer).errors.some((message) => message.includes('技术终止超时')), 'production 档不得静默改成快测超时');
+  assert(Object.keys(TIMING_PROFILES).join(',') === 'production,fast-cycle,rehearsal', '时序档位集合应为 production / fast-cycle / rehearsal');
+  return 'production（12h/36h/24×1h，超时 7 天）· fast-cycle（600/1800/60×24，超时 900s，仅测试网）';
 });
 test('raw.amount.helper', () => {
   assert(rawAmount(700000000) === '700000000000000000', 'rawAmount 错误');
@@ -159,11 +180,11 @@ section('自测：登记表与验收（临时目录）');
 test('registry.roundtrip', () => {
   const registry = emptyRegistry();
   const addresses = {};
-  for (const key of ['jettonMaster', 'roundController']) {
+  for (const key of ['jettonMaster', 'roundController', 'junxiangDistributor']) {
     addresses[key] = formatAddress(0, createHash('sha256').update('contract-' + key).digest('hex'), { bounceable: true, testnet: true });
     setContract(registry, key, addresses[key], { note: 'selftest' });
   }
-  for (const key of ['keeper', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet']) {
+  for (const key of ['keeper', 'treasury', 'teamWallet', 'junxiangPublisher', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet']) {
     setWallet(registry, key, formatAddress(0, createHash('sha256').update('wallet-' + key).digest('hex'), { bounceable: true, testnet: true }));
   }
   for (const kind of FUNDING_KINDS) {
@@ -191,9 +212,9 @@ test('admin_ops.policy_reject', () => {
 test('admin_ops.removed_actions', () => {
   for (const action of ['pause-oracle', 'finalize-round', 'start-observation', 'retry-pending']) {
     const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', action, '--round', '1'], { OPS_REGISTRY: tempRegistry });
-    assert(result.code === 1 && result.out.includes('v10 只保留'), action + ' 未被拒绝（exit ' + result.code + '）');
+    assert(result.code === 1 && result.out.includes('v11 只保留'), action + ' 未被拒绝（exit ' + result.code + '）');
   }
-  return 'v8.9 动作全部拒绝';
+  return 'v10 时代动作（pause/finalize/start-observation/retry-pending）全部拒绝';
 });
 
 section('自测：公告模板（5 类 × 中英）');
@@ -263,6 +284,31 @@ test('deploy_all.jetton', () => {
   return 'Jetton 分步 10→11 dry-run PASS';
 });
 
+test('dryrun.80.release_team', () => {
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'release-team'], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, 'release-team dry-run 失败：' + result.out.slice(-700));
+  for (const expected of ['op=release-team', 'dest=', 'admin_op.tolk']) assert(result.out.includes(expected), '缺少字段：' + expected);
+  return 'release-team 摘要（dest/op，无需 round）';
+});
+test('dryrun.80.junxiang_set_root', () => {
+  const root = '0x' + 'ef'.repeat(32);
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'junxiang-set-root', '--list', '3', '--root', root, '--total', '1000000000000'], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 0, 'junxiang-set-root dry-run 失败：' + result.out.slice(-900));
+  for (const expected of ['listId=3', 'junxiang_op.tolk', 'junxiang-set-root', 'opcode=0x4a580001']) assert(result.out.includes(expected), '缺少字段：' + expected);
+  return 'SetRoot 摘要（listId / root / 0x4a580001 / junxiang_op.tolk）';
+});
+test('dryrun.80.junxiang_set_root.requires_total', () => {
+  const root = '0x' + 'ef'.repeat(32);
+  const result = run([join(SCRIPTS, '80_admin_ops.mjs'), '--action', 'junxiang-set-root', '--list', '3', '--root', root], { OPS_REGISTRY: tempRegistry });
+  assert(result.code === 1 && result.out.includes('--total'), '缺少 --total 未被拒绝（exit ' + result.code + '）');
+  return '缺 --total 拒绝（发布前余额核对必填）';
+});
+test('dryrun.15.fast_profile_env', () => {
+  const result = run([join(SCRIPTS, '15_deploy_contracts.mjs')], { OPS_REGISTRY: tempRegistry, OPS_PARAMS: join(OPS_ROOT, 'config', 'testnet-fast.params.json') });
+  assert(result.code === 0, '15 快测档 dry-run 失败：' + result.out.slice(-700));
+  for (const expected of ['A9_TIMING_PREVIEW_SECONDS=600', 'A9_TIMING_STAKE_SECONDS=1800', 'A9_TIMING_CANDLE_SECONDS=60', 'A9_TIMING_ABORT_TIMEOUT_SECONDS=900']) assert(result.out.includes(expected), '快测 env 缺失：' + expected);
+  return '15 读取 testnet-fast.params.json → deploy-emulation 的 A9_TIMING_* 环境变量';
+});
 section('自测：广播脚本 dry-run 摘要（50/55/80）');
 test('dryrun.50.summary', () => {
   const result = run([join(SCRIPTS, '50_fund_vaults.mjs'), '--all'], { OPS_REGISTRY: tempRegistry });
@@ -304,7 +350,7 @@ test('dryrun.80.submit_candle_window_mismatch', () => {
   return 'periodStart 不匹配 → ops 层拦截，未进入 acton';
 });
 
-section('自测：主网仪式 dry-run（v10 阶段）');
+section('自测：主网仪式 dry-run（v11 阶段）');
 test('ceremony.dry_run', () => {
   const result = run([join(SCRIPTS, '90_mainnet_ceremony.mjs'), '--dry-run'], { OPS_REGISTRY: join(temp, 'ceremony.registry.json') });
   assert(result.code === 0, '仪式 dry-run 失败：' + result.out.slice(-800));

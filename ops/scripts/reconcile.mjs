@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * reconcile — 对账（v10）：每轮一笔销毁 / 团队释放 vs 状态预期；total_supply = 100 亿 − Σ销毁；
+ * reconcile — 对账（v11 口径需重写，见 ops/tests/README）：每轮一笔销毁 / 团队释放 vs 状态预期；total_supply = 100 亿 − Σ销毁；
  * RC 钱包余额 = 82 亿 + Σ质押 − Σ销毁 − Σ团队释放 − 已领本金 − 已领奖励 + 退款账本未领（只允许正偏差：零头/尾差）。
  * 支持 --snapshot 离线运行；--chain 读链上 total_supply 与 RC 钱包余额。
  */
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { flag, str } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, formatTokens, loadAndValidate } from './lib/config.mjs';
 import { getJettonData, getJettonWalletBalance } from './lib/ton.mjs';
-import { expectedRcVault, expectedSettlement } from './lib/ledger.mjs';
+import { expectedRcVault, expectedSettlementFor } from './lib/ledger.mjs';
 import { loadRegistry } from './lib/registry.mjs';
 import { section, kv, ok, fail, warn, info, detail, table, summary } from './lib/log.mjs';
 
@@ -112,7 +112,7 @@ for (const round of data.rounds) {
     : roundId;
   const recordedBurn = round.burnedRaw === null || round.burnedRaw === undefined ? null : asBigInt(round.burnedRaw);
   const recordedTeam = round.teamReleasedRaw === null || round.teamReleasedRaw === undefined ? null : asBigInt(round.teamReleasedRaw);
-  const settlement = expectedSettlement(params, state, stake);
+  const settlement = expectedSettlementFor(params, data.rounds, round);
   const expectedBurn = settlement ? settlement.burnRaw : null;
   const teamRelease = settlement ? settlement.teamReleaseRaw : null;
   const burnDelta = expectedBurn !== null && recordedBurn !== null ? recordedBurn - expectedBurn : null;
@@ -169,7 +169,7 @@ if (chainSupply !== null) {
   kv('账本 vs 链上差异', (ledgerSupply - chainSupply).toString());
 }
 
-section('RC 钱包核对（v10 公式）');
+section('RC 钱包核对（公式沿用 v10，待 v11 改写）');
 const vault = expectedRcVault(params, data.rounds, data.stats || {});
 kv('82 亿注资', vault.breakdown.fundingRaw.toString());
 kv('Σ已接受质押', vault.breakdown.stakeRaw.toString());
@@ -208,6 +208,6 @@ const csv = [headers.join(',')].concat(rows.map((row) => [
 ].join(','))).join(String.fromCharCode(10));
 writeFileSync(file, csv + String.fromCharCode(10), 'utf8');
 ok('对账表已写入：' + file);
-detail('CSV 字段与 ops/templates/reconciliation.csv 一致；v10 每个失败轮只有一笔销毁（RoundSettled 事件带 reward/team/principal 拆分）。');
+detail('CSV 字段与 ops/templates/reconciliation.csv 一致；每个失败轮只有一笔销毁（v11：budget/2 + 1.2 亿 + 本金）（RoundSettled 事件带 reward/team/principal 拆分）。');
 
 process.exit(summary({ 轮次数: rows.length, 销毁差异轮次: burnDeltas, 团队释放差异轮次: teamDeltas, RC钱包偏差: vaultDrift === null ? '未核对' : vaultDrift.toString(), 账本内部差异: internalDelta.toString(), 输出: file }) || (strict && problems.length ? 1 : 0));

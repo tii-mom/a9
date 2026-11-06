@@ -26,7 +26,7 @@ export function expectedProtocolConfig(params) {
     minStakeRaw: params.stakeLimits.minStakeRaw,
     maxStakePerAddressBps: Number(params.stakeLimits.maxStakePerAddressBps),
     maxTotalStakeRaw: params.stakeLimits.maxTotalStakeRaw,
-    // v10 get_protocol_config 两个超时槽位都返回同一个 abortTimeoutSeconds（7 天）
+    // v11 get_protocol_config 两个超时槽位都返回同一个 abortTimeoutSeconds（生产 7 天 / 快测 900s）
     techAbortPauseSeconds: Number(params.techAbort.abortTimeoutSeconds),
     techAbortObservationTimeout: Number(params.techAbort.abortTimeoutSeconds),
     roundRewardRaw: params.rounds.roundRewardRaw,
@@ -41,7 +41,7 @@ export function expectedProtocolConfig(params) {
 
 export function verifyRegistryStructure(registry) {
   const checks = [];
-  const contractKeys = ['jettonMaster', 'roundController'];
+  const contractKeys = ['jettonMaster', 'roundController', 'junxiangDistributor'];
   for (const key of contractKeys) {
     const value = registry.contracts[key] && registry.contracts[key].address;
     if (!value) {
@@ -53,10 +53,10 @@ export function verifyRegistryStructure(registry) {
     else if (parsed.testnet === false) checks.push(check('contract.' + key, CHECK_STATUS.FAIL, '不是测试网地址'));
     else checks.push(check('contract.' + key, CHECK_STATUS.PASS, value));
   }
-  const walletKeys = ['keeper', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'];
+  const walletKeys = ['keeper', 'treasury', 'teamWallet', 'junxiangPublisher', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'];
   for (const key of walletKeys) {
     const value = registry.wallets[key] && registry.wallets[key].address;
-    checks.push(value ? check('wallet.' + key, CHECK_STATUS.PASS, value) : check('wallet.' + key, CHECK_STATUS.WARN, '未登记（部署前必须提供）'));
+    checks.push(value ? check('wallet.' + key, CHECK_STATUS.PASS, value) : check('wallet.' + key, CHECK_STATUS.WARN, '未登记（部署前必须提供；junxiangPublisher 缺省时同 keeper）'));
   }
   checks.push(
     registry.bindings.roundControllerUpgradeable === false
@@ -66,7 +66,7 @@ export function verifyRegistryStructure(registry) {
   checks.push(
     registry.bindings.hasAdmin === false
       ? check('bindings.hasAdmin', CHECK_STATUS.PASS, '无 admin（D-42）')
-      : check('bindings.hasAdmin', CHECK_STATUS.FAIL, '登记表应为 hasAdmin=false（v10 无 admin）')
+      : check('bindings.hasAdmin', CHECK_STATUS.FAIL, '登记表应为 hasAdmin=false（v11 无 admin）')
   );
   return checks;
 }
@@ -74,7 +74,7 @@ export function verifyRegistryStructure(registry) {
 export function verifyFundingPlan(params, options = {}) {
   const all = Boolean(options.all);
   const plan = [
-    // v10：70 亿奖励 + 12 亿团队一次性转入 RC，forward_ton_amount 必须为 0
+    // v11：70 亿奖励 + 12 亿团队一次性转入 RC，forward_ton_amount 必须为 0
     { kind: 'roundController', label: 'RoundController（70 亿奖励 + 12 亿团队 = 82 亿，forward 0）', recipientKey: 'roundControllerJettonWallet', amountRaw: params.rounds.rcFundingRaw, forwardTonNano: '0', always: true },
     { kind: 'marketing', label: '营销钱包（5 亿）', recipientKey: 'marketingWallet', amountRaw: params.supply.allocations.marketing.raw, always: false },
     { kind: 'liquidity', label: '流动性钱包（5 亿）', recipientKey: 'liquidityWallet', amountRaw: params.supply.allocations.liquidity.raw, always: false },

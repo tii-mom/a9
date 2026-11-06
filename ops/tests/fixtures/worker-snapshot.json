@@ -1,5 +1,5 @@
 {
-  "note": "对账/监控离线测试夹具（V7 时间 / v10 合约）：R1 成功（团队释放 1.2 亿）、R2 失败（一笔销毁 7 亿 + 1.2 亿 + 本金）、R3 观察中；chain 字段模拟 --chain 读数（RC 钱包比公式多 123 raw 零头）。",
+  "note": "对账/监控离线测试夹具（v11 口径）：R1 首次破城（无团队释放，1.2 亿挂起）、R2 失败（一笔销毁 = 奖池一半 3.5 亿 + 1.2 亿 + 本金 2.415 亿）、R3 观察中；chain 字段模拟 --chain 读数（RC 钱包比公式多 123 raw 零头）。",
   "now": 1793450000000,
   "health": {
     "ok": true,
@@ -37,11 +37,11 @@
       "teamWallet": null
     },
     "tonUsdE8": "300000000",
-    "minStakeRaw": "100000000000000"
+    "minStakeRaw": "1000000000000"
   },
   "stats": {
-    "supplyRaw": "8938500000000000000",
-    "burnedRaw": "1061500000000000000",
+    "supplyRaw": "9288500000000000000",
+    "burnedRaw": "711500000000000000",
     "lockedStakeRaw": "500000000000000000",
     "stakerCount": 14,
     "volume24hUsdE8": "120000000000",
@@ -51,7 +51,7 @@
     "nextStakeOpenAt": null,
     "claimedPrincipalRaw": "50000000000000000",
     "claimedRewardRaw": "350000000000000000",
-    "refundPendingRaw": "100000000000000"
+    "refundPendingRaw": "0"
   },
   "rounds": [
     {
@@ -71,7 +71,7 @@
       "result": "SUCCESS",
       "burnedRaw": "0",
       "updatedAt": 1793363500000,
-      "teamReleasedRaw": "120000000000000000"
+      "teamReleasedRaw": "0"
     },
     {
       "roundId": 2,
@@ -88,7 +88,7 @@
       "totalAcceptedStakeRaw": "241500000000000000",
       "stakerCount": 9,
       "result": "FAILURE",
-      "burnedRaw": "1061500000000000000",
+      "burnedRaw": "711500000000000000",
       "updatedAt": 1793386500000,
       "teamReleasedRaw": "0"
     },
@@ -151,8 +151,8 @@
     }
   ],
   "chain": {
-    "totalSupplyRaw": "8938500000000000000",
-    "rcJettonBalanceRaw": "7460100000000000123",
+    "totalSupplyRaw": "9288500000000000000",
+    "rcJettonBalanceRaw": "7930000000000000123",
     "keeperTonNano": "5000000000",
     "events": [
       {

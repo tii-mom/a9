@@ -29,7 +29,7 @@ export type LeaderboardType = SocialLeaderboardType;
 export type LeaderboardScope = SocialLeaderboardScope;
 
 /** 可分享的时刻：上车成功 / 成团 / 破城 / 阵亡（纯前端文案用，不进契约）。 */
-export type ShareMoment = 'join' | 'squad' | 'breach' | 'fallen';
+export type ShareMoment = 'join' | 'squad' | 'breach' | 'fallen' | 'claim';
 
 /** 战队摘要（后端 SocialSquadBrief：level 与 memberCount 直接展示，不在前端重算）。 */
 export type SquadInfo = SocialSquadBrief;

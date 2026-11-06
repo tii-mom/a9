@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-/** fasttest-runner.mjs — v10 快测 10 轮编排：逐轮质押（含低于 10 万的退款探针）+ Claim / ClaimAll，记录每轮证据。
- * 用法：OPS_EXECUTE=1 node ops/scripts/fasttest-runner.mjs --rc <fastRc> --start 2 --end 10
+/** fasttest-runner.mjs — v11 快测 10 轮编排：逐轮质押（含低于 1,000 A9 的退款探针）+ TicketClaim（攻城令领取），记录每轮证据。
+ * 用法：OPS_PARAMS=ops/config/testnet-fast.params.json OPS_EXECUTE=1 node ops/scripts/fasttest-runner.mjs --rc <fastRc> --start 2 --end 10
+ * 注：v11 没有 Claim / ClaimAll；每人每城一张攻城令，领取 = TicketClaim 发到 RC.get_ticket_address(owner, round)。
+ * 不覆盖：TicketRestake（一键续战）与军饷分发（需单独演练）。
  */
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -65,8 +67,8 @@ async function runUser(key, cmd, a = 0, b = 0, c = 0, addr) {
 }
 const A9 = 1000000000n;
 const MIN_STAKE = BigInt(params.stakeLimits.minStakeRaw);
-// R4 的 A 故意质押 5 万（低于 10 万最低额）：forward 0.12 TON → 合约即时退回，链上仓位应为 0
-function stakeAmount(key, roundId) { return (roundId === 4 && key === 'A' ? 50000n : 100000n) * A9; }
+// R4 的 A 故意质押 500 A9（低于 1,000 A9 最低额）：forward 0.12 TON → 合约即时退回，链上攻城令不生成（仓位应为 0）
+function stakeAmount(key, roundId) { return (roundId === 4 && key === 'A' ? 500n : 100000n) * A9; }
 function expectedPosition(amount) { return amount >= MIN_STAKE ? amount : 0n; }
 async function walletA9(address) {
   try { const r = await runGetMethod(params, address, 'get_wallet_data'); return stackItemToBigInt(r.stack[0]); } catch { return 0n; }
@@ -132,9 +134,9 @@ while (Date.now() - started < 80 * 60 * 1000) {
     claimed.add(cur);
     log({ event: 'round-terminal', roundId: cur, status: rd.status, qualified: rd.qualified, candles: rd.candles, totalStake: rd.totalStake?.toString() });
     if (rd.status === 8 || rd.status === 10) {
-      // v10：Claim(roundId) = 本金 + 全额奖励；ClaimAll = 1..10 + 退款账本
-      if (cur % 2 === 1) { await runUser('A', 'claim', cur, 0, 0); await runUser('B', 'claim-all', 0, 0, 0); }
-      else { await runUser('C', 'claim', cur, 0, 0); }
+      // v11：TicketClaim 发到本人本城攻城令：成功轮 = 20% 立即奖励 + 本金（破城当轮）；技术终止轮 = 退本金。
+      // 每个质押人都领一次（没有攻城令的地址会在 user_op 里失败，记录即可）。
+      for (const key of ['A', 'B', 'C']) await runUser(key, 'claim', cur, 0, 0);
     }
     for (const key of ['A', 'B', 'C']) {
       const rb = await queryUser('stake', users[key].address, cur);

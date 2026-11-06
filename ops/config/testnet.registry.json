@@ -2,7 +2,7 @@
   "network": "testnet",
   "chainId": -3,
   "status": "not_deployed",
-  "contractsVersion": "v10",
+  "contractsVersion": "v11",
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
@@ -48,6 +48,22 @@
       "codeHash": null,
       "deployedAt": null,
       "note": null
+    },
+    "junxiangDistributor": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "junxiangDistributorJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
     }
   },
   "wallets": {
@@ -66,6 +82,13 @@
       "note": null
     },
     "teamWallet": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "junxiangPublisher": {
       "address": null,
       "raw": null,
       "testnet": null,

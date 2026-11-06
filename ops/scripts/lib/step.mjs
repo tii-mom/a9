@@ -64,19 +64,20 @@ export function bootstrap({ id, title, dependsOn = [] }) {
 }
 
 export function printProtocolConfigExpected(params) {
-  section('预期链上配置（V7 时间参数 / v10 合约）');
+  section('预期链上配置（时序档 ' + (params.meta.timingProfile || 'production') + ' / v11 合约）');
+  const t = params.timeline;
   kv('P0', params.price.p0UsdE8 + ' USD_E8（' + params.price.p0Usd + '）');
   kv('倍数', params.price.priceMultiplier + '×（不可变）');
   kv('目标价锁定', params.price.targetFormula);
-  kv('PREVIEW', params.timeline.previewSeconds + 's（12h）');
-  kv('报名窗口', params.timeline.stakeDurationSeconds + 's（36h）');
-  kv('观察窗口', params.timeline.candleCount + ' × ' + params.timeline.candleSeconds + 's = ' + params.timeline.observationSeconds + 's（24h），阈值 ' + params.timeline.minQualifiedCandles);
-  kv('单轮 / 10 轮', params.timeline.roundSeconds + 's（72h）/ ' + params.timeline.roundsTotalSeconds + 's（30 天）');
+  kv('PREVIEW', t.previewSeconds + 's');
+  kv('报名窗口', t.stakeDurationSeconds + 's');
+  kv('观察窗口', t.candleCount + ' × ' + t.candleSeconds + 's = ' + t.observationSeconds + 's，阈值 ' + t.minQualifiedCandles);
+  kv('单轮 / 10 轮', t.roundSeconds + 's / ' + t.roundsTotalSeconds + 's');
   kv('每轮奖励', params.rounds.roundRewardRaw + ' raw（7 亿 A9）');
-  kv('团队每轮', params.rounds.teamRoundRaw + ' raw（1.2 亿 A9）');
-  kv('质押限额', 'min ' + params.stakeLimits.minStakeRaw + ' / 单地址 ≤ ' + params.stakeLimits.maxStakePerAddressBps + ' bps / 本轮 ≤ ' + params.stakeLimits.maxTotalStakeRaw);
+  kv('团队每轮', params.rounds.teamRoundRaw + ' raw（1.2 亿 A9，下一次破城才转出）');
+  kv('最低质押', params.stakeLimits.minStakeRaw + ' raw（1,000 A9）；无单地址上限 / 无本轮总额上限');
   kv('RC 注资', params.rounds.rcFundingRaw + ' raw（70 亿奖励 + 12 亿团队），forward_ton_amount = 0');
-  kv('技术终止', '观察应结束后 / 预告结束后 ' + params.techAbort.abortTimeoutDays + ' 天，任何人可触发；本金可领，奖励/团队额度留在 RC，不消耗档位');
+  kv('技术终止', params.techAbort.abortTimeoutSeconds + 's 后任何人可触发（观察 / 预告共用）；本金经攻城令领取，奖励/团队额度滚入下一城');
 }
 
 export function printNextSteps(lines) {
@@ -106,7 +107,7 @@ export function signerWallet(params) {
     process.env.A9_SIGNER_WALLET ||
     (params.network.deployer.walletNameEnv ? process.env[params.network.deployer.walletNameEnv] : null) ||
     params.network.deployer.walletNameDefault ||
-    'a9-deployer'
+    'deployer' // matches the Acton wallet name used by deploy-emulation.tolk
   );
 }
 
@@ -114,7 +115,8 @@ export function signerWallet(params) {
 export function addressFromFile(params, fileName) {
   const path = resolvePath(params.toolchain.contractsDir + '/deploy/' + fileName);
   if (!existsSync(path)) return null;
-  const first = readFileSync(path, 'utf8').trim().split(String.fromCharCode(10))[0].trim();
+  // deploy-emulation 写入 "<address> (<ContractName>)"：只取第一个 token，避免把标签拼进 shell 命令
+  const first = readFileSync(path, 'utf8').trim().split(String.fromCharCode(10))[0].trim().split(/\s+/)[0];
   return first || null;
 }
 

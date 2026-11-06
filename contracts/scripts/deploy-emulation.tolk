@@ -1,4 +1,4 @@
-// A9 Protocol v10 — deterministic deployment (emulation by default).
+// A9 Protocol v11 — deterministic deployment (emulation by default).
 //
 //   acton script scripts/deploy-emulation.tolk                 # local emulation
 //   acton script scripts/deploy-emulation.tolk --net testnet   # real testnet broadcast
@@ -14,17 +14,21 @@
 //   5. Fund RC with 10 rounds of reward + 10 rounds of team quota via a TEP-74
 //      transfer with forward_ton_amount = 0 (otherwise RC treats it as a deposit
 //      and refunds it), then verify the RC jetton balance.
+//   6. Deploy JunxiangDistributor (+ its jetton wallet address). NOT funded here:
+//      ops funds its jetton wallet before every root is published (contracts/README §7.1).
+//   7. Read back RC.get_ticket_code_hash and the distributor's get_distributor and print both.
 //
 // Env (all optional unless noted):
 //   A9_KEEPER_ADDRESS          keeper address (default: deployer wallet)
 //   A9_TEAM_WALLET_ADDRESS     team wallet (REQUIRED with --net; default: deployer wallet)
+//   A9_JUNXIANG_PUBLISHER_ADDRESS  distributor root publisher (default: keeper)
 //   A9_DEPLOY_ROUND_REWARD_RAW, A9_DEPLOY_TEAM_ROUND_RAW, A9_DEPLOY_MIN_STAKE_RAW (raw A9)
 //   A9_TIMING_PREVIEW_SECONDS, A9_TIMING_STAKE_SECONDS, A9_TIMING_CANDLE_SECONDS,
-//   A9_TIMING_CANDLE_COUNT, A9_TIMING_MIN_QUALIFIED
+//   A9_TIMING_CANDLE_COUNT, A9_TIMING_MIN_QUALIFIED, A9_TIMING_ABORT_TIMEOUT_SECONDS
 //                              A9_TIMING_OBSERVATION_SECONDS is no longer configurable:
 //                              observation = candleSeconds * candleCount. If set, it must match.
-//   A9_DEPLOY_TON_JETTON_MASTER, A9_DEPLOY_TON_ROUND_CONTROLLER, A9_DEPLOY_MINT_TON,
-//   A9_DEPLOY_MINT_FORWARD_TON, A9_DEPLOY_FUND_TON   deployment TON budget (decimal TON)
+//   A9_DEPLOY_TON_JETTON_MASTER, A9_DEPLOY_TON_ROUND_CONTROLLER, A9_DEPLOY_TON_JUNXIANG_DISTRIBUTOR,
+//   A9_DEPLOY_MINT_TON, A9_DEPLOY_MINT_FORWARD_TON, A9_DEPLOY_FUND_TON   deployment TON budget (decimal TON)
 
 import "@stdlib/strings"
 import "@acton/env"
@@ -38,6 +42,7 @@ import "@acton/fs"
 import "@acton/emulation/scripts"
 import "@contracts/types"
 import "@contracts/jetton/storage"
+import "@contracts/junxiang"
 import "deploy/actions"
 
 const PARAM_TOTAL_SUPPLY: coins = 10000000000000000000; // 100 亿 A9 (9 decimals)
@@ -193,6 +198,7 @@ fun requireActive(addr: address, name: string, expectedCode: cell, needed: coins
 fun main() {
     val masterTon = deployTon("A9_DEPLOY_TON_JETTON_MASTER", 5);
     val rcTon = deployTon("A9_DEPLOY_TON_ROUND_CONTROLLER", 5);
+    val distTon = deployTon("A9_DEPLOY_TON_JUNXIANG_DISTRIBUTOR", 1);
     val mintTon = tonSetting("A9_DEPLOY_MINT_TON", "0.55");
     val mintForwardTon = tonSetting("A9_DEPLOY_MINT_FORWARD_TON", "0.4");
     val fundTon = tonSetting("A9_DEPLOY_FUND_TON", "0.3");
@@ -200,6 +206,10 @@ fun main() {
         "Deploy TON: JettonMaster={} nano [{}] RoundController={} nano [{}]",
         masterTon, tonSource("A9_DEPLOY_TON_JETTON_MASTER"),
         rcTon, tonSource("A9_DEPLOY_TON_ROUND_CONTROLLER"),
+    );
+    println(
+        "Deploy TON: JunxiangDistributor={} nano [{}]",
+        distTon, tonSource("A9_DEPLOY_TON_JUNXIANG_DISTRIBUTOR"),
     );
     println(
         "Deploy TON extras: mint={} nano [{}] mintForward={} nano [{}]",
@@ -219,11 +229,15 @@ fun main() {
     val roundRewardRaw = coinRawSetting("A9_DEPLOY_ROUND_REWARD_RAW", PARAM_ROUND_REWARD);
     val teamRoundRaw = coinRawSetting("A9_DEPLOY_TEAM_ROUND_RAW", PARAM_TEAM_ROUND);
     val minStakeRaw = coinRawSetting("A9_DEPLOY_MIN_STAKE_RAW", PARAM_MIN_STAKE);
+    val abortTimeoutSeconds = intSetting("A9_TIMING_ABORT_TIMEOUT_SECONDS", PARAM_ABORT_TIMEOUT);
 
     if (previewSeconds <= 0 || stakeSeconds <= 0 || candleSeconds <= 0 || candleCount <= 0) {
         Assert.fail("timing values must all be > 0");
     }
-    // observation window is derived in v10; an explicit override must agree with it
+    if (abortTimeoutSeconds <= 0) {
+        Assert.fail("A9_TIMING_ABORT_TIMEOUT_SECONDS must be > 0");
+    }
+    // observation window is derived in v11; an explicit override must agree with it
     val observationSeconds = candleSeconds * candleCount;
     val obsRaw = env<string>("A9_TIMING_OBSERVATION_SECONDS");
     if (obsRaw != null) {
@@ -231,7 +245,7 @@ fun main() {
         if (obsEnv != observationSeconds) {
             Assert.fail(
                 format(
-                    "A9_TIMING_OBSERVATION_SECONDS={} must equal candleSeconds*candleCount={} (observation is derived in v10)",
+                    "A9_TIMING_OBSERVATION_SECONDS={} must equal candleSeconds*candleCount={} (observation is derived in v11)",
                     obsEnv,
                     observationSeconds,
                 ),
@@ -256,6 +270,10 @@ fun main() {
         minQualified, intSource("A9_TIMING_MIN_QUALIFIED"),
         observationSeconds,
     );
+    println(
+        "Timing: abortTimeout={} [{}] (technical abort; observation/preview timeout)",
+        abortTimeoutSeconds, intSource("A9_TIMING_ABORT_TIMEOUT_SECONDS"),
+    );
 
     val deployer = scripts.wallet("deployer");
     val admin = scripts.wallet("admin");
@@ -266,11 +284,15 @@ fun main() {
         Assert.fail("A9_TEAM_WALLET_ADDRESS must be set when broadcasting with --net");
     }
     val teamWallet = teamEnv ?? deployer.address;
+    // distributor publisher: explicit env, else the keeper (contracts/README §7.1)
+    val publisherEnv = env<address>("A9_JUNXIANG_PUBLISHER_ADDRESS");
+    val junxiangPublisher = publisherEnv ?? keeper;
 
     println("A9 deploy params:");
     println("  totalSupplyRaw     = {}", PARAM_TOTAL_SUPPLY);
     println("  keeper             = {} [{}]", keeper, env<address>("A9_KEEPER_ADDRESS") == null ? "default: deployer" : "env");
     println("  teamWallet         = {} [{}]", teamWallet, teamEnv == null ? "default: deployer" : "env");
+    println("  junxiangPublisher  = {} [{}]", junxiangPublisher, publisherEnv == null ? "default: keeper" : "env");
     println("  p0UsdE8            = {}", PARAM_P0);
     println("  priceMultiplier    = 2");
     println("  roundRewardRaw     = {} [{}]", roundRewardRaw, intSource("A9_DEPLOY_ROUND_REWARD_RAW"));
@@ -349,7 +371,7 @@ fun main() {
             candleSeconds: candleSeconds as uint32,
             candleCount: candleCount as uint8,
             minQualifiedCandles: minQualified as uint8,
-            abortTimeoutSeconds: PARAM_ABORT_TIMEOUT,
+            abortTimeoutSeconds: abortTimeoutSeconds as uint32,
             riskDisclosureVersion: 1,
             configVersion: 1,
         }.toCell(),
@@ -419,15 +441,62 @@ fun main() {
     }
     println("Funded RC Jetton Wallet with {} raw A9 (balance verified = {})", rcFundRaw, rcBalance);
 
+    // --- 6. JunxiangDistributor (deployed, NOT funded: ops funds before each root) ---
+    val distStorage = DistributorStorage {
+        publisher: junxiangPublisher,
+        jettonMaster: masterAddress,
+        codes: DistributorCodes { jettonWalletCode: build("JettonWallet"), recordCode: build("ClaimRecord") }.toCell(),
+        root: 0 as uint256,
+        listId: 0,
+        totalPaidRaw: 0,
+    };
+    val distInit = ContractState { code: build("JunxiangDistributor"), data: distStorage.toCell() };
+    val distAddress = AutoDeployAddress { stateInit: distInit }.calculateAddress();
+    net.send(deployer.address, createMessage({
+        bounce: false,
+        value: distTon,
+        dest: { stateInit: distInit },
+        body: TopUpTons {},
+    })).waitForTrace();
+    requireActive(distAddress, "JunxiangDistributor", build("JunxiangDistributor"), distTon);
+    fs.writeString("deploy/junxiang-distributor.addr", format("{}\n", distAddress));
+    println("JunxiangDistributor deployed at {}", distAddress);
+    val distWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [distAddress]);
+    println("Distributor Jetton Wallet = {} (not funded by deploy; ops funds it before junxiang-set-root)", distWallet);
+
+    // --- 7. Read-back: RC ticket code hash + distributor state ---------------
+    val ticketHashBuild = build("StakeTicket").hash();
+    val ticketHashOnChain = net.runGetMethod<uint256>(rcAddress, "get_ticket_code_hash");
+    println("RC get_ticket_code_hash      = 0x{:x} (build StakeTicket = 0x{:x})", ticketHashOnChain, ticketHashBuild);
+    if (ticketHashOnChain != ticketHashBuild) {
+        Assert.fail("RC.get_ticket_code_hash does not match build StakeTicket");
+    }
+    val distView = net.runGetMethod<DistributorView>(distAddress, "get_distributor");
+    println(
+        "JunxiangDistributor get_distributor = publisher={} listId={} root=0x{:x} totalPaidRaw={}",
+        distView.publisher, distView.listId, distView.root, distView.totalPaidRaw,
+    );
+    if (distView.publisher != junxiangPublisher) {
+        Assert.fail("JunxiangDistributor.publisher does not match junxiangPublisher");
+    }
+    if (distView.listId != 0 || distView.totalPaidRaw != 0) {
+        Assert.fail("JunxiangDistributor must start with listId=0 and totalPaidRaw=0");
+    }
+
     // --- Summary ------------------------------------------------------------
     println("");
-    println("=== A9 v10 deploy summary ===");
+    println("=== A9 v11 deploy summary ===");
     println("  JettonMaster       = {}", masterAddress);
     println("  RoundController    = {}", rcAddress);
     println("  RC jetton wallet   = {}", rcWallet);
     println("  RC funded balance  = {} raw A9", rcBalance);
+    println("  RC ticket code hash = 0x{:x}", ticketHashOnChain);
+    println("  JunxiangDistributor = {}", distAddress);
+    println("  Distributor jetton wallet = {}", distWallet);
+    println("  Distributor code hash = 0x{:x} (build)", build("JunxiangDistributor").hash());
+    println("  junxiangPublisher  = {}", junxiangPublisher);
     println("  keeper             = {}", keeper);
     println("  teamWallet         = {}", teamWallet);
-    println("  address files      = deploy/jetton-master.addr, deploy/round-controller.addr");
+    println("  address files      = deploy/jetton-master.addr, deploy/round-controller.addr, deploy/junxiang-distributor.addr");
     println("TODO (ops): seed extra TON gas balance on RC if needed (RC >= 20 TON recommended).");
 }

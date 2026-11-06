@@ -1,0 +1,374 @@
+{
+  "abi_schema_version": "1.0",
+  "contract_name": "StakeTicket",
+  "author": "A9 Protocol",
+  "version": "11.0.0",
+  "description": "A9 stake ticket: per-owner, per-round receipt for the RoundController.",
+  "unique_types": [
+    {
+      "kind": "void"
+    },
+    {
+      "kind": "int"
+    },
+    {
+      "kind": "slice"
+    },
+    {
+      "kind": "cell"
+    },
+    {
+      "kind": "builder"
+    },
+    {
+      "kind": "bool"
+    },
+    {
+      "kind": "coins"
+    },
+    {
+      "kind": "address"
+    },
+    {
+      "kind": "intN",
+      "n": 32
+    },
+    {
+      "kind": "uintN",
+      "n": 32
+    },
+    {
+      "kind": "intN",
+      "n": 64
+    },
+    {
+      "kind": "uintN",
+      "n": 64
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketAddStake"
+    },
+    {
+      "kind": "uintN",
+      "n": 128
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketUpdate"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketClaim"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketRestake"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketStorage"
+    },
+    {
+      "kind": "uintN",
+      "n": 8
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketRequest"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ReturnExcessesBackTicket"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketView"
+    }
+  ],
+  "struct_instantiations": [],
+  "alias_instantiations": [],
+  "declarations": [
+    {
+      "kind": "struct",
+      "name": "ReturnExcessesBackTicket",
+      "ty_idx": 20,
+      "prefix": {
+        "prefix_num": 3576854235,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketStorage",
+      "ty_idx": 17,
+      "fields": [
+        {
+          "name": "rc",
+          "ty_idx": 7
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 18
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "principalDone",
+          "ty_idx": 5
+        },
+        {
+          "name": "lockedClaimedRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "pending",
+          "ty_idx": 5
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketAddStake",
+      "ty_idx": 12,
+      "prefix": {
+        "prefix_num": 1381237505,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketUpdate",
+      "ty_idx": 14,
+      "prefix": {
+        "prefix_num": 1381237506,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "principalDone",
+          "ty_idx": 5
+        },
+        {
+          "name": "lockedClaimedRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketClaim",
+      "ty_idx": 15,
+      "prefix": {
+        "prefix_num": 1381237507,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketRestake",
+      "ty_idx": 16,
+      "prefix": {
+        "prefix_num": 1381237508,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketRequest",
+      "ty_idx": 19,
+      "prefix": {
+        "prefix_num": 1381237509,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 18
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "principalDone",
+          "ty_idx": 5
+        },
+        {
+          "name": "lockedClaimedRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "restake",
+          "ty_idx": 5
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketView",
+      "ty_idx": 21,
+      "fields": [
+        {
+          "name": "rc",
+          "ty_idx": 7
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 18
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "principalDone",
+          "ty_idx": 5
+        },
+        {
+          "name": "lockedClaimedRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "pending",
+          "ty_idx": 5
+        }
+      ]
+    }
+  ],
+  "incoming_messages": [
+    {
+      "body_ty_idx": 12
+    },
+    {
+      "body_ty_idx": 14
+    },
+    {
+      "body_ty_idx": 15
+    },
+    {
+      "body_ty_idx": 16
+    }
+  ],
+  "incoming_external": [],
+  "outgoing_messages": [
+    {
+      "body_ty_idx": 19
+    },
+    {
+      "body_ty_idx": 20
+    }
+  ],
+  "emitted_events": [],
+  "storage": {
+    "storage_ty_idx": 17
+  },
+  "get_methods": [
+    {
+      "tvm_method_id": 71423,
+      "name": "get_ticket_data",
+      "parameters": [],
+      "return_ty_idx": 21
+    }
+  ],
+  "thrown_errors": [
+    {
+      "kind": "enum_member",
+      "name": "Errors.UnknownMessage",
+      "err_code": 106
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NothingToClaim",
+      "err_code": 230
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotEnoughValue",
+      "err_code": 234
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotTicket",
+      "err_code": 236
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotOwner",
+      "err_code": 237
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.TicketPending",
+      "err_code": 238
+    }
+  ],
+  "compiler_name": "tolk",
+  "compiler_version": "1.4.1"
+}

@@ -142,6 +142,7 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
     contracts: {
       jettonMaster: contract('contract_jetton_master'),
       roundController: contract('contract_round_controller'),
+      junxiangDistributor: contract('contract_junxiang_distributor'),
       stakingVault: contract('contract_staking_vault'),
       rewardVault: contract('contract_reward_vault'),
       codeHash: contract('contract_code_hash'),

@@ -39,6 +39,9 @@ export function buildShareText(moment: ShareMoment, ctx: ShareContext = {}): str
       const pool = ctx.poolYi ? `奖池 ${ctx.poolYi} 亿 A9 分给攻城的人` : '奖池已分给攻城的人';
       return `${round}破城了！${pool}。散户做庄，这次我们赢了 ${SHARE_TAG}`;
     }
+    case 'claim': {
+      return `刚领到这周的军饷！拉人、组队、守城都有饷，散户做庄从来不白干 ${SHARE_TAG}`;
+    }
     case 'fallen': {
       const medal = ctx.medals !== null && ctx.medals !== undefined ? `，阵亡勋章 ×${ctx.medals}` : '';
       return `${round}没破，我的本金阵亡了${medal}。下一城见 ${SHARE_TAG}`;

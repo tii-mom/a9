@@ -10,6 +10,9 @@
  */
 
 export { ChainMePanel } from './ChainMePanel';
+export { JunxiangCard } from './JunxiangCard';
+export type { JunxiangCardProps } from './JunxiangCard';
+export { prepareJunxiangClaimTransaction, buildClaimJunxiangBody, buildProofCell } from './junxiang';
 export type { ChainMePanelProps } from './ChainMePanel';
 export { TxStatusView } from './TxStatus';
 export type { TxStatusProps } from './TxStatus';

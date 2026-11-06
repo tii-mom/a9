@@ -2,8 +2,8 @@
   "abi_schema_version": "1.0",
   "contract_name": "RoundController",
   "author": "A9 Protocol",
-  "version": "10.0.0",
-  "description": "A9 round state machine, stake ledger, settlement and pull claims.",
+  "version": "11.0.0",
+  "description": "A9 round state machine, round totals, settlement and ticket-based claims.",
   "unique_types": [
     {
       "kind": "void"
@@ -116,11 +116,7 @@
     },
     {
       "kind": "StructRef",
-      "struct_name": "Claim"
-    },
-    {
-      "kind": "StructRef",
-      "struct_name": "ClaimAll"
+      "struct_name": "TicketRequest"
     },
     {
       "kind": "StructRef",
@@ -129,6 +125,10 @@
     {
       "kind": "StructRef",
       "struct_name": "RetrySettlement"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ReleaseTeam"
     },
     {
       "kind": "StructRef",
@@ -175,6 +175,14 @@
       "inner_ty_idx": 37
     },
     {
+      "kind": "StructRef",
+      "struct_name": "ProtocolCodes"
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 40
+    },
+    {
       "kind": "cellOf",
       "inner_ty_idx": 32
     },
@@ -183,23 +191,25 @@
       "struct_name": "RoundData"
     },
     {
+      "kind": "StructRef",
+      "struct_name": "RoundExtra"
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 44
+    },
+    {
       "kind": "mapKV",
       "key_ty_idx": 23,
-      "value_ty_idx": 41
-    },
-    {
-      "kind": "StructRef",
-      "struct_name": "StakePosition"
-    },
-    {
-      "kind": "mapKV",
-      "key_ty_idx": 7,
       "value_ty_idx": 43
     },
     {
-      "kind": "mapKV",
-      "key_ty_idx": 23,
-      "value_ty_idx": 44
+      "kind": "StructRef",
+      "struct_name": "TicketAddStake"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TicketUpdate"
     },
     {
       "kind": "StructRef",
@@ -207,15 +217,15 @@
     },
     {
       "kind": "StructRef",
+      "struct_name": "ProtocolStateView"
+    },
+    {
+      "kind": "StructRef",
       "struct_name": "RoundView"
     },
     {
       "kind": "StructRef",
-      "struct_name": "StakePositionView"
-    },
-    {
-      "kind": "StructRef",
-      "struct_name": "Claimable"
+      "struct_name": "RewardPreview"
     },
     {
       "kind": "StructRef",
@@ -240,6 +250,14 @@
     {
       "kind": "StructRef",
       "struct_name": "RoundSettled"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TeamReleased"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "Restaked"
     },
     {
       "kind": "StructRef",
@@ -300,14 +318,6 @@
         {
           "name": "minStakeRaw",
           "ty_idx": 20
-        },
-        {
-          "name": "maxStakePerAddressRaw",
-          "ty_idx": 20
-        },
-        {
-          "name": "maxTotalStakeRaw",
-          "ty_idx": 20
         }
       ]
     },
@@ -352,6 +362,21 @@
     },
     {
       "kind": "struct",
+      "name": "ProtocolCodes",
+      "ty_idx": 40,
+      "fields": [
+        {
+          "name": "jettonWalletCode",
+          "ty_idx": 3
+        },
+        {
+          "name": "ticketCode",
+          "ty_idx": 3
+        }
+      ]
+    },
+    {
+      "kind": "struct",
       "name": "ProtocolConfig",
       "ty_idx": 32,
       "fields": [
@@ -368,15 +393,38 @@
           "ty_idx": 39
         },
         {
-          "name": "jettonWalletCode",
-          "ty_idx": 3
+          "name": "codes",
+          "ty_idx": 41
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RoundExtra",
+      "ty_idx": 44,
+      "fields": [
+        {
+          "name": "targetTwap24hUsdE8",
+          "ty_idx": 20
+        },
+        {
+          "name": "candleHash",
+          "ty_idx": 24
+        },
+        {
+          "name": "burnRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "teamTransferRaw",
+          "ty_idx": 20
         }
       ]
     },
     {
       "kind": "struct",
       "name": "RoundData",
-      "ty_idx": 41,
+      "ty_idx": 43,
       "fields": [
         {
           "name": "status",
@@ -388,10 +436,6 @@
         },
         {
           "name": "targetPriceUsdE8",
-          "ty_idx": 20
-        },
-        {
-          "name": "targetTwap24hUsdE8",
           "ty_idx": 20
         },
         {
@@ -419,8 +463,16 @@
           "ty_idx": 20
         },
         {
-          "name": "stakerCount",
-          "ty_idx": 38
+          "name": "totalWeightRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "rewardBudgetRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "stakeCount",
+          "ty_idx": 9
         },
         {
           "name": "actionsSent",
@@ -431,27 +483,8 @@
           "ty_idx": 23
         },
         {
-          "name": "candleHash",
-          "ty_idx": 24
-        }
-      ]
-    },
-    {
-      "kind": "struct",
-      "name": "StakePosition",
-      "ty_idx": 43,
-      "fields": [
-        {
-          "name": "amountRaw",
-          "ty_idx": 20
-        },
-        {
-          "name": "lastDepositNonce",
-          "ty_idx": 11
-        },
-        {
-          "name": "claimed",
-          "ty_idx": 5
+          "name": "extra",
+          "ty_idx": 45
         }
       ]
     },
@@ -462,7 +495,7 @@
       "fields": [
         {
           "name": "config",
-          "ty_idx": 40
+          "ty_idx": 42
         },
         {
           "name": "currentRoundId",
@@ -474,11 +507,23 @@
         },
         {
           "name": "rounds",
-          "ty_idx": 42
+          "ty_idx": 46
         },
         {
-          "name": "stakes",
-          "ty_idx": 45
+          "name": "carryRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "lastSuccessRound",
+          "ty_idx": 23
+        },
+        {
+          "name": "teamPendingRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "endAt",
+          "ty_idx": 11
         }
       ]
     },
@@ -561,46 +606,23 @@
     },
     {
       "kind": "struct",
-      "name": "Claim",
-      "ty_idx": 25,
+      "name": "ReleaseTeam",
+      "ty_idx": 28,
       "prefix": {
-        "prefix_num": 1381236742,
+        "prefix_num": 1381236758,
         "prefix_len": 32
       },
       "fields": [
         {
           "name": "queryId",
           "ty_idx": 11
-        },
-        {
-          "name": "roundId",
-          "ty_idx": 23
-        }
-      ]
-    },
-    {
-      "kind": "struct",
-      "name": "ClaimAll",
-      "ty_idx": 26,
-      "prefix": {
-        "prefix_num": 1381236750,
-        "prefix_len": 32
-      },
-      "fields": [
-        {
-          "name": "queryId",
-          "ty_idx": 11
-        },
-        {
-          "name": "roundId",
-          "ty_idx": 23
         }
       ]
     },
     {
       "kind": "struct",
       "name": "AbortTechnical",
-      "ty_idx": 27,
+      "ty_idx": 26,
       "prefix": {
         "prefix_num": 1381236752,
         "prefix_len": 32
@@ -615,7 +637,7 @@
     {
       "kind": "struct",
       "name": "RetrySettlement",
-      "ty_idx": 28,
+      "ty_idx": 27,
       "prefix": {
         "prefix_num": 1381236757,
         "prefix_len": 32
@@ -723,7 +745,7 @@
     {
       "kind": "struct",
       "name": "TargetPriceSet",
-      "ty_idx": 52,
+      "ty_idx": 55,
       "prefix": {
         "prefix_num": 1381236993,
         "prefix_len": 32
@@ -750,7 +772,7 @@
     {
       "kind": "struct",
       "name": "RoundSettled",
-      "ty_idx": 55,
+      "ty_idx": 58,
       "prefix": {
         "prefix_num": 1381236994,
         "prefix_len": 32
@@ -795,13 +817,21 @@
         {
           "name": "teamReleasedRaw",
           "ty_idx": 20
+        },
+        {
+          "name": "rewardBudgetRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "carryAfterRaw",
+          "ty_idx": 20
         }
       ]
     },
     {
       "kind": "struct",
       "name": "DepositAccepted",
-      "ty_idx": 51,
+      "ty_idx": 54,
       "prefix": {
         "prefix_num": 1381236995,
         "prefix_len": 32
@@ -820,7 +850,15 @@
           "ty_idx": 20
         },
         {
+          "name": "weightRaw",
+          "ty_idx": 20
+        },
+        {
           "name": "totalAcceptedStakeRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "totalWeightRaw",
           "ty_idx": 20
         }
       ]
@@ -828,7 +866,7 @@
     {
       "kind": "struct",
       "name": "TechnicalAborted",
-      "ty_idx": 57,
+      "ty_idx": 62,
       "prefix": {
         "prefix_num": 1381236996,
         "prefix_len": 32
@@ -851,7 +889,7 @@
     {
       "kind": "struct",
       "name": "StakingClosed",
-      "ty_idx": 53,
+      "ty_idx": 56,
       "prefix": {
         "prefix_num": 1381237003,
         "prefix_len": 32
@@ -878,7 +916,7 @@
     {
       "kind": "struct",
       "name": "CandleSubmitted",
-      "ty_idx": 54,
+      "ty_idx": 57,
       "prefix": {
         "prefix_num": 1381237004,
         "prefix_len": 32
@@ -917,7 +955,7 @@
     {
       "kind": "struct",
       "name": "Claimed",
-      "ty_idx": 56,
+      "ty_idx": 61,
       "prefix": {
         "prefix_num": 1381237006,
         "prefix_len": 32
@@ -928,8 +966,8 @@
           "ty_idx": 7
         },
         {
-          "name": "roundsMask",
-          "ty_idx": 38
+          "name": "roundId",
+          "ty_idx": 23
         },
         {
           "name": "principalRaw",
@@ -944,7 +982,7 @@
     {
       "kind": "struct",
       "name": "DepositRefunded",
-      "ty_idx": 50,
+      "ty_idx": 53,
       "prefix": {
         "prefix_num": 1381237007,
         "prefix_len": 32
@@ -961,17 +999,63 @@
         {
           "name": "instant",
           "ty_idx": 5
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "Restaked",
+      "ty_idx": 60,
+      "prefix": {
+        "prefix_num": 1381237010,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "ty_idx": 7
         },
         {
-          "name": "recorded",
-          "ty_idx": 5
+          "name": "fromRound",
+          "ty_idx": 23
+        },
+        {
+          "name": "toRound",
+          "ty_idx": 23
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 20
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TeamReleased",
+      "ty_idx": 59,
+      "prefix": {
+        "prefix_num": 1381237011,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "roundId",
+          "ty_idx": 23
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 20
         }
       ]
     },
     {
       "kind": "struct",
       "name": "SettlementBounced",
-      "ty_idx": 58,
+      "ty_idx": 63,
       "prefix": {
         "prefix_num": 1381237008,
         "prefix_len": 32
@@ -990,7 +1074,7 @@
     {
       "kind": "struct",
       "name": "UnexpectedBounce",
-      "ty_idx": 59,
+      "ty_idx": 64,
       "prefix": {
         "prefix_num": 1381237009,
         "prefix_len": 32
@@ -1009,7 +1093,7 @@
     {
       "kind": "struct",
       "name": "ProtocolConfigView",
-      "ty_idx": 46,
+      "ty_idx": 49,
       "fields": [
         {
           "name": "admin",
@@ -1104,7 +1188,7 @@
     {
       "kind": "struct",
       "name": "RoundView",
-      "ty_idx": 47,
+      "ty_idx": 51,
       "fields": [
         {
           "name": "roundId",
@@ -1198,51 +1282,144 @@
     },
     {
       "kind": "struct",
-      "name": "StakePositionView",
-      "ty_idx": 48,
+      "name": "ProtocolStateView",
+      "ty_idx": 50,
       "fields": [
         {
-          "name": "amountRaw",
+          "name": "carryRaw",
           "ty_idx": 20
         },
         {
-          "name": "lastDepositNonce",
+          "name": "lastSuccessRound",
+          "ty_idx": 23
+        },
+        {
+          "name": "teamPendingRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "endAt",
           "ty_idx": 11
         },
         {
-          "name": "principalClaimed",
-          "ty_idx": 5
+          "name": "successCount",
+          "ty_idx": 23
         },
         {
-          "name": "rewardClaimed",
-          "ty_idx": 5
-        },
-        {
-          "name": "weight",
-          "ty_idx": 20
-        },
-        {
-          "name": "rewardState",
+          "name": "currentRoundId",
           "ty_idx": 23
         }
       ]
     },
     {
       "kind": "struct",
-      "name": "Claimable",
-      "ty_idx": 49,
+      "name": "RewardPreview",
+      "ty_idx": 52,
       "fields": [
-        {
-          "name": "principalRaw",
-          "ty_idx": 20
-        },
         {
           "name": "rewardRaw",
           "ty_idx": 20
         },
         {
-          "name": "roundsMask",
-          "ty_idx": 38
+          "name": "immediateRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "lockedRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "unlockedLockedRaw",
+          "ty_idx": 20
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketAddStake",
+      "ty_idx": 47,
+      "prefix": {
+        "prefix_num": 1381237505,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 20
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketUpdate",
+      "ty_idx": 48,
+      "prefix": {
+        "prefix_num": 1381237506,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "principalDone",
+          "ty_idx": 5
+        },
+        {
+          "name": "lockedClaimedRaw",
+          "ty_idx": 20
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TicketRequest",
+      "ty_idx": 25,
+      "prefix": {
+        "prefix_num": 1381237509,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 23
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "weightRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "principalDone",
+          "ty_idx": 5
+        },
+        {
+          "name": "lockedClaimedRaw",
+          "ty_idx": 20
+        },
+        {
+          "name": "restake",
+          "ty_idx": 5
         }
       ]
     }
@@ -1283,18 +1460,15 @@
   "outgoing_messages": [
     {
       "body_ty_idx": 3
+    },
+    {
+      "body_ty_idx": 47
+    },
+    {
+      "body_ty_idx": 48
     }
   ],
   "emitted_events": [
-    {
-      "body_ty_idx": 50
-    },
-    {
-      "body_ty_idx": 51
-    },
-    {
-      "body_ty_idx": 52
-    },
     {
       "body_ty_idx": 53
     },
@@ -1315,6 +1489,21 @@
     },
     {
       "body_ty_idx": 59
+    },
+    {
+      "body_ty_idx": 60
+    },
+    {
+      "body_ty_idx": 61
+    },
+    {
+      "body_ty_idx": 62
+    },
+    {
+      "body_ty_idx": 63
+    },
+    {
+      "body_ty_idx": 64
     }
   ],
   "storage": {
@@ -1325,7 +1514,13 @@
       "tvm_method_id": 101317,
       "name": "get_protocol_config",
       "parameters": [],
-      "return_ty_idx": 46
+      "return_ty_idx": 49
+    },
+    {
+      "tvm_method_id": 101785,
+      "name": "get_protocol_state",
+      "parameters": [],
+      "return_ty_idx": 50
     },
     {
       "tvm_method_id": 89632,
@@ -1338,6 +1533,27 @@
       "name": "get_jetton_wallet_code_hash",
       "parameters": [],
       "return_ty_idx": 24
+    },
+    {
+      "tvm_method_id": 76857,
+      "name": "get_ticket_code_hash",
+      "parameters": [],
+      "return_ty_idx": 24
+    },
+    {
+      "tvm_method_id": 77790,
+      "name": "get_ticket_address",
+      "parameters": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "roundId",
+          "ty_idx": 23
+        }
+      ],
+      "return_ty_idx": 7
     },
     {
       "tvm_method_id": 92146,
@@ -1360,7 +1576,7 @@
           "ty_idx": 23
         }
       ],
-      "return_ty_idx": 47
+      "return_ty_idx": 51
     },
     {
       "tvm_method_id": 81440,
@@ -1404,48 +1620,22 @@
           "ty_idx": 23
         }
       ],
-      "return_ty_idx": 38
+      "return_ty_idx": 9
     },
     {
-      "tvm_method_id": 119194,
-      "name": "get_user_stake",
+      "tvm_method_id": 77194,
+      "name": "get_reward_preview",
       "parameters": [
         {
           "name": "roundId",
           "ty_idx": 23
         },
         {
-          "name": "owner",
-          "ty_idx": 7
+          "name": "weightRaw",
+          "ty_idx": 20
         }
       ],
-      "return_ty_idx": 48
-    },
-    {
-      "tvm_method_id": 108774,
-      "name": "get_user_reward_estimate",
-      "parameters": [
-        {
-          "name": "roundId",
-          "ty_idx": 23
-        },
-        {
-          "name": "owner",
-          "ty_idx": 7
-        }
-      ],
-      "return_ty_idx": 20
-    },
-    {
-      "tvm_method_id": 113163,
-      "name": "get_claimable_all",
-      "parameters": [
-        {
-          "name": "owner",
-          "ty_idx": 7
-        }
-      ],
-      "return_ty_idx": 49
+      "return_ty_idx": 52
     }
   ],
   "thrown_errors": [
@@ -1526,8 +1716,13 @@
     },
     {
       "kind": "enum_member",
-      "name": "Errors.WrongWorkchain",
-      "err_code": 235
+      "name": "Errors.NotTicket",
+      "err_code": 236
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.RestakeNotOpen",
+      "err_code": 239
     },
     {
       "kind": "enum_member",

@@ -35,6 +35,12 @@ export async function computeRoundJunxiang(
   const snap = await loadSnapshot(env as SocialEnv, now);
   const round = snap.rounds.find((row) => row.round_id === roundId);
   if (!round) throw notFound('轮次不存在');
+  // Lead decision: technically aborted rounds pay no 军饷 — principal is refunded with zero risk,
+  // so referral/squad bonuses there would be free to farm. Clear any rows and stop.
+  if ((round as { result?: string | null }).result === 'TECHNICAL_ABORT') {
+    await replaceJunxiangRows(env as SocialEnv, roundId, [], now);
+    return [];
+  }
   const budgets = JUNXIANG_A9_BUDGETS;
   const input = junxiangInputOf(snap, roundId, budgets);
   const contributions: JunxiangContribution[] = [];

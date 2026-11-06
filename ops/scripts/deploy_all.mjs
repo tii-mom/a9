@@ -31,7 +31,7 @@ if (errors.length) {
   process.exit(1);
 }
 
-section('deploy_all：部署编排（V7 时间 / v10 合约）');
+section('deploy_all：部署编排（V7 时间 / v11 合约）');
 dryRunBanner(execute);
 kv('模式', mode === 'whole' ? 'whole（15 整体部署 deploy-emulation）' : 'jetton（仅 Jetton 分步 10/11）');
 kv('配置哈希', digest);
@@ -49,7 +49,7 @@ const failed = [];
 section('部署顺序');
 table(['step', 'id', 'script', '依赖'], plan.map((item) => [item.step, item.id, item.script, (item.dependsOn || []).join(',')]));
 detail(mode === 'whole'
-  ? 'whole 模式（v10）：15 整体部署 = JettonMaster → mint 100 亿（mint-once）→ RoundController → 钱包推导核对 → RC 注资 82 亿（forward 0）；随后 40/55/50/60/verify。'
+  ? 'whole 模式（v11）：15 整体部署 = JettonMaster → mint 100 亿（mint-once）→ RoundController → 钱包推导核对 → RC 注资 82 亿（forward 0）→ JunxiangDistributor（不注资）；随后 40/55/50/60/verify。'
   : 'jetton 模式：只跑 10/11（Jetton 分步部署与 mint-once）；RC 请用 15 整体部署。');
 
 for (const item of plan) {

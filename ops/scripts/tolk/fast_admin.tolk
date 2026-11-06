@@ -1,9 +1,10 @@
-// Fast-test keeper / ops messages (v10) with small TON values.
+// Fast-test keeper / ops messages (v11 ABI) with small TON values.
 // Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/fast_admin.tolk <cmd> <roundId> <twap>
 //   open-round        keeper only; roundId ignored (RC opens the round after the settled one), twap = opening 24h TWAP
-//   close-staking     anyone, after the 36h window; roundId/twap ignored
-//   abort-technical   anyone, 7 days after the observation / preview should have ended
+//   close-staking     anyone, after the staking window; roundId/twap ignored
+//   abort-technical   anyone, abortTimeoutSeconds after the observation / preview should have ended
 //   retry-settlement  anyone, after a SettlementBounced event for <roundId> (RC requires >= 0.3 TON)
+//   release-team      anyone, 30 days after round 10 (RC requires >= 0.1 TON)
 import "@stdlib/strings"
 import "@acton/build"
 import "@acton/env"
@@ -38,6 +39,11 @@ fun main(cmd: string, roundId: int, twap: int) {
     if (op.equalTo("retry-settlement")) {
         net.send(signer.address, createMessage({ bounce: true, value: ton("0.3"), dest: rc!, body: RetrySettlement { queryId: 0, roundId: roundId as uint8 } }));
         println("retry-settlement sent round={}", roundId);
+        return;
+    }
+    if (op.equalTo("release-team")) {
+        net.send(signer.address, createMessage({ bounce: true, value: ton("0.3"), dest: rc!, body: ReleaseTeam { queryId: 0 } }));
+        println("release-team sent");
         return;
     }
     throw 400;

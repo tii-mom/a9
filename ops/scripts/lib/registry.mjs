@@ -1,25 +1,29 @@
-/** 地址登记表（v10）：唯一事实来源（地址 + 部署交易 + 配置哈希）。 */
+/** 地址登记表（v11）：唯一事实来源（地址 + 部署交易 + 配置哈希）。 */
 
 import { createHash } from 'node:crypto';
 import { existsSync, renameSync } from 'node:fs';
 import { DEFAULT_REGISTRY, OPS_ROOT, TEMPLATE_REGISTRY, readJSON, writeJSON } from './config.mjs';
 import { parseAddress, validateTestnetAddress } from './ton.mjs';
 
-// v10（D-42）：只有 JettonMaster + 标准 JettonWallet + 一个 RoundController。
-// RC 的 Jetton Wallet 同时托管 70 亿奖励 + 12 亿团队额度 + 质押本金。
+// v11（contracts/README §6、§7.1）：JettonMaster + 标准 JettonWallet + RoundController（+ StakeTicket 子合约）
+// + 军饷 JunxiangDistributor（+ ClaimRecord 子合约）。RC 的 Jetton Wallet 托管 70 亿奖励 + 12 亿团队额度 + 质押本金；
+// 分发合约的 Jetton Wallet 由运维按周充值，不在部署时注资。
 export const CONTRACT_KEYS = [
   'jettonMaster',
   'jettonMasterTreasuryWallet',
   'roundController',
   'roundControllerJettonWallet',
   'teamWalletJettonWallet',
+  'junxiangDistributor',
+  'junxiangDistributorJettonWallet',
 ];
 
-// 没有 admin：keeper 是唯一的运营热钱包（OpenRound / SubmitCandle）。
+// 没有 admin：keeper 是唯一的运营热钱包（OpenRound / SubmitCandle）；junxiangPublisher 只发布军饷周根（默认同 keeper）。
 export const WALLET_KEYS = [
   'keeper',
   'treasury',
   'teamWallet',
+  'junxiangPublisher',
   'marketingWallet',
   'liquidityWallet',
   'teamInternalWallet',
@@ -46,7 +50,7 @@ export function emptyRegistry() {
     network: 'testnet',
     chainId: -3,
     status: 'not_deployed',
-    contractsVersion: 'v10',
+    contractsVersion: 'v11',
     configVersion: 1,
     paramsDigest: null,
     codeHashes: {},
