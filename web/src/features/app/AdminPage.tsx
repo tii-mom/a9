@@ -465,7 +465,7 @@ export default function AdminPage() {
         { label: lang === 'zh' ? '观察窗口' : 'Observation', value: secondsHint(config.observationSeconds) },
         { label: lang === 'zh' ? '网络' : 'Network', value: config.network },
         { label: lang === 'zh' ? '数据源' : 'Data source', value: <DataSourceChip value={config.dataSource} /> },
-        { label: 'TON/USD', value: formatPrice(config.tonUsdE8) },
+        { label: 'GRAM/USD', value: formatPrice(config.tonUsdE8) },
         { label: 'TON Connect manifest', value: config.tonConnectManifestUrl ?? d.notDeployed },
       ]
     : [];

@@ -238,7 +238,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
         ) : (
           <div className="chain-balances">
             <span>
-              <span className="lbl">{d.tonBalance}</span> <b>{walletStore.tonBalance ?? '—'}</b> TON
+              <span className="lbl">{d.tonBalance}</span> <b>{walletStore.tonBalance ?? '—'}</b> GRAM
             </span>
             <span>
               <span className="lbl">{d.a9Balance}</span>{' '}
@@ -346,7 +346,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
                   {busy && state.kind === 'stake' ? d.stakeSigning : d.stakeAction}
                 </button>
                 <span className="chain-gas">
-                  {d.previewGas}: 0.2 TON · forward 0.05 TON
+                  {d.previewGas}: 0.2 GRAM · forward 0.05 GRAM
                 </span>
               </div>
 

@@ -772,6 +772,29 @@ async function main() {
       if (process.env.RECONCILE_DEBUG) console.log('[debug] 被拒质押 owner=' + notification.initiator.raw + ' amount=' + notification.amountRaw.toString());
     }
 
+    // 1c) 逐轮摘要（写入报告，便于审计核对 R1/R2 等期望）
+    console.log('轮 | status | tier | target | seen | qualified(链上/封顶) | 质押 A9 | 权重 A9 | R/T/P 销毁标志');
+    for (const [roundId, view] of [...rounds.entries()].sort((a, b) => a[0] - b[0])) {
+      console.log(
+        'R' + roundId + ' | ' + view.status + ' | ' + view.targetTier + ' | ' + view.targetPriceUsdE8.toString() + ' | ' +
+          view.candlesSeen + ' | ' + view.qualifiedCandles + '/' + Math.min(view.qualifiedCandles, Number(config.minQualifiedCandles)) + ' | ' +
+          view.totalAcceptedStakeRaw.toString() + ' | ' + view.totalWeight.toString() + ' | ' +
+          (view.rewardBurnConfirmed ? 'R✓' : 'R—') + ' ' + (view.teamBurnConfirmed ? 'T✓' : 'T—') + ' ' + (view.principalBurnConfirmed ? 'P✓' : 'P—'),
+      );
+    }
+    // 下一轮（PREVIEW/未开）状态：不计入本轮对账，但报告注明
+    if (currentRound < 10) {
+      try {
+        const next = await getRound(rc.raw, currentRound + 1);
+        if (next.status !== 0) {
+          notes.push('R' + (currentRound + 1) + ' 当前 status=' + next.status + '（PREVIEW/进行中，未计入本轮对账）');
+          console.log('R' + (currentRound + 1) + ' 当前 status=' + next.status + '（PREVIEW/进行中，未计入本轮对账）');
+        }
+      } catch (error) {
+        notes.push('读取下一轮状态失败：' + String(error.message).slice(0, 120));
+      }
+    }
+
     // 2) 轮次级口径：销毁、技术终止
     const abortedRounds = [...rounds.values()].filter((view) => view.status === 10);
     const failedRoundsV88 = [...rounds.values()].filter((view) => view.status === 9);
@@ -886,6 +909,12 @@ async function main() {
       if (state.released) teamReleasedEffective += state.amountRaw || BigInt(config.teamRoundRaw);
       if (state.burned) teamBurnedEffective += state.amountRaw || BigInt(config.teamRoundRaw);
     }
+    const tvRoundLines = [];
+    for (const [roundId] of [...rounds.entries()].sort((a, b) => a[0] - b[0])) {
+      const state = await getTeamRoundState(tv.raw, roundId);
+      tvRoundLines.push('R' + roundId + '(released=' + state.released + ',burned=' + state.burned + ',amount=' + state.amountRaw.toString() + ')');
+    }
+    console.log('TeamVault 逐轮 released/burned：' + tvRoundLines.join(' '));
     const tvExpected =
       TV_INITIAL_QUOTA + abortedTeamRaw - teamReleasedEffective - teamBurnedEffective;
     if (teamReleasedEffective !== teamVault.totalReleasedRaw || teamBurnedEffective !== teamVault.totalBurnedRaw) {

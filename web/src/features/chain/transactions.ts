@@ -116,7 +116,7 @@ function assertGas(chain: ChainConfig, wallet: WalletContext, minimum: number): 
   const balance = tonBalanceToNumber(wallet.tonBalance);
   if (balance === null) return; // 余额未知时不阻断，由钱包端最终校验
   if (balance < minimum) {
-    throw chainError('INSUFFICIENT_BALANCE', 'TON 余额不足', '需要 ≥ ' + minimum + ' TON（当前 ' + balance + ' TON）');
+    throw chainError('INSUFFICIENT_BALANCE', 'GRAM 余额不足', '需要 ≥ ' + minimum + ' GRAM（当前 ' + balance + ' GRAM）');
   }
 }
 

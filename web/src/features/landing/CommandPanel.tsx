@@ -240,7 +240,7 @@ export function CommandPanel({ cfg, stats, board, secondsRemaining, me, wallet, 
                 value={payTon}
                 onChange={(event) => setPayTon(event.target.value)}
               />
-              <span>TON</span>
+              <span>GRAM</span>
             </div>
           </label>
           <div className="chips">

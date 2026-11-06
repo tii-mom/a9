@@ -89,7 +89,7 @@ const ZH: MeDict = {
   demo: '使用演示钱包',
   disconnect: '断开',
   gateTitle: '连接钱包查看你的质押',
-  gateDesc: '连接 TON 钱包（只读）或使用演示钱包，即可查看当前轮质押、可领取与历史记录。',
+  gateDesc: '连接 GRAM 钱包（只读）或使用演示钱包，即可查看当前轮质押、可领取与历史记录。',
   gateHint: '仅读取地址与余额，不签名、不转账；质押与领取请在首页交易台完成。',
   demoNotice: '当前为演示钱包：地址由本地生成或取自演示数据，资金与链上数据均为演示用途。',
   readonlyNotice: '只读模式：不会发起任何交易；合约部署后开放真实质押与领取。',
@@ -142,7 +142,7 @@ const ZH: MeDict = {
   toastClaimOk: '领取成功：',
   toastClaimFail: '领取失败：',
   viewLb: '查看排行榜',
-  walletTon: 'TON 钱包（只读）',
+  walletTon: 'GRAM 钱包（只读）',
   walletDemo: '演示钱包',
 };
 
@@ -154,7 +154,7 @@ const EN: MeDict = {
   demo: 'Use demo wallet',
   disconnect: 'Disconnect',
   gateTitle: 'Connect a wallet to see your stake',
-  gateDesc: 'Connect a TON wallet (read-only) or use the demo wallet to see your current stake, claimables and history.',
+  gateDesc: 'Connect a GRAM wallet (read-only) or use the demo wallet to see your current stake, claimables and history.',
   gateHint: 'Only address and balance are read. No signature, no transfer. Stake and claim from the home trade desk.',
   demoNotice: 'Demo wallet: the address is generated locally or taken from demo data. All funds are simulated.',
   readonlyNotice: 'Read-only mode: no transactions are sent. Real staking and claiming open after contract deployment.',
@@ -207,7 +207,7 @@ const EN: MeDict = {
   toastClaimOk: 'Claimed: ',
   toastClaimFail: 'Claim failed: ',
   viewLb: 'View leaderboard',
-  walletTon: 'TON wallet (read-only)',
+  walletTon: 'GRAM wallet (read-only)',
   walletDemo: 'Demo wallet',
 };
 

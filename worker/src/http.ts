@@ -283,7 +283,7 @@ export function parseAddress(value: unknown, key = 'address'): string {
   const address = value.trim();
   if (!address) throw badRequest(`缺少字段 ${key}`);
   if (address.length > 128) throw badRequest('地址过长');
-  if (!ADDRESS_RE.test(address)) throw badRequest('地址格式不合法（需要 TON 用户友好地址）');
+  if (!ADDRESS_RE.test(address)) throw badRequest('地址格式不合法（需要 GRAM 用户友好地址）');
   return address;
 }
 

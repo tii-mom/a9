@@ -510,7 +510,7 @@ export async function sendTonConnectTransaction(tx: TonConnectTxRequest): Promis
     throw txError('钱包未连接', 'WALLET_NOT_CONNECTED');
   }
   if (state.mode !== 'ton') {
-    throw txError('演示钱包不能签名，请连接真实 TON 钱包', 'DEMO_WALLET');
+    throw txError('演示钱包不能签名，请连接真实 GRAM 钱包', 'DEMO_WALLET');
   }
   const network =
     tx.network ?? (state.network === 'testnet' ? '-3' : state.network === 'mainnet' ? '-239' : undefined);
