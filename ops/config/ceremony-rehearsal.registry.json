@@ -6,7 +6,7 @@
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-06T12:02:10.109Z",
+  "updatedAt": "2026-11-06T12:04:51.500Z",
   "contracts": {
     "jettonMaster": {
       "address": "kQBnEm-jgkTMnKORlgSft2NB10meB0jtLqTH0zbRR2edE60u",
@@ -118,10 +118,10 @@
   "ceremony": {
     "phases": {
       "P0": {
-        "status": "ACK_FAILED",
-        "result": "ACK_FAILED",
-        "durationMs": 134,
-        "finishedAt": "2026-11-06T12:00:23.889Z"
+        "status": "FAILED",
+        "startedAt": "2026-11-06T12:04:51.352Z",
+        "error": "preflight-mainnet FAIL（非演练预期项，硬停）：       其余 0 处残留 ✓ | [8/8] FAIL — 生产 D1：database_id 必须与 demo 不同且非占位符 |        生产 D1 database_id 仍是占位符（00000000-0000-0000-0000-000000000000）；部署时由 GitHub Variable PROD_D1_DATABASE_ID 注入 |  | 汇总：PASS 6 / FAIL 2 / TOTAL 8 | 结果：FAIL（未通过主网部署前自检，禁止部署）",
+        "finishedAt": "2026-11-06T12:04:51.499Z"
       },
       "P1": {
         "status": "DRY_RUN",
@@ -156,7 +156,7 @@
     },
     "completed": [],
     "startedAt": "2026-11-06T12:00:23.747Z",
-    "finishedAt": "2026-11-06T12:02:10.109Z",
+    "finishedAt": "2026-11-06T12:04:45.654Z",
     "addresses": {
       "jettonMaster": "kQBnEm-jgkTMnKORlgSft2NB10meB0jtLqTH0zbRR2edE60u",
       "jettonMasterTreasuryWallet": null,

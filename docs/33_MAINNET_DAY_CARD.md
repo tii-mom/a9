@@ -12,7 +12,7 @@
 ~~~bash
 export A9_MAINNET_RPC=https://toncenter.com/api/v2 A9_MAINNET_API=https://toncenter.com/api/v3 TONCENTER_API_KEY=<mainnet key>
 export RC=<RC> TV=<TV> JM=<JettonMaster> OA=<OracleAdapter> JW=<JettonWallet> ADMIN_ADDRESS=<冷钱包>
-export PROD_D1_ID=<a9-mainnet-id> A9_SIGNER_WALLET=<signer> OPS_RECORDS_DIR=$PWD/ops/records/mainnet-$(date +%Y%m%d)
+export PROD_D1_DATABASE_ID=<a9-mainnet-id> A9_SIGNER_WALLET=<signer> OPS_RECORDS_DIR=$PWD/ops/records/mainnet-$(date +%Y%m%d)
 export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> PROD_JETTON_MASTER_ADDRESS=<JM-raw> PROD_ORACLE_CONFIG_HASH=<sha256:...>
 ~~~
 
@@ -30,10 +30,10 @@ export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> P
     失败：任何 `FAIL` → **停止**，按脚本报的项修（尤其 ops `--net testnet` / 生产 D1 与 demo 同 id）
     可逆：是（只读）
 
-[ ] 3. 建 D1 a9-mainnet → apply 0001-0009 → 空库
-    命令：`cd worker && wrangler d1 create a9-mainnet && wrangler d1 migrations apply a9-mainnet --remote && wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) FROM rounds;"`
-    期望：只列 `0001_init.sql`…`0009_chain_indexer.sql`；`rounds=0`、`trades/claims/stakes/burn_ledger` 全 0；**绝不 seed**
-    失败：出现非编号 SQL 或业务表非空 → **停止**，清库/移文件后重来
+[ ] 3. 建 D1 a9-mainnet → apply 0001-0009 → 空库（**必须 `--env production`**）
+    命令：`cd worker && wrangler d1 create a9-mainnet && wrangler d1 migrations apply DB --remote --env production && wrangler d1 execute DB --remote --env production --command "SELECT COUNT(*) FROM rounds;"`
+    期望：只列 `0001_init.sql`…`0009_chain_indexer.sql`；`rounds=0` 且业务表全空；**绝不 seed**；把返回的 database_id 填进 GitHub Variable `PROD_D1_DATABASE_ID`（不要手写顶层 D1）
+    失败：出现非编号 SQL / 业务表非空 / 忘记 `--env production` → **停止**，清库/移文件后重来
     可逆：是（新库，可删重建）
 
 [ ] 4. 部署 4 个合约（JM/OA/TV/RC；wallet 由 code 派生）
@@ -60,10 +60,10 @@ export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> P
     失败：不相等/未绑定 → **停止**；`InitController` 不可逆，**绝不重复发**
     可逆：**否**
 
-[ ] 8. A9 五笔分发（RC 70 亿 / TV 12 亿 / 内盘 8 亿 / 流动 5 亿 / 营销 5 亿）
-    命令：`OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<signer> node ops/scripts/50_fund_vaults.mjs --execute --all --probe 2>&1 | tee "$OPS_RECORDS_DIR/50_fund.log"`
-    期望：首笔 1 A9 probe 到账 → 发余量；5 笔 `get_wallet_data` 增量精确匹配；末尾 5 项 `>= 注资额`
-    失败：金额/地址不符 → **立即停**；**exit 33** → 回读 5 个钱包+admin：全 0 才重试一次；部分到账按差额手工补（`fund_jetton.tolk <owner> <remainingRaw>`），**禁止整笔重发**（坑②）
+[ ] 8. A9 三笔分发（内盘 8 亿 / 流动 5 亿 / 营销 5 亿；**RC/TV 已由部署脚本注资，勿重复**）
+    命令：`OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<signer> node ops/scripts/50_fund_vaults.mjs --execute --all --probe --resume 2>&1 | tee "$OPS_RECORDS_DIR/50_fund.log"`
+    期望：日志显示 RC/TV **skip**（部署脚本已注资并断言 7e18/1.2e18）；3 笔 `get_wallet_data` 增量精确匹配；admin 归零
+    失败：**若试图重复注资 RC/TV / 报 admin 余额不足 → 立即停**（admin 仅剩 18 亿，重复注资必失败）；**exit 33** → 回读 3 钱包+RC/TV：全 0 才重试一次；部分到账按差额补，**禁止整笔重发**（坑②）
     可逆：**否**
 
 [ ] 9. admin 清零 + totalSupply == 100 亿
@@ -72,22 +72,22 @@ export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> P
     失败：不一致 → **停止**，查 §8 差额；**不要补发整笔**
     可逆：**否**
 
-[ ] 10. Worker 部署（必须 production）
-    命令：`cd worker && wrangler secret put ADMIN_TOKEN --env production && wrangler secret put TONCENTER_API_KEY --env production && cd .. && npm run build && cd worker && wrangler deploy --env production --var ROUND_CONTROLLER_ADDRESS:"$PROD_ROUND_CONTROLLER_ADDRESS" --var TEAM_VAULT_ADDRESS:"$PROD_TEAM_VAULT_ADDRESS" --var JETTON_MASTER_ADDRESS:"$PROD_JETTON_MASTER_ADDRESS" --var ORACLE_CONFIG_HASH:"$PROD_ORACLE_CONFIG_HASH"`
-    期望：CI 生产门禁通过（`DATA_SOURCE=chain`/`CHAIN_NETWORK=mainnet`/`DEMO_ALLOW_UNSIGNED_WRITES=false`），输出新版本号
-    失败：门禁 fail / 仍 demo → **停止**；**禁止不带 `--env production`**；可 `wrangler rollback`
+[ ] 10. Worker 部署（**推荐 CI**，必须 production）
+    命令：`cd worker && wrangler secret put ADMIN_TOKEN --env production && wrangler secret put TONCENTER_API_KEY --env production; cd .. && gh workflow run ci.yml --ref main -f allow_demo_deploy=false && gh run watch`
+    期望：CI 先 **Inject production D1 database id**（`PROD_D1_DATABASE_ID`）→ 生产门禁 → migrations → `deploy --env production`；输出新版本号
+    失败：缺第 5 个 Variable / 门禁 fail / 仍 demo → **停止**；**禁止手工顶层 D1 / 不带 `--env production`**；手工兜底必须先复用 CI 注入步骤；可 `wrangler rollback`
     可逆：是（Worker 可回滚）
 
-[ ] 11. 线上接口验证
-    命令：`curl -s https://a9.lat/api/health | jq; curl -s https://a9.lat/api/version | jq '.data.schemaVersion // .schemaVersion'; curl -s https://a9.lat/api/config | jq '.data.p0UsdE8'`
-    期望：health ok；`schemaVersion=9`；config 的 P0 等 14 参数与 `get_protocol_config` 一致；rounds 是链上真值
-    失败：demo 数据/版本不符 → **停止**，查 `DATA_SOURCE`/地址；**禁止公告**
+[ ] 11. 线上接口验证（**只验 health/version**）
+    命令：`curl -s https://a9.lat/api/health | jq; curl -s https://a9.lat/api/version | jq '.data.schemaVersion // .schemaVersion'`
+    期望：health ok；`schemaVersion=9`（`/api/config`、`/api/rounds` 此时 503 ORACLE_PAUSED 是**正确保护**，留到 step 12 验）
+    失败：health 非 200 / schemaVersion≠9 → **停止**，查 `DATA_SOURCE`/地址/D1 注入；**禁止公告**
     可逆：是
 
-[ ] 12. 索引器 tick → 11 个 chain config key → health 无缺键
-    命令：`curl -s -X POST https://a9.lat/api/admin/indexer/tick -H "Authorization: Bearer $ADMIN_TOKEN" | jq; curl -s https://a9.lat/api/health | jq '.data.oracle'`
-    期望：`paused=false`、`reason=[]`；11 键全落库（p0/roundReward/totalSupply/minStake/maxTotalStake/candleCount/candleSeconds/minQualified/observation/stakeDuration/riskDisclosureVersion）
-    失败：仍缺键 → 看 `admin_events` 的 INDEXER_TICK_WARN/ERROR；**先修索引器再公告**
+[ ] 12. 索引器 tick（≥180s）→ `config` 表 11 键 → config/rounds 转 200
+    命令：`time curl -sS --max-time 180 -X POST https://a9.lat/api/admin/indexer/tick -H "Authorization: Bearer $ADMIN_TOKEN" | jq '.data | {ok,healthy,pages,nextPollMs}'; curl -s https://a9.lat/api/health | jq '.data.oracle.reason'; curl -s https://a9.lat/api/config | jq '.data | keys | length'`
+    期望：tick `ok=true,healthy=true`（嵌套 data；无 key 实测 76.7s，主网必须配 key 且留 ≥180s）；11 键在 **`config` 表**（不是 metrics）→ reason 空、config 返回 **28 个顶层字段**、rounds 转 200
+    失败：超时/缺键/仍 503 → 看 `admin_events` 的 INDEXER_TICK_WARN/ERROR；**先修索引器再公告**；**不要引用不存在的 `/api/admin/indexer/health`**
     可逆：是（只读链上重建）
 
 [ ] 13. 开 R1（无 PREVIEW；twap 双人复核）

@@ -79,7 +79,7 @@ export A9_MAINNET_API="https://toncenter.com/api/v3"
 > | 合约部署初始余额 | **2.30** | JM 0.15 / OA 0.15 / TV **1.0** / RC **1.0**（TV 需覆盖 10 轮 jetton 转账；RC 会从 keeper 与 claim 的回流中增长，TV 不会） |
 > | 铸造 tonAmount | 0.55 | forward 低于 0.35 会导致 admin jetton wallet 未部署（已实测 exit 678） |
 > | wiring 6 条 | 0.36 | 每条 0.06 |
-> | A9 分配 5 笔 | 1.00 | 每笔 0.2（RC 70亿 / TV 12亿 / 内盘 8亿 / 流动 5亿 / 营销 5亿） |
+> | A9 分配 3 笔 | 0.60 | 每笔 0.2（内盘 8亿 / 流动 5亿 / 营销 5亿）；**RC/TV 由部署脚本自动注资，另 2 笔已含在合约部署费用里，勿重复** |
 > | deployer 作业余量 | 1.00 | 开轮 / 关窗 / 结算 / 重试 |
 > | 缓冲 | 1.00 | 429 重试、失败重放 |
 > | **合计** | **6.20** | 建议备 7 GRAM |
@@ -149,11 +149,13 @@ jq -e '
 ~~~bash
 cd worker
 wrangler d1 create a9-mainnet
-# 把返回的 database_id 写入 wrangler.toml 的 [[d1_databases]]，binding 保持 DB
 wrangler whoami
 ~~~
 
 期望：输出 `database_id`；`wrangler whoami` 显示正确账号。
+
+> ⚠️ **不要手写顶层 `[[d1_databases]]`（那是 demo 库）。** 生产绑定在 `worker/wrangler.toml` 的 **`[[env.production.d1_databases]]`**，仓库里是**全 0 占位符**；部署前由 CI 从 GitHub Variable **`PROD_D1_DATABASE_ID`** 注入（`.github/workflows/ci.yml` 的 “Inject production D1 database id” 步骤）。把新库 ID 填进 **`PROD_D1_DATABASE_ID`**，不要改顶层。
+
 失败：名称冲突/权限不足 → 换名或检查账号；**不得复用测试库**。
 **可逆**：是（库可删，尚未接入生产 Worker）。
 
@@ -163,21 +165,24 @@ wrangler whoami
 cd worker
 ls migrations | sort
 for f in migrations/*.sql; do case "$(basename "$f")" in [0-9][0-9][0-9][0-9]_*.sql) ;; *) echo "BAD: $f"; exit 1;; esac; done
-wrangler d1 migrations apply a9-mainnet --remote
+# 主网：必须显式 --env production，否则会按顶层 demo 绑定解析
+wrangler d1 migrations apply DB --remote --env production
+# 彩排（drill）：用 drill 配置
+# wrangler d1 migrations apply DB --remote --config wrangler.drill.toml
 ~~~
 
-期望：`ls` 恰好 `0001_init.sql` … `0009_chain_indexer.sql`；apply 只列这 9 个，0 报错。
+期望：`ls` 恰好 `0001_init.sql` … `0009_chain_indexer.sql`；apply 只列这 9 个，0 报错；命令里必须出现 **`--env production`**（彩排为 `--config wrangler.drill.toml`）。
 失败：出现非编号文件 → **立即停止**，移出 migrations 后重跑；**绝不执行 seed.sql**。
 **可逆**：是（删库重建；尚未有业务数据）。
 
 ### 2.3 验证空库
 
 ~~~bash
-wrangler d1 execute a9-mainnet --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
-wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS rounds FROM rounds;"
-wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS trades FROM trades;"
-wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS claims FROM claims;"
-wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS stakes FROM stakes;"
+wrangler d1 execute DB --remote --env production --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+wrangler d1 execute DB --remote --env production --command "SELECT COUNT(*) AS rounds FROM rounds;"
+wrangler d1 execute DB --remote --env production --command "SELECT COUNT(*) AS trades FROM trades;"
+wrangler d1 execute DB --remote --env production --command "SELECT COUNT(*) AS claims FROM claims;"
+wrangler d1 execute DB --remote --env production --command "SELECT COUNT(*) AS stakes FROM stakes;"
 ~~~
 
 期望：表存在；`rounds=0`、`trades=0`、`claims=0`、`stakes=0`、`burn_ledger=0`。
@@ -187,11 +192,15 @@ wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS stakes FRO
 ### 2.4 上线前备份
 
 ~~~bash
-wrangler d1 export a9-mainnet --remote --output "$OPS_RECORDS_DIR/d1-mainnet-preload.sql"
+wrangler d1 export DB --remote --env production --output "$OPS_RECORDS_DIR/d1-mainnet-preload.sql"
 shasum -a 256 "$OPS_RECORDS_DIR/d1-mainnet-preload.sql"
 ~~~
 
-期望：导出成功 + 记录 sha256。失败：导出失败 → 停止，先解决权限/配额。**可逆**：备份本身可删。
+期望：导出成功 + 记录 sha256。
+
+> ⚠️ **彩排未演练 export**：主网切换前**必须单独验证** export 权限与产物大小（确认能导出完整主网库，且文件大小/耗时可接受）。未验证前不得把 §2.4 当作已通过。
+
+失败：导出失败 → 停止，先解决权限/配额。**可逆**：备份本身可删。
 
 ---
 
@@ -373,7 +382,7 @@ done
 
 ---
 
-## 5. A9 分配（100 亿，5 笔；每笔 probe + 回读）
+## 5. A9 分配（部署脚本已注资 RC/TV；本节只做剩余 3 笔）
 
 ### 5.1 铸造去向
 
@@ -381,30 +390,32 @@ done
 - 若项目方按 D-36 决定先铸给 admin 冷钱包再分发：把 treasury 换成 admin 地址，**必须双人签字**；两种方式都只能选一种，不能重复 mint；
 - 铸造后 `total_supply == 1e19` 且 `mintable == false`。
 
-### 5.2 五笔分配（不可逆）
+### 5.2 三笔分配（**RC/TV 由部署脚本自动注资，勿重复**）
 
-| 接收方 | owner | 金额（A9） | raw |
-| --- | --- | --- | --- |
-| RC Jetton Wallet（本金+奖励） | RoundController | 70 亿 | `7000000000000000000` |
-| TV Jetton Wallet | TeamVault | 12 亿 | `1200000000000000000` |
-| 团队内盘管理钱包 | internal（公开可查） | 8 亿 | `800000000000000000` |
-| 流动性钱包 | liquidity | 5 亿 | `500000000000000000` |
-| 营销钱包 | marketing | 5 亿 | `500000000000000000` |
-
-~~~bash
-cd /Users/yu1/Desktop/BAM
-OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<admin/deployer> \
-  node ops/scripts/50_fund_vaults.mjs --execute --all --probe 2>&1 | tee "$OPS_RECORDS_DIR/50_fund.log"
-~~~
-
-期望：第一笔先 1 A9 probe，确认到账后发余量；每笔 `get_wallet_data` 增量精确匹配；末尾 5 项全部 `>= 注资额`；admin A9 归零。
-失败：任何金额/地址不符 → **立即停止**；已错投不可逆（§10）。
-**可逆**：**否**。
+> ⚠️ **先看这条**：`deploy-emulation.tolk` **无条件**把 **RC 注资 70 亿、TV 注资 12 亿**（脚本内 `PARAM_ROUND_REWARD * 10` / `PARAM_TEAM_ROUND * 10`，并在注资后用 `get_wallet_data` 做精确余额断言——就是 dry-run 里 `Funded RC Jetton Wallet` 那行）。
+> 因此 **§5.2 只处理剩余 3 笔**；若再给 RC/TV 发一遍，admin 只剩 18 亿，签名交易会直接失败（即使不失败也会重复注资，不可回滚）。
+>
+> | 接收方 | owner | 金额（A9） | raw |
+> | --- | --- | --- | --- |
+> | 团队内盘管理钱包 | internal（公开可查） | 8 亿 | `800000000000000000` |
+> | 流动性钱包 | liquidity | 5 亿 | `500000000000000000` |
+> | 营销钱包 | marketing | 5 亿 | `500000000000000000` |
+>
+> ```bash
+> cd /Users/yu1/Desktop/BAM
+> # --resume：按链上余额跳过已注资的 RC/TV，只发剩余 3 笔；不要去掉 --resume
+> OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<admin/deployer> \
+>   node ops/scripts/50_fund_vaults.mjs --execute --all --probe --resume 2>&1 | tee "$OPS_RECORDS_DIR/50_fund.log"
+> ```
+>
+> 期望：日志显示 RC/TV 因余额已达标被 **skip**；只发 3 笔（内盘 8 亿 / 流动 5 亿 / 营销 5 亿），每笔 `get_wallet_data` 增量精确匹配；admin A9 归零。
+> 失败：若日志显示要给 RC/TV 转账或报余额不足 → **立即停止**，说明 deploy 脚本没注资或参数错，回 §4 检查；**不要手工补 RC/TV**。
+> **可逆**：**否**。
 
 ### 5.3 逐笔回读（必须做）
 
 ~~~bash
-# 对 5 个目标钱包逐个执行；期望余额等于上表 raw
+# 对 3 个目标钱包逐个执行；期望余额等于上表 raw
 acton rpc info <JETTON_WALLET_ADDRESS> --net mainnet   # 先确认 active
 # 或用 toncenter v3 读 get_wallet_data 第 0 槽
 curl -s -H "X-API-Key: $TONCENTER_API_KEY" \
@@ -412,12 +423,12 @@ curl -s -H "X-API-Key: $TONCENTER_API_KEY" \
   -d "{\"address\":\"<wallet>\",\"method\":\"get_wallet_data\",\"stack\":[]}" | jq
 ~~~
 
-期望：5 个钱包余额 = 上表 raw；`total_supply` 仍为 1e19；admin 钱包 A9 余额 = 0（或项目方书面保留的 gas 额度）。
+期望：3 个钱包余额 = 上表 raw；**另回读 RC=7e18、TV=1.2e18 作为部署脚本断言复核**；`total_supply` 仍为 1e19；admin 钱包 A9 余额 = 0（或项目方书面保留的 gas 额度）。
 失败：差额 → 停止，按 §5.4 处理；**不要重复整笔转账**。**可逆**：否。
 
 ### 5.4 `exit code 33` / seqno 冲突处置（写在值班卡上）
 
-1. **先判“钱有没有动”**：读取 5 个收款钱包 + admin A9 + deployer TON 余额；
+1. **先判“钱有没有动”**：读取 **3 个待发钱包** + **RC/TV 余额**（应为 7e18 / 1.2e18）+ admin A9 + deployer TON 余额；
 2. **全 0 / 完全没动** → 可重试同一命令**一次**（先确认 seqno 已更新/节点回读一致）；
 3. **部分到账** → 计算差额，用单笔模板手工补：
 
@@ -430,7 +441,7 @@ OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<signer> JETTON_MASTER_ADDRESS=<j
 4. **补完必须回读**：`get_wallet_data` 余额精确等于目标；
 5. **绝不允许**“整笔重发”或“用 50 脚本再跑一遍全额”；`50 --resume` 只在确认余额后使用（它会按余额跳过已达标项）。
 
-> 期望：最终 5 个钱包余额精确匹配；失败：仍不匹配 → 停止所有签名，按 runbooks/03 升级。**可逆**：否。
+> 期望：最终 3 个钱包余额精确匹配，RC/TV 仍为 7e18 / 1.2e18；失败：仍不匹配 → 停止所有签名，按 runbooks/03 升级。**可逆**：否。
 
 ---
 
@@ -448,12 +459,33 @@ wrangler secret put TONCENTER_API_KEY --env production  # 主网 key
 
 ### 6.2 GitHub Variables（地址不提交进仓库，D-38）
 
-在 GitHub → Settings → Variables 设置：`PROD_ROUND_CONTROLLER_ADDRESS`、`PROD_TEAM_VAULT_ADDRESS`、`PROD_JETTON_MASTER_ADDRESS`、`PROD_ORACLE_CONFIG_HASH`（4 个，均来自 §4/§5 的链上真实值）。
-期望：4 个变量存在且非占位符。失败：缺一个 → CI 会 fail 并打印原因；**不要 `allow_demo_deploy=true`**。**可逆**：是。
+在 GitHub → Settings → Variables 设置 **5 个**：
 
-### 6.3 部署（必须 `--env production`）
+| Variable | 值 | 时点 |
+| --- | --- | --- |
+| `PROD_ROUND_CONTROLLER_ADDRESS` | RC 地址 | 合约部署后 |
+| `PROD_TEAM_VAULT_ADDRESS` | TV 地址 | 合约部署后 |
+| `PROD_JETTON_MASTER_ADDRESS` | JettonMaster 地址 | 合约部署后 |
+| `PROD_ORACLE_CONFIG_HASH` | oracle config hash | 参数初始化后 |
+| **`PROD_D1_DATABASE_ID`** | **建库后得到的 a9-mainnet database_id** | **§2.1 建库后立即填** |
+
+期望：5 个变量存在且非占位符。失败：缺 `PROD_D1_DATABASE_ID` 或任一地址 → CI 门禁**直接 fail**；**不要 `allow_demo_deploy=true`**。**可逆**：是。
+
+### 6.3 部署（**推荐走 CI**；必须 `--env production`）
+
+> 手工 `wrangler deploy` 不会执行 CI 的 “Inject production D1 database id”，会把**全 0 占位符**当生产 D1 部署。因此**主网推荐用 CI workflow_dispatch**：
+>
+> ```bash
+> gh workflow run ci.yml --ref main -f allow_demo_deploy=false
+> gh run watch
+> ```
+>
+> CI 顺序：Inject production D1 database id（`PROD_D1_DATABASE_ID`）→ production gate → migrations → deploy `--env production`（地址由 4 个 Variables 经 `--var` 注入）。
+>
+> **仅当 CI 不可用时才手工**，且必须先复用 CI 的注入步骤（`.github/workflows/ci.yml:236-259`）把 `[[env.production.d1_databases]]` 的占位符替换为真实 ID；否则禁止部署。
 
 ~~~bash
+# 手工等价（仅兜底；先完成 D1 注入！）
 pnpm -C web build
 cd worker
 wrangler deploy --env production \
@@ -464,54 +496,72 @@ wrangler deploy --env production \
   2>&1 | tee "$OPS_RECORDS_DIR/worker-deploy.log"
 ~~~
 
-期望：CI 生产门禁通过（`DATA_SOURCE=chain` / `CHAIN_NETWORK=mainnet` / `DEMO_ALLOW_UNSIGNED_WRITES=false` / 地址已注入），输出新版本号。
-失败：门禁 fail → 按日志修配置，**不要回滚到 demo**；D1 绑定错 → 检查 `database_id`。**可逆**：是（Worker 可 rollback）。
+期望：CI 生产门禁通过（`DATA_SOURCE=chain` / `CHAIN_NETWORK=mainnet` / `DEMO_ALLOW_UNSIGNED_WRITES=false` / 地址与 D1 已注入），输出新版本号。
+失败：门禁 fail → 按日志修配置，**不要回滚到 demo**；D1 绑定错 → 检查 `PROD_D1_DATABASE_ID` 与 `[env.production.d1_databases]`。**可逆**：是（Worker 可 rollback）。
 
-### 6.4 验证（必须看到链上真值）
+### 6.4 验证（只验 health / version；config 与 rounds 在 §7.3）
 
 ~~~bash
 curl -s https://a9.lat/api/health | jq
-curl -s https://a9.lat/api/version | jq
-curl -s https://a9.lat/api/rounds | jq '.[0] // .data[0]'
+curl -s https://a9.lat/api/version | jq '.data.schemaVersion // .schemaVersion'
 ~~~
 
-期望：`health ok`；`version` 与部署 sha 一致；`rounds` 的 `roundId/status/target` 与 `get_round` 一致（不是 demo 数据）。
-失败：看到 demo/假余额 → **立即停止**，检查 `DATA_SOURCE` 与地址；**禁止公告**。**可逆**：是。
+期望：`health ok`；`schemaVersion=9`；`version` 与部署 sha 一致。
+
+> **引导前 `/api/config` 与 `/api/rounds` 返回 503 `ORACLE_PAUSED` 是正确的保护语义**（11 个 chain config key 还没落库）；不要把它当故障，**不要**在 §6.4 用它们判失败。二者统一在 **§7.3**（索引器引导之后）验证。
+
+失败：health 非 200 / schemaVersion≠9 → **立即停止**，查 `DATA_SOURCE`、D1 注入与地址；**禁止公告**。**可逆**：是。
 
 ---
 
 ## 7. 索引器引导（不做 = 全站 503）
 
-### 7.1 触发首次索引
+### 7.1 触发首次索引（**预留 ≥180s**）
 
 ~~~bash
-curl -s -X POST https://a9.lat/api/admin/indexer/tick \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | jq
+# 必须带 key；公共 toncenter 无 key 本次实测 76.7s，主网要预留 ≥180s
+time curl -sS --max-time 180 -X POST https://a9.lat/api/admin/indexer/tick \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq '.data | {ok,pages,writes,events,candles,stakes,healthy,nextPollMs}'
 ~~~
 
-期望：返回 ok / 索引条数；`admin_events` 无 `INDEXER_TICK_ERROR`。失败：401 → `ADMIN_TOKEN` 错；RPC 错 → 查 `TONCENTER_API_KEY`。**可逆**：是（只读链上）。
+期望：HTTP 200；`data.ok=true`、`healthy=true`；`pages/writes/events/candles/stakes` 有数值；`nextPollMs` 正常。
 
-### 7.2 确认 11 个 chain config key 落库
+> 返回是**嵌套结构**：`data.{ok,pages,writes,events,candles,stakes,healthy,nextPollMs}`（不是顶层字段）。
+> 本次彩排（公共 toncenter、无 key）耗时 **76.7s**；主网**必须配 `TONCENTER_API_KEY`**，并预留 **≥180s**，否则会超时被误判失败。
+> **`/api/admin/indexer/health` 不存在（实测 404）**；不要引用该路由。缺键只看 `/api/health.data.oracle.reason` + D1 `config` 表。
+
+失败：401 → `ADMIN_TOKEN` 错；超时 → 配 key 后**重试一次**并加大 `--max-time`；`healthy=false` → 看 `admin_events` 的 `INDEXER_TICK_WARN/ERROR`。**可逆**：是（只读链上）。
+
+### 7.2 确认 11 个 chain config key 落库（表名是 **`config`**，不是 `metrics`）
 
 缺任一键，Worker 返回 `ORACLE_PAUSED`（health 200，但业务 API 503）——**这是保护，不是故障**。
 
 ~~~bash
+cd worker
+wrangler d1 execute DB --remote --env production --command \
+  "SELECT key FROM config WHERE key IN ('p0_usd_e8','round_reward_raw','total_supply_raw','min_stake_raw','max_total_stake_raw','candle_count','candle_seconds','min_qualified_candles','observation_seconds','stake_duration_seconds','risk_disclosure_version');"
 curl -s https://a9.lat/api/health | jq '.data.oracle'
-# 期望：paused=false，reason 为空/缺键列表为空
 ~~~
 
-必须存在的 11 键：`p0_usd_e8`、`round_reward_raw`、`total_supply_raw`、`min_stake_raw`、`max_total_stake_raw`、`candle_count`、`candle_seconds`、`min_qualified_candles`、`observation_seconds`、`stake_duration_seconds`、`risk_disclosure_version`。
+期望：`config` 表返回 **11 行**；health `paused=false`、`reason` 为空。
 
-失败：仍报缺键 → 看 `admin_events` 的 `INDEXER_TICK_WARN/ERROR`；确认 `ROUND_CONTROLLER_ADDRESS` 正确、toncenter key 有效。**可逆**：是。
+> ⚠️ **别查 `metrics` 表**：11 个 chain config key 在 **`config`** 表；按 `metrics` 查会误判“缺键”。
 
-### 7.3 数据一致性
+失败：缺行 → 看 `admin_events` 的 `INDEXER_TICK_WARN/ERROR`；确认 `ROUND_CONTROLLER_ADDRESS` 正确、toncenter key 有效。**可逆**：是。
+
+### 7.3 数据一致性（索引器成功后**才**验 `/api/config` 与 `/api/rounds`）
 
 ~~~bash
-curl -s https://a9.lat/api/config | jq
+curl -s https://a9.lat/api/config | jq '.data | keys | length'
+curl -s https://a9.lat/api/config | jq '.data.contracts'
 curl -s https://a9.lat/api/rounds | jq '.[0] // .data[0]'
 ~~~
 
-期望：`/api/config` 的 14 个参数与 `get_protocol_config` 一致；`/api/rounds` 与 `get_round` 逐字段一致。失败：先修索引器，**不要对外公告**。**可逆**：是。
+期望：`/api/config` 返回 **28 个顶层字段**；`/api/rounds` 与 `get_round` 逐字段一致（roundId/status/target/stakeOpenAt/stakeCloseAt）。
+
+> **历史遗留键（不阻塞上线）**：`contracts` 里只有 `jettonMaster` / `roundController` / `teamVault` / `oracleConfigHash` 有值；`stakingVault`、`rewardVault`、`oracleAdapter`、`codeHash`、`adminOwner`、`teamWallet`、`auditReportUrl` 为 **null**（旧架构字段，当前架构不使用；`oracleAdapter` 目前无配置键写入，恒为 null，前端已按可选字段处理）。
+
+失败：缺字段/503 → 回 §7.1/7.2；**不要对外公告**。**可逆**：是。
 
 ---
 
@@ -571,7 +621,7 @@ curl -s https://a9.lat/api/health | jq '.data.oracle'
 | 对象 | 命令 | 注意 |
 | --- | --- | --- |
 | Worker | `wrangler rollback --env production`（或 `wrangler deployments list` 选上一版） | 只能回代码，**不能回链上状态** |
-| D1 | `wrangler d1 export a9-mainnet --remote --output backup.sql`（事前）；恢复用 `wrangler d1 execute --file` | 只回数据；若链上已产生新轮次，恢复会不一致，需人工对账 |
+| D1 | `wrangler d1 export DB --remote --env production --output backup.sql`（事前）；恢复用 `wrangler d1 execute --file` | 只回数据；若链上已产生新轮次，恢复会不一致，需人工对账 |
 | 域名/DNS/证书 | Cloudflare 面板 | 不影响合约 |
 
 ### 10.2 不可逆（写进事故模板）
@@ -594,6 +644,28 @@ curl -s https://a9.lat/api/health | jq '.data.oracle'
 ### 10.4 事后
 
 保存 `$OPS_RECORDS_DIR` 全量证据；24h 内出事故复盘；若涉及合约，只能**重新部署新实例**（RC 不可升级），并重新走本文件。
+
+---
+
+## 11. 彩排发现的差异（2026-11-06）
+
+> 来源：`ops/records/mainnet-rehearsal-diffs.md`（testnet-ops 彩排）。共 **10 条不一致 + 1 条合约分配修正**，其中 **4 条会让主网当天直接失败**（①~④）。本节是主网前的审计痕迹，**不得删除**。
+
+| # | 彩排发现（实际 vs 文档） | 处理 | 状态 |
+| --- | --- | --- | --- |
+| ① | D1 写法错误：文档让改顶层 `[[d1_databases]]`（demo 库）；实际生产在 **`[[env.production.d1_databases]]`**，仓库为全 0 占位符，CI 从 `PROD_D1_DATABASE_ID` 注入 | 改写 §2.1：只建库 + 填 GitHub Variable，**禁止改顶层** | 已修正到文档 |
+| ② | 迁移命令缺 `--env production`（彩排 `--config wrangler.drill.toml`） | §2.2 改为 `wrangler d1 migrations apply DB --remote --env production`（彩排用 drill 配置） | 已修正到文档；**附：CI 的 migration 步骤仍写 `apply fuse-protocol --remote` 未带 `--env production`，需 CI 同步修**（流程调整） |
+| ③ | GitHub Variables 少第 5 个：**`PROD_D1_DATABASE_ID`**（CI 门禁强制） | §6.2 补 5 个变量表，注明建库后立即填 | 已修正到文档 |
+| ④ | 手工 `wrangler deploy` 不走 CI 的 “Inject production D1 database id”，会用占位符 D1 | §6.3 改为**推荐 CI workflow_dispatch**；手工仅兜底且必须先复用注入步骤 | 已修正到文档 |
+| ⑤ | 验证顺序矛盾：引导前 `/api/config`、`/api/rounds` 是 503 ORACLE_PAUSED（正确保护） | §6.4 只验 `/api/health` + `/api/version`；config/rounds 移到 §7.3 | 已修正到文档 |
+| ⑥ | `indexer/tick` 实际返回嵌套 `data.{ok,pages,writes,events,candles,stakes,healthy,nextPollMs}`；公共 toncenter 无 key 耗时 **76.7s** | §7.1 写嵌套结构；主网预留 **≥180s** 且必须配 key | 已修正到文档 + **流程调整（值班预留 180s/key）** |
+| ⑦ | `/api/admin/indexer/health` **不存在（404）** | 删除引用；缺键只查 `/api/health.data.oracle.reason` + D1 `config` 表 | 已修正到文档 |
+| ⑧ | 11 个 chain config key 在 **`config`** 表，不是 `metrics` | §7.2 改为查 `config` 表（11 行） | 已修正到文档 |
+| ⑨ | `/api/config` 实际 **28 个顶层字段**；`contracts` 多个旧键为 null | §7.3 写明 28 字段 + 历史遗留键（stakingVault/rewardVault/oracleAdapter/codeHash/adminOwner/teamWallet/auditReportUrl 为 null，不阻塞；前端已可选处理） | 已修正到文档 |
+| ⑩ | `d1 export` 未演练 | §2.4 标注“主网前必须单独验证 export 权限与产物大小” | **流程调整（主网前单独演练）** |
+| ⑪ | §5.2 五笔分配错误：部署脚本已无条件注资 RC 70 亿 + TV 12 亿并精确断言 | §5.2 改为**三笔**（内盘 8 亿/流动 5 亿/营销 5 亿）+ 提示“重复注资必失败”；docs/33 step8 同步 | 已修正到文档 |
+
+> **签字**：以上 11 条已逐条处理；①~④ 为主网阻断项，必须在主网前一天复查。
 
 ---
 

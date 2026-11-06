@@ -24,7 +24,6 @@ const dryRun = has('dry-run');
 const execute = has('execute') && !dryRun;
 const resume = has('resume');
 const rehearsal = has('rehearsal');
-const allowPreflightFail = has('allow-preflight-fail');
 const requested = (arg('phase', 'P0,P1,P2,P3,P4,P5,P6')).split(',').map((x) => x.trim()).filter(Boolean);
 const PHASES = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 for (const p of requested) if (!PHASES.includes(p)) { console.error('未知阶段：' + p); process.exit(2); }
@@ -314,7 +313,7 @@ for (const id of requested) {
   try {
     const result = await fns[id]();
     const durationMs = Date.now() - t0;
-    state.phases[id] = { status: result === 'DRY_RUN' ? 'DRY_RUN' : (result === 'ACK_FAILED' ? 'ACK_FAILED' : 'PASS'), result, durationMs, finishedAt: new Date().toISOString() };
+    state.phases[id] = { status: (result === 'DRY_RUN' || result === 'EXPECTED_IN_REHEARSAL') ? result : 'PASS', result, durationMs, finishedAt: new Date().toISOString() };
     save();
     completed.push(id);
     console.log('[OK] ' + id + ' ' + result + '（' + (durationMs / 1000).toFixed(1) + 's）');

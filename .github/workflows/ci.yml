@@ -341,7 +341,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote
+        run: ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote --env production
       - name: Deploy Worker (env production)
         # 必须 --env production；生产 D1 已在前面注入；真实地址由 GitHub Variables 经 --var 注入（D-38）
         working-directory: worker
