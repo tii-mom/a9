@@ -1,0 +1,47 @@
+# ===========================================================================
+# 主网彩排专用配置（task-59）——与生产 [env.production] 隔离
+# Worker: fuse-protocol-drill   D1: a9-drill (035c6db5-076b-4e04-b95f-d70731839eca)
+# 用途：Cloudflare 链路演练（D1 → migrations → Worker → indexer 引导）
+# 注意：
+#   - 无 routes / 无自定义域名，只走 workers.dev；绝不触碰 a9.lat
+#   - 不执行 seed；D1 由 0001–0009 迁移建表
+#   - 测试网 v8.9 实例地址（task-59 提供，公开测试网，非主网）
+# ===========================================================================
+name = "fuse-protocol-drill"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+assets = { directory = "../web/dist", binding = "ASSETS", not_found_handling = "single-page-application", run_worker_first = true }
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "a9-drill"
+database_id = "035c6db5-076b-4e04-b95f-d70731839eca"
+
+[vars]
+DATA_SOURCE = "chain"
+CHAIN_NETWORK = "testnet"
+DEMO_AUTOPLAY = "false"
+DEMO_ALLOW_UNSIGNED_WRITES = "false"
+# 彩排环境用公共测试网 toncenter（不占主网 key 配额）；主网必须用 TONCENTER_API_KEY secret
+TONCENTER_ALLOW_PUBLIC = "1"
+TONCENTER_V2_URL = "https://testnet.toncenter.com/api/v2"
+TONCENTER_V3_URL = "https://testnet.toncenter.com/api/v3"
+# 测试网 v8.9 实例（task-59）
+ROUND_CONTROLLER_ADDRESS = "kQD9TXvfEbAAIEW-Oyj58V4TO7b5HGALQgmPh-Ja1tRRcYAK"
+TEAM_VAULT_ADDRESS = "kQCjfgro1mAnrScsAvTN5-sE9BDw4f7U_1mq3fD9fvZgO10h"
+JETTON_MASTER_ADDRESS = "kQBnEm-jgkTMnKORlgSft2NB10meB0jtLqTH0zbRR2edE60u"
+ALLOWED_ORIGINS = "https://a9.lat,https://www.a9.lat"
+TON_PROOF_DOMAINS = "a9.lat,www.a9.lat,localhost,127.0.0.1"
+RATE_LIMIT_PER_MINUTE = "60"
+RATE_LIMIT_NONCE_PER_MINUTE = "10"
+RATE_LIMIT_READ_PER_MINUTE = "120"
+RATE_LIMIT_STATIC_PER_MINUTE = "600"
+VERSION = "0.0.0-drill"
+EDGE_CACHE_SECONDS = "1"
+TONCONNECT_MANIFEST_URL = "/tonconnect-manifest.json"
