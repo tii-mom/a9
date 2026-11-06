@@ -462,5 +462,14 @@
     },
     "channelsNote": "所有密钥/Token 只从环境变量读取，绝不写入本文件或仓库。"
   },
-  "notes": "production timing test: 12h/36h/1h×24/24h; P0 etc default V7"
+  "notes": "production timing test: 12h/36h/1h×24/24h; P0 etc default V7 ; budget=3.65 TON (mint must stay 0.55/0.4; mintForward <0.35 breaks wallet deployment)",
+  "deploymentBudget": {
+    "contractsTon": "1.00",
+    "mintWiringFundTon": "1.31 (mint0.55+wiring6x0.06+A9fund2x0.2)",
+    "keeperTon": "0.34 (24 candles x0.01 + open/close/finalize)",
+    "userGasTon": "0.50",
+    "bufferTon": "0.50",
+    "totalTon": "3.65",
+    "note": "mint/mintForward must be >=0.35/0.2 in practice; mint0.15/forward0.05 causes admin jetton wallet not deployed -> exit 678 at funding"
+  }
 }
