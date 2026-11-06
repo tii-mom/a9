@@ -1,5 +1,5 @@
 // Deploy an Acton-configured wallet account (v4r2) by sending state init from deployer.
-// Usage: acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/deploy_wallet.tolk <walletName>
+// Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/deploy_wallet.tolk <walletName>
 import "@stdlib/strings"
 import "@acton/build"
 import "@acton/emulation/network"

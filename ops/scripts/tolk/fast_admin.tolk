@@ -1,5 +1,5 @@
 // Fast-test admin ops with small TON value: open-round / close-staking / finalize-round.
-// Usage: acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/fast_admin.tolk <cmd> <roundId> <twap>
+// Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/fast_admin.tolk <cmd> <roundId> <twap>
 import "@stdlib/strings"
 import "@acton/build"
 import "@acton/env"

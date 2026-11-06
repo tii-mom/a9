@@ -1,5 +1,5 @@
 // Fast-test keeper candle submitter: sends SubmitCandle directly with a small TON value.
-// Usage: A9_PERIOD_START=... A9_PERIOD_END=... A9_TWAP_E8=... acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/fast_candle.tolk <roundId> <candleIndex>
+// Usage: A9_PERIOD_START=... A9_PERIOD_END=... A9_TWAP_E8=... acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/fast_candle.tolk <roundId> <candleIndex>
 import "@stdlib/strings"
 import "@acton/build"
 import "@acton/env"

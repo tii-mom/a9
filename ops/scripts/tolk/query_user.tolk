@@ -1,5 +1,5 @@
 // Query user getters on a RoundController.
-// Usage: acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/query_user.tolk <cmd> <owner> <roundId>
+// Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/query_user.tolk <cmd> <owner> <roundId>
 // cmd: stake|weight|reward|claimable|referral|streak|unlock
 import "@stdlib/strings"
 import "@acton/env"

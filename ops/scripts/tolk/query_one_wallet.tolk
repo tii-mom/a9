@@ -1,5 +1,5 @@
 // Query JettonMaster.get_wallet_address(owner) for one owner.
-// Usage: acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/query_one_wallet.tolk <master> <owner>
+// Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/query_one_wallet.tolk <master> <owner>
 import "@stdlib/strings"
 import "@acton/emulation/network"
 import "@acton/io"

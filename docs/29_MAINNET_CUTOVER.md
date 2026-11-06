@@ -71,8 +71,21 @@ export A9_MAINNET_API="https://toncenter.com/api/v3"
 | **G3** | **CI 生产门禁生效** | `.github/workflows/ci.yml` 中 production guard 代码 + 最近一次 CI run URL | `DATA_SOURCE=chain`、`CHAIN_NETWORK=mainnet`、`DEMO_ALLOW_UNSIGNED_WRITES=false`、地址非占位符，否则 fail | 门禁缺失 → 停止；先修 CI 并跑一次 dry-run | 是 |
 | **G4** | **toncenter 主网 key 可用** | `curl -s -H "X-API-Key: $TONCENTER_API_KEY" "$A9_MAINNET_RPC/getAddressInformation?address=$ADMIN_ADDRESS"` | HTTP 200，`ok:true`，无限流 | 401/429 → 换 key/加配额；**不得不带 key 硬跑** | 是 |
 | **G5** | **admin 冷钱包地址已定**（D-36） | 硬件钱包地址 + 双人核对记录（首尾 6 字符 + CRC，§3.3） | 地址固定；钱包 `seqno=0`（从未发交易）；私钥离线 ≥2 份 | 不符 → 停止；**部署后 admin 永久不可改** | **否（部署后）** |
-| **G6** | **主网 GRAM ≥5 已到 deployer** | toncenter v3：`GET /jetton/wallets?jetton_address=<GRAM_MASTER>&owner_address=<DEPLOYER>` | `balance` ≥ 5 GRAM（按项目方确认的 decimals 换算 raw） | 未到账 → 停止，先转够；**不要用测试网 GRAM** | 是（转账可再操作） |
-| **G7** | **TON 预算已批准** | 部署记录中的 TON 预算表（部署 4 笔 + wiring + 注资 5 笔 + RC/TV gas + 用户提示） | deployer ≥30 TON；RC 部署后 ≥20 TON、TV ≥10 TON；用户 UI 明确“至少 0.5 TON gas” | 不足 → 停止补足；**不要压低合约 value 到 0.05 级** | 是（充值） |
+| **G6** | **主网 GRAM 已到 deployer（≥7 GRAM）** | 查 deployer 的 GRAM 余额 | **≥7 GRAM**（预算 6.20，见下表）；< 6.2 → 停止 | 未到账 → 停止，先转够；**不要用测试网 GRAM** | 是（转账可再操作） |
+> **主网 GRAM 预算表（v8.8 实测推导）**
+>
+> | 项 | GRAM | 说明 |
+> | --- | --- | --- |
+> | 合约部署初始余额 | **2.30** | JM 0.15 / OA 0.15 / TV **1.0** / RC **1.0**（TV 需覆盖 10 轮 jetton 转账；RC 会从 keeper 与 claim 的回流中增长，TV 不会） |
+> | 铸造 tonAmount | 0.55 | forward 低于 0.35 会导致 admin jetton wallet 未部署（已实测 exit 678） |
+> | wiring 6 条 | 0.36 | 每条 0.06 |
+> | A9 分配 5 笔 | 1.00 | 每笔 0.2（RC 70亿 / TV 12亿 / 内盘 8亿 / 流动 5亿 / 营销 5亿） |
+> | deployer 作业余量 | 1.00 | 开轮 / 关窗 / 结算 / 重试 |
+> | 缓冲 | 1.00 | 429 重试、失败重放 |
+> | **合计** | **6.20** | 建议备 7 GRAM |
+>
+> **不要照抄早期估计的 30 GRAM**：那是按「RC 20 / TV 10」的极端保守值算的，与 v8.8 实测不符，会无谓推迟上线。
+| **G7** | **GRAM 预算已批准（6.20 GRAM）** | 上表逐项签字 | 合计 6.20，建议备 7 | 不足 → 停止补足；**不要把 mint 的 tonAmount 压到 0.55 以下** | 是（充值） |
 | **G8** | **主网 D1 方案就绪** | Cloudflare 账号权限、`wrangler whoami`、计划库名 `a9-mainnet`；**且 `[env.production]` database_id 与顶层 demo 不同（见 G0b）** | 有权限创建/迁移；无同名冲突；生产/演示库 id 不同 | 无权限 → 换账号/授权；**不得复用测试库** | 是 |
 | **G9** | **tag 与 5 个 code hash 一致** | `git rev-parse v8.8-audit-fixed^{}`；`node -e` 读 `contracts/build/*.json` 的 hash | commit=`fb6bb45`；5 个 hash 与 §4.2 表逐字一致 | 不一致 → 停止；重新 clean build；**不要用旧 build 产物** | 是（未上链） |
 | **G10** | **主网参数双人复核 + 哈希存档** | `mainnet.params.json` 逐项过表；`sha256sum` 存档 | P0/时间参数/限额/分配/opcode 全对；SHA-256 写入证据文件 | 任一项错 → 停止改文件后重算哈希；**部署后参数不可改** | 是（部署前） |
@@ -329,6 +342,16 @@ grep -F "Funded RC Jetton Wallet" "$OPS_RECORDS_DIR/15_deploy.log"
 **可逆**：**否**（合约地址与代码永久固定）。
 
 ### 4.5 部署后手工核对（不只看脚本 PASS）
+
+**第一步：主网 toncenter 独立确认合约 active（防止 --net 选错发到测试网）**
+
+~~~bash
+# 取第一个已部署合约（JettonMaster）；--net 错误时主网不会存在该地址
+JM=$(jq -r '.contracts.jettonMaster.address' "$OPS_REGISTRY")
+curl -sS -H "X-API-Key: $TONCENTER_API_KEY" "https://toncenter.com/api/v2/getAddressInformation?address=$JM" | jq -e '.ok == true and .result.state == "active"'
+~~~
+
+期望：返回 true（主网链上 active）。失败：**立即停止**——这通常意味着部署被发到了测试网或合约未生效；记录后按 §4.4 重部署，绝不继续开轮。
 
 ~~~bash
 cd contracts

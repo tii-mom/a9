@@ -1,6 +1,6 @@
 // User operations for fast-test RC: stake / set-referrer / claims.
 // Usage examples:
-//   acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/user_op.tolk stake 100000000000000 1 1 <dummy>
+//   acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/user_op.tolk stake 100000000000000 1 1 <dummy>
 //   ... set-referrer 0 0 0 <referrer>
 //   ... claim-principal 1 0 0 <dummy>
 import "@stdlib/strings"

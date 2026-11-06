@@ -1,5 +1,5 @@
 // Query canonical Jetton Wallet addresses from JettonMaster.get_wallet_address(owner).
-// Usage: acton script --manifest-path contracts/Acton.toml --net testnet ops/scripts/tolk/query_wallets.tolk <master> <owner1> <owner2> <owner3> <owner4> <owner5> <owner6>
+// Usage: acton script --manifest-path contracts/Acton.toml --net <net> ops/scripts/tolk/query_wallets.tolk <master> <owner1> <owner2> <owner3> <owner4> <owner5> <owner6>
 import "@stdlib/strings"
 import "@acton/emulation/network"
 import "@acton/io"
