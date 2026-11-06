@@ -344,3 +344,54 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 ### 15.4 worker 配套（demo 模式）
 
 `claims(kind='unlock')` 为**累加式 UPSERT**（先 SELECT 旧值 → BigInt 相加 → 写回；**不用 SQL 加法**，因为 A9 总供应 1e19 超过 SQLite INTEGER 的 2^63）。支持多次部分领取，每次返回增量 `amountRaw`，`claimed_raw` 累加。worker 侧实证：t1/t2 两次部分领取都成功，各 `87,280,222,426,001,063`，DB 累计 `174,560,444,852,002,126` 与 `/api/stats.unlock.claimedRaw` 一致。
+
+---
+
+## 16. v8.7 外部审计修复（当前冻结基线）
+
+> 状态：**已冻结**，tag `v8.7-audit-fixed` @ `e6c4278`。**主网部署基线以本节为准**，§8 的 v8.6 基线已 superseded。
+> 输入：两份外部审计报告（`docs/22_EXTERNAL_AUDIT_REPORT.md` + 第二份对话提供），交叉核实与合并计划见 `docs/23_AUDIT_TRIAGE.md`。
+
+### 16.1 冻结基线（v8.7）
+
+| 合约 | 行数 | Code Hash |
+| --- | --- | --- |
+| RoundController | 2,192 | `0xF4343A8E20756CBF683DAEBABE68C9737F8CB9FE968DC96A2600402B3DCE15AB` |
+| TeamVault | 362 | `0xDE6BE49154E3024C9B6945EA81E7181F3E1D04FECC85DBC629C08EDE6A673FB6` |
+| OracleAdapter | 492 | `0x0C91E5338E00F18B5FFC7C5C26B510424775D8089588F4147E5B667703676768` |
+| JettonMaster | 250 | `0xB8FAF413176C6329A98B2474FEDF765A796A14EDA96C031EE1FE5B27E59EE272` |
+| JettonWallet | 224 | `0xC40F41ED05BEFFB7EF17E25FA0D1BB2AFDA72C567052546A2E310C0275D31D13` |
+
+**验证基线**：`acton check` → 0 error 0 warning；`acton test` → **175 passed / 18 files**（v8.6 为 154，新增 21 条审计回归测试）。
+
+### 16.2 修复清单
+
+| 编号 | 问题 | 修复要点 |
+| --- | --- | --- |
+| **F1** | `sendExcessesTo` 困惑副手 → 可伪造 `ReturnExcessesBack`（**销毁路径**：master 回传攻击者 queryId；**转账路径**：攻击者向受害者钱包转 1 nano-A9 指定 `sendExcessesTo=RC`）→ 伪造销毁确认或提前结算导致资金永久锁死 | JettonWallet 限制 `sendExcessesTo == null \|\| == owner`；JettonMaster 限制 `== burnInitiator`；`confirmBurn` 断言 `*BurnDispatched`；禁止 0 金额转账/销毁 |
+| **F2** | `refundStake` 零倒贴 → 每次退款从 RC 余额支出 0.1 TON 且 excess 退给调用者 → 可抽干 RC TON | 入站 ≥0.12 TON 才自动退款且 excess 回 RC；不足则记入 `stakes[0]` 退款账本，用户 `ClaimPrincipal(0)` 自付 gas 领回 |
+| **F3** | 销毁二跳 bounce 无通知 → 永久卡 `SETTLING_*` | JettonWallet 对 `BurnNotificationForMinter` bounce 也发 `TransferBounced`；burn queryId 加 tag 与 claim 区分；RC/TV 幂等清 `dispatched` |
+| **F4** | 二跳 Out-of-Gas 下通知被静默丢弃 | 钱包预留存储 + 0.015 TON；`CARRY_ALL_BALANCE \| IGNORE_ERRORS` 保证通知可达且不丢余额回滚 |
+| **F5** | `ResumeOracle` 后 OA 与 RC K 线游标永久失步 | OA 新增 `ResetRoundCandles(0x52540028)`（仅 admin/controller）；RC resume 时用 `IGNORE_ERRORS` 通知（oracle 为 admin 时跳过）；OA CANDLE 回滚改为只回滚匹配当前游标 |
+| **F6** | 领取/预言机入口缺入站金额下限 → 可被高频调用抽干 TON | RC 领取 ≥0.15 TON；OA 签名入口 ≥0.25 TON |
+| **F7** | `SetTeamWalletJettonWallet` 运行期可改 → 后续 `ReturnExcessesBack` 全校验失败 | 加 `controller == null` 一次性锁 |
+| **F8** | `MintOnce` 先置空 admin 再发转账 → bounce 即永久报废 | 先断言 `tonAmount >= 0.1 && valueCoins >= tonAmount + 0.05`，再清 admin |
+| **F9** | 延迟开窗导致 36h 质押窗口被压缩到接近 0 | `handleOpenRound` 无条件锚定 `stakeOpenAt = now` |
+| **F10** | 滚存未校验 `minStakeRaw` → 1 raw 也能滚入刷连胜 | `rollAmount >= minStakeRaw` 才滚入 |
+| **F12** | 5 类状态变更无 external-out 事件 → 索引器假阳性风险 | 新增事件 `0x52540109`–`0x5254010D` |
+
+### 16.3 明确不修（含理由）
+
+| 项 | 理由 |
+| --- | --- |
+| **F11. `RetryPendingActions` 团队路径加 dispatched 节流** | `TeamVault.ReleaseTeamQuota` 已保证幂等（已 released 只重发 ack、pending 在途直接 return，不重复转账）；且该调用要求附 0.3 TON 打进 RC、RC 仅花 0.05 转发 → **刷调用是亏钱的，RC 净赚**。加节流必须配 TV→RC 反向通知，通知丢失即从「无害重复」变「永久卡死」——负收益。 |
+| **两份报告中的 2 项假阳性** | ①「R10 后 `ClaimAll` 仍走 50% 早领」不成立（`RC:1171` 与 `payEarlyReward:1427` 均有 `unlockStart == 0` 断言）②「`SetJettonWalletCode` 未锁 `currentRoundId == 0`」不成立（`RC:1019` 已有断言）。 |
+| **作废轮导致 streak 断签** | 产品设计选择（「连续参与」语义），不改合约；在风险披露中写明「轮次未开启或被技术中止时，该轮不计入连胜」。 |
+
+### 16.4 修复后的强制验证流程
+
+改 `JettonWallet` 会连带改 `JettonMaster` 内嵌 wallet code → **所有 jetton wallet 地址变化**，因此：
+1. **必须全新部署，禁止 `A9_RESUME_JETTON_MASTER_ADDRESS`**；
+2. 测试网实例重跑 10 轮链上验收 + 100 亿守恒（误差 0 raw）；
+3. 索引器对新实例重跑 `chain-reconcile.mjs`，DIFFS 必须 0；
+4. 提交两位审计方执行 M4 复核。
