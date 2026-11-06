@@ -45,44 +45,17 @@ export const DEFAULT_DEMO_PREVIEW_SECONDS = 90;
 export const DEFAULT_DEMO_CANDLE_SECONDS = 90;
 
 // ---------------------------------------------------------------------------
-// V8 权重制 / 奖励三态 / 邀请 / 解锁（docs/17，合约 V8 已定稿；参数不得擅改）
+// v10（docs/00 D-42、docs/34）：奖励纯按质押比例，没有权重 / 邀请 / 连续参与 / 滚存 / 早领 / 解锁池
 // ---------------------------------------------------------------------------
-/** 连续参与每轮权重加成：1000 bps = +10%（streak=1 → 1.10×，streak=10 → 2.00×） */
-export const STREAK_BONUS_BPS = 1_000;
-/** 连续参与加成封顶轮次 */
-export const STREAK_MAX_ROUNDS = 10;
-/** 直接邀请人加成：2000 bps = 被邀请人质押的 20% */
-export const REFERRAL_BONUS_BPS = 2_000;
-/** 邀请加成封顶 = 邀请人自己质押额（10000 bps = 1.0×） */
-export const REFERRAL_CAP_MULTIPLE = 10_000;
-/** 早领罚没：5000 bps = 立即领 50%，另 50% 进解锁池 */
-export const EARLY_CLAIM_PENALTY_BPS = 5_000;
-/** 单地址单轮滚存上限：2000 万 A9（与单地址质押硬顶一致） */
-export const ROLLOVER_CAP_PER_ADDRESS_RAW = 20_000_000n * TOKEN_SCALE;
-/** 单笔最低质押 / 单地址硬顶 / 本轮总上限（合约 V8 参数，滚存截断用） */
-export const MIN_STAKE_RAW = 10_000n * TOKEN_SCALE;
+
+/** 单笔最低有效质押（v10：100,000 A9） */
+export const MIN_STAKE_RAW = 100_000n * TOKEN_SCALE;
 export const MAX_TOTAL_STAKE_RAW = 200_000_000n * TOKEN_SCALE;
-/** R10 终态后线性解锁：12 × 30 天 = 31,104,000 秒 */
-export const UNLOCK_DURATION_SECONDS = 31_104_000;
-/** 演示模式下「解锁中」展示时长（秒）：演示周期在 R10 结束后展示 ClaimUnlocked 一段时间再重置 */
-export const DEFAULT_DEMO_UNLOCK_SECONDS = 1_800;
 
-/** streak 权重倍数 bps：10000 + streak × 1000（合约 weightBpsForStreak 同口径） */
-export function weightBpsForStreak(streak: number): number {
-  const capped = Math.max(0, Math.min(streak, STREAK_MAX_ROUNDS));
-  return 10_000 + capped * STREAK_BONUS_BPS;
-}
-
-/** 连续轮次推导（合约 streakForRound 同口径）：同轮保持；上轮 +1（封顶）；否则重置 1。 */
-export function streakForRound(prevLastRound: number, prevCount: number, roundId: number): number {
-  if (prevCount > 0 && prevLastRound === roundId) return Math.min(prevCount, STREAK_MAX_ROUNDS);
-  if (prevCount > 0 && prevLastRound + 1 === roundId) return Math.min(prevCount + 1, STREAK_MAX_ROUNDS);
-  return 1;
-}
-
-/** own weight = amount × (1 + 10% × min(streak,10))（floor） */
-export function ownWeightFor(amountRaw: bigint, streak: number): bigint {
-  return (amountRaw * BigInt(weightBpsForStreak(streak))) / 10_000n;
+/** 合约 rewardOf：floor(本轮奖励 × 我的质押 / 本轮总质押)。 */
+export function rewardFor(rewardBudgetRaw: bigint, stakeRaw: bigint, totalStakeRaw: bigint): bigint {
+  if (totalStakeRaw <= 0n || stakeRaw <= 0n) return 0n;
+  return (rewardBudgetRaw * stakeRaw) / totalStakeRaw;
 }
 
 export const TERMINAL_STATES: readonly RoundState[] = [
@@ -194,18 +167,8 @@ export interface Params {
   previewSeconds: number;
   /** 协议口径的预告期（秒），恒为 43200（12h），不受 demo 压缩影响；用于 /api/config 展示 */
   previewProtocolSeconds: number;
-  // ---- V8 ----
-  streakBonusBps: number;
-  streakMaxRounds: number;
-  referralBonusBps: number;
-  referralCapMultiple: number;
-  earlyClaimPenaltyBps: number;
-  rolloverCapPerAddressRaw: bigint;
-  unlockDurationSeconds: number;
   minStakeRaw: bigint;
   maxTotalStakeRaw: bigint;
-  /** 演示模式「解锁中」展示时长（秒） */
-  demoUnlockSeconds: number;
   /** B6：chain 模式缺失的关键链上配置键（非空时 API 必须 ORACLE_PAUSED，不得回退本地常量） */
   chainConfigMissing: string[];
   now: number;

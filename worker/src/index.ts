@@ -32,11 +32,11 @@ import {
 import * as state from './state';
 import * as store from './store';
 import * as views from './views';
-import * as v8 from './v8';
+import * as rewards from './rewards';
 import { clientIp, enforceRateLimit, issueAuthNonce, requireWriteAuth } from './tonproof';
 import { notImplemented, oraclePaused } from './http';
 import { reconcile as indexerReconcile, tick as indexerTick } from './indexer';
-import { ownWeightFor, streakForRound } from './protocol';
+import { parseTonAddress } from './indexer/address';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 import type { ReconcileResult } from './state';
 import type { Env as WorkerEnv } from './env';
@@ -59,19 +59,10 @@ async function handleTrades(env: Env, url: URL): Promise<Response> {
 
 async function handleMe(env: Env, st: ReconcileResult, url: URL): Promise<Response> {
   const address = parseAddress(url.searchParams.get('address'));
-  return okResponse(await views.buildMe(env, st, address));
-}
-
-/** P1-C：按 V8 权重（own weight + 邀请加成）/ 总权重 估算单地址奖励（旧数据兜底）。 */
-function v8WeightReward(st: ReconcileResult, roundId: number, address: string): bigint {
-  const round = st.rounds.find((row) => row.round_id === roundId);
-  if (!round) return 0n;
-  const stakes = st.stakeRows.filter((row) => row.round_id === roundId);
-  if (!stakes.length) return 0n;
-  const weights = v8.computeRoundWeights(st.params, stakes);
-  const weight = weights.byAddress.get(address)?.weight ?? 0n;
-  if (weights.totalWeight === 0n || weight === 0n) return 0n;
-  return (toBigInt(round.reward_budget_raw) * weight) / weights.totalWeight;
+  // chain 模式索引器按 raw 地址（0:hex）落库；用户友好地址先归一成 raw 再查，响应里仍回显调用方传入的地址
+  const lookup = st.params.dataSource === 'chain' ? (parseTonAddress(address)?.raw ?? address) : address;
+  const me = await views.buildMe(env, st, lookup);
+  return okResponse({ ...me, address, stakes: me.stakes.map((stake) => ({ ...stake, address })) });
 }
 
 async function handleStake(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
@@ -106,6 +97,9 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
   for (const row of existing) {
     if (row.address === address) alreadyStaked += toBigInt(row.amount_raw);
   }
+  if (amount < params.minStakeRaw) {
+    throw badRequest(`低于最低有效质押（${params.minStakeRaw.toString()} raw）`);
+  }
   if (amount > params.demoWalletBalanceRaw || alreadyStaked + amount > params.demoWalletBalanceRaw) {
     throw badRequest('演示钱包余额不足');
   }
@@ -123,45 +117,15 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
     throw conflict('当前不在质押时间窗口内');
   }
 
-  // V8：连续轮次与权重（streak = 上轮+1 / 同轮保持 / 否则重置 1）
-  const myStakes = st.stakeRows.filter((row) => row.address === address);
-  const lastRound = myStakes.reduce((max, row) => Math.max(max, row.round_id), 0);
-  const lastStreak = myStakes
-    .filter((row) => row.round_id === lastRound)
-    .reduce((max, row) => Math.max(max, row.streak ?? 1), 0);
-  const streak = streakForRound(lastRound, lastStreak, roundId);
-  const weightRaw = ownWeightFor(amount, streak);
-
-  // V8：邀请人绑定（一次性、不可改；demo 允许首次质押时通过 body.referrer 绑定）
-  let referredBy: string | null = null;
-  const bound = await store.getReferralOf(env, address);
-  if (bound) {
-    referredBy = bound.referrer;
-  } else {
-    const rawReferrer = optionalString(body, 'referrer');
-    if (rawReferrer && rawReferrer !== address) {
-      const referrer = parseAddress(rawReferrer, 'referrer');
-      const back = await store.getReferralOf(env, referrer);
-      if (back && back.referrer === address) throw conflict('禁止互相绑定邀请');
-      const boundReferrer = await store.insertReferral(env, address, referrer, now);
-      if (boundReferrer) {
-        referredBy = referrer;
-        await store.logEvent(env, 'info', address.slice(0, 12), 'REFERRER_SET', 'referrer=' + referrer);
-      }
-    }
-  }
-
   const inserted = await store.insertStake(env, {
     roundId,
     address,
     amountRaw: amount,
-    weightRaw,
+    weightRaw: amount,
     nonce,
     riskDisclosureVersion: riskVersion,
     acceptFullPrincipalBurn: true,
     acceptedAt: now,
-    streak,
-    referredBy,
   });
   if (!inserted) throw conflict('重复的 deposit nonce，本次质押已忽略');
 
@@ -171,7 +135,7 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
     'info',
     `wallet:${address.slice(0, 8)}`,
     'STAKE_ACCEPTED',
-    `R${roundId} + ${amount.toString()} raw（streak=${streak} weight=${weightRaw.toString()} referral=${referredBy ?? '-'}）`,
+    `R${roundId} + ${amount.toString()} raw`,
   );
   bustCache();
   return okResponse({
@@ -180,6 +144,11 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
   });
 }
 
+/**
+ * 演示领取（v10 合约同口径）：Claim(roundId) = 本金 + 全额奖励一次领完；all=true 等价 ClaimAll。
+ * 可领：SUCCEEDED（本金 + 奖励）/ TECHNICAL_ABORTED（只退本金）；FAILED_PERMANENT 无可领。
+ * demo 没有退款账本（入参校验失败直接拒绝），所以 roundsMask 不会出现 bit 15。
+ */
 async function handleClaim(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
   const body = await readJsonBody(request);
   if (st.params.dataSource === 'chain') {
@@ -188,136 +157,69 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
   const address = parseAddress(body.address);
   // P1-A：领取同样需要 ton_proof（防替他人领取）
   await requireWriteAuth(env, request, body, address, st.now);
-  const kind = requireString(body, 'kind');
-  if (kind !== 'principal' && kind !== 'reward' && kind !== 'unlock') {
-    throw badRequest('kind 必须是 principal / reward / unlock');
-  }
-  const roundsById = new Map(st.rounds.map((row) => [row.round_id, row]));
-
-  // V8 ClaimUnlocked：R10 任一终态后按 12×30 天线性领取
-  if (kind === 'unlock') {
-    const unlock = await v8.buildUnlockInfo(env, st.params, st.rewardRows, roundsById, address, st.now);
-    if (!unlock.active) throw conflict('解锁尚未开始：R10 终态后 12 个月线性解锁');
-    const claimAmount = toBigInt(unlock.claimableRaw);
-    if (claimAmount <= 0n) {
-      return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
-    }
-    const recordedUnlock = await store.recordClaim(env, {
-      roundId: st.params.roundCount,
-      address,
-      kind: 'unlock',
-      amountRaw: claimAmount,
-      claimedAt: st.now,
-    });
-    // unlock 为累加式（多次部分领取），recordClaim 只会因数据库异常失败；
-    // 返回值必须是**本次实际领取额**（claimAmount），不是累计已领额。
-    if (!recordedUnlock) {
-      return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
-    }
-    await store.updateUnlockPool(
-      env,
-      { claimedRaw: (toBigInt(st.unlockPool.claimed_raw) + claimAmount).toString() },
-      st.now,
-    );
-    await store.logEvent(env, 'info', address.slice(0, 12), 'UNLOCK_CLAIMED', `${claimAmount.toString()} raw`);
-    bustCache();
-    return okResponse({ claimed: true, amountRaw: claimAmount.toString(), alreadyClaimed: false });
-  }
-
-  const roundId = parseRoundId(body.roundId);
-  const round = st.rounds.find((item) => item.round_id === roundId);
-  if (!round) throw notFound('轮次不存在');
-  if (round.state === 'FAILED_PERMANENT') {
-    throw conflict('本轮永久失败，质押本金与奖励额度已销毁，无资产可领取');
-  }
-  if (round.state !== 'SUCCEEDED') throw conflict('本轮尚未成功结算，暂不可领取');
-
-  const stakeRows = (await store.listStakesForAddress(env, address)).filter((row) => row.round_id === roundId);
-  if (!stakeRows.length) throw notFound('该地址在本轮没有质押记录');
-
-  const already = await store.getClaim(env, roundId, address, kind);
-  if (already) {
-    return okResponse({ claimed: false, amountRaw: already.amount_raw, alreadyClaimed: true });
-  }
-
-  const amount = stakeRows.reduce((sum, row) => sum + toBigInt(row.amount_raw), 0n);
-  let claimAmount = 0n;
-
-  if (kind === 'principal') {
-    claimAmount = stakeRows.reduce(
-      (sum, row) => sum + (row.principal_claimed === 1 ? 0n : toBigInt(row.amount_raw)),
-      0n,
-    );
+  const all = body.all === true;
+  let roundIds: number[];
+  if (all) {
+    roundIds = st.rounds.map((row) => row.round_id);
   } else {
-    // V8：阶梯期奖励三态；旧 ClaimReward 按 EARLY 语义只付 50%，另一半进解锁池（无后门）
-    const lastRound = st.rounds.find((row) => row.round_id === st.params.roundCount);
-    const unlockStarted =
-      !!lastRound &&
-      (lastRound.state === 'SUCCEEDED' || lastRound.state === 'FAILED_PERMANENT' || lastRound.state === 'TECHNICAL_ABORTED') &&
-      st.unlockPool.start_at > 0;
-    if (unlockStarted) {
-      throw conflict('R10 已终态、解锁已开始：请改用 ClaimUnlocked 线性领取（旧 ClaimReward 已关闭）');
+    const roundId = parseRoundId(body.roundId);
+    const round = st.rounds.find((item) => item.round_id === roundId);
+    if (!round) throw notFound('轮次不存在');
+    if (round.state === 'FAILED_PERMANENT') {
+      throw conflict('本轮永久失败，质押本金与奖励额度已销毁，无资产可领取');
     }
-    const rewardRow = st.rewardRows.find((row) => row.round_id === roundId && row.address === address);
-    if (rewardRow && rewardRow.state !== 0) {
-      return okResponse({
-        claimed: false,
-        amountRaw: rewardRow.state === 2 ? rewardRow.paid_raw : '0',
-        alreadyClaimed: true,
-        state: rewardRow.state,
-      });
-    }
-    // P1-C：无 rewardRow 的旧数据也按 V8 权重公式兜底（不再用本金比例）
-    const reward = rewardRow
-      ? toBigInt(rewardRow.reward_raw)
-      : v8WeightReward(st, round.round_id, address);
-    const paidBps = BigInt(10_000 - st.params.earlyClaimPenaltyBps);
-    claimAmount = (reward * paidBps) / 10_000n;
-    const lockedAmount = reward - claimAmount;
-    if (claimAmount <= 0n) {
-      return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
-    }
-    if (rewardRow) {
-      await store.updateRoundReward(env, {
-        roundId,
-        address,
-        state: 2,
-        paidRaw: claimAmount.toString(),
-        lockedRaw: lockedAmount.toString(),
-        now: st.now,
-      });
-    }
-    await store.updateUnlockPool(
-      env,
-      { totalLockedRaw: (toBigInt(st.unlockPool.total_locked_raw) + lockedAmount).toString() },
-      st.now,
-    );
+    if (round.state !== 'SUCCEEDED' && round.state !== 'TECHNICAL_ABORTED') throw conflict('本轮尚未结算，暂不可领取');
+    roundIds = [roundId];
   }
 
-  if (claimAmount === 0n) {
-    return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
+  const myStakes = (await store.listStakesForAddress(env, address)).filter((row) => roundIds.includes(row.round_id));
+  if (!all && !myStakes.length) throw notFound('该地址在本轮没有质押记录');
+
+  let mask = 0;
+  let principalTotal = 0n;
+  let rewardTotal = 0n;
+  let alreadyClaimed = false;
+  for (const roundId of roundIds) {
+    const round = st.rounds.find((item) => item.round_id === roundId);
+    if (!round || (round.state !== 'SUCCEEDED' && round.state !== 'TECHNICAL_ABORTED')) continue;
+    const rows = myStakes.filter((row) => row.round_id === roundId);
+    if (!rows.length) continue;
+    if (rows.every((row) => row.principal_claimed === 1)) {
+      alreadyClaimed = true;
+      continue;
+    }
+    const principal = rows.reduce((sum, row) => sum + toBigInt(row.amount_raw), 0n);
+    const reward = rewards.rewardOfAddress(round, address, st.stakeRows, st.rewardRows);
+    const recorded = await store.recordRoundClaim(env, { roundId, address, principalRaw: principal, rewardRaw: reward, claimedAt: st.now });
+    if (!recorded) {
+      alreadyClaimed = true;
+      continue;
+    }
+    mask |= 1 << (roundId - 1);
+    principalTotal += principal;
+    rewardTotal += reward;
   }
 
-  const recorded = await store.recordClaim(env, {
-    roundId,
-    address,
-    kind,
-    amountRaw: claimAmount,
-    claimedAt: st.now,
-  });
-  if (!recorded) {
-    const raced = await store.getClaim(env, roundId, address, kind);
-    return okResponse({ claimed: false, amountRaw: raced?.amount_raw ?? '0', alreadyClaimed: true });
+  if (mask === 0) {
+    if (!all && !alreadyClaimed) throw conflict('没有可领取的资产');
+    return okResponse({ claimed: false, roundsMask: 0, principalRaw: '0', rewardRaw: '0', amountRaw: '0', alreadyClaimed: true });
   }
   await store.logEvent(
     env,
     'info',
     address.slice(0, 12),
-    kind === 'principal' ? 'PRINCIPAL_CLAIMED' : 'REWARD_EARLY_CLAIMED',
-    `R${roundId} ${claimAmount.toString()} raw`,
+    'CLAIMED',
+    `mask=0x${mask.toString(16)} principal=${principalTotal.toString()} reward=${rewardTotal.toString()} raw`,
   );
   bustCache();
-  return okResponse({ claimed: true, amountRaw: claimAmount.toString(), alreadyClaimed: false });
+  return okResponse({
+    claimed: true,
+    roundsMask: mask,
+    principalRaw: principalTotal.toString(),
+    rewardRaw: rewardTotal.toString(),
+    amountRaw: (principalTotal + rewardTotal).toString(),
+    alreadyClaimed: false,
+  });
 }
 
 async function handleAdmin(
@@ -460,10 +362,6 @@ function classifyRoute(method: string, url: URL): RoutePlan | null {
     return isGet ? routePlan({ requiresState: false, cheap: 'nonce', d1Scope: 'nonce' }) : null;
   }
 
-  if (parts[0] === 'referral' && parts.length === 2) {
-    return isGet ? routePlan({}) : null;
-  }
-
   if (parts[0] === 'rounds' && parts.length >= 2 && parts.length <= 3) {
     if (!isGet) return null;
     const roundId = Number(parts[1]);
@@ -598,12 +496,6 @@ async function route(
     assertMethod(method, 'GET');
     const address = parseAddress(url.searchParams.get('address'));
     return okResponse(await issueAuthNonce(env, address, st.now));
-  }
-
-  if (parts[0] === 'referral' && parts.length === 2) {
-    assertMethod(method, 'GET');
-    const address = parseAddress(decodeURIComponent(parts[1]));
-    return okResponse(await views.buildReferralResponse(env, st, address));
   }
 
   if (parts[0] === 'rounds' && parts.length >= 2) {

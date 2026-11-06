@@ -56,13 +56,13 @@ await test('B2：chain 模式不本地推进轮次状态', async () => {
   return 'R1 保持 STAKING_OPEN（链上状态未变）';
 });
 
-await test('B3：chain 模式不覆盖 total_weight_raw / candle_hash（链上权威值）', async () => {
+await test('B3：chain 模式不覆盖 candle_hash（链上权威值）；v10 不再返回 totalWeightRaw', async () => {
   const rounds = await api('/api/rounds');
   const r1 = rounds.body.data.find((row) => row.roundId === 1);
   assert(r1, '缺少 R1');
-  eq(r1.totalWeightRaw, '777', 'totalWeightRaw 应保留索引器写入值');
+  assert(!('totalWeightRaw' in r1), 'v10 /api/rounds 不应再返回 totalWeightRaw');
   eq(r1.candleHash, '0xabababababababababababababababababababababababababababababababab', 'candleHash 应保留链上值');
-  return 'total_weight=777 / candle_hash=0xabab… 未被本地重算';
+  return 'candle_hash=0xabab… 未被本地重算；totalWeightRaw 已从 API 移除';
 });
 
 await test('B7：chain 未开轮不投影档位（targetLocked=false）', async () => {

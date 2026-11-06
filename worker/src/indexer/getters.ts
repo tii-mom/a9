@@ -1,7 +1,7 @@
 /**
- * RoundController / TeamVault / JettonMaster 的 get-method 封装与栈解码。
- * 槽位顺序严格对齐 contracts/contracts/types.tolk（RoundView 22 槽 / ProtocolConfigView 22 槽 / TeamVaultState 8 槽），
- * 任何槽位顺序变化都必须先改合约再改这里（进度核对脚本会以 candleHash/failureBurnId 复算兜底）。
+ * RoundController / JettonMaster 的 get-method 封装与栈解码（v10：TeamVault / OracleAdapter 已删除）。
+ * 槽位顺序严格对齐 contracts/contracts/types.tolk（RoundView 22 槽 / ProtocolConfigView 22 槽，形状沿用 v8.9），
+ * 任何槽位顺序变化都必须先改合约再改这里（进度核对脚本会以 candleHash 复算兜底）。
  */
 import { BitReader, BitWriter, buildSingleCellBoc, cellFromRawData, rootCellFromBase64 } from './boc';
 import type { ChainClient, StackArg } from './chain-client';
@@ -132,33 +132,26 @@ export interface ChainRoundView {
   qualifiedCandles: number;
   totalAcceptedStakeRaw: bigint;
   settledAt: number;
+  /** v10：团队转账已发出且未被退回（成功轮） */
   teamReleaseConfirmed: boolean;
+  /** v10：失败轮且那一笔 burn 已发出且未被退回 */
   teamBurnConfirmed: boolean;
+  /** v10：本轮 burn 已发出且未被退回（失败轮或 0 质押成功轮） */
   rewardBurnConfirmed: boolean;
+  /** v10：同 teamBurnConfirmed（失败轮只有一笔 burn） */
   principalBurnConfirmed: boolean;
+  /** v10 恒为 0 */
   failureBurnId: string;
   candleHash: string;
+  /** v10 = 总质押（不再有权重） */
   totalWeight: bigint;
 }
 
 export interface ChainStakePosition {
   amountRaw: bigint;
   lastDepositNonce: bigint;
-  principalClaimed: boolean;
-  rewardClaimed: boolean;
-  weight: bigint;
-  rewardState: number;
-}
-
-export interface ChainTeamVaultState {
-  controller: TonAddress | null;
-  jettonWallet: TonAddress | null;
-  teamWallet: TonAddress | null;
-  teamRoundRaw: bigint;
-  totalReleasedRaw: bigint;
-  totalBurnedRaw: bigint;
-  releasedCount: number;
-  burnedCount: number;
+  /** v10：一次 Claim 同时领本金 + 奖励（principalClaimed = rewardClaimed） */
+  claimed: boolean;
 }
 
 export interface ChainJettonData {
@@ -230,43 +223,12 @@ export async function getSuccessCount(client: ChainClient, roundController: stri
   return stackInt(stack[0], 'successCount');
 }
 
-/** get_round_burn_status(roundId)：3 个确认标志 + failureBurnId。 */
-export async function getRoundBurnStatus(
-  client: ChainClient,
-  roundController: string,
-  roundId: number,
-): Promise<{ rewardBurnConfirmed: boolean; teamBurnConfirmed: boolean; principalBurnConfirmed: boolean; failureBurnId: string }> {
-  const { stack } = await client.runGetMethod(roundController, 'get_round_burn_status', [numArg(roundId)]);
-  if (stack.length < 4) throw new Error('get_round_burn_status 槽位不足：' + stack.length);
-  return {
-    rewardBurnConfirmed: stackBool(stack[0]),
-    teamBurnConfirmed: stackBool(stack[1]),
-    principalBurnConfirmed: stackBool(stack[2]),
-    failureBurnId: hex256(stackNum(stack[3])),
-  };
-}
-
 export async function getRoundTotalStake(client: ChainClient, roundController: string, roundId: number): Promise<bigint> {
   const { stack } = await client.runGetMethod(roundController, 'get_round_total_stake', [numArg(roundId)]);
   return stackNum(stack[0]);
 }
 
-export async function getTotalWeight(client: ChainClient, roundController: string, roundId: number): Promise<bigint> {
-  const { stack } = await client.runGetMethod(roundController, 'get_total_weight', [numArg(roundId)]);
-  return stackNum(stack[0]);
-}
-
-export async function getUserWeight(
-  client: ChainClient,
-  roundController: string,
-  roundId: number,
-  owner: TonAddress,
-): Promise<bigint> {
-  const { stack } = await client.runGetMethod(roundController, 'get_user_weight', [numArg(roundId), addressArg(owner)]);
-  return stackNum(stack[0]);
-}
-
-/** get_user_stake(roundId, owner)：6 槽（amount, nonce, principalClaimed, rewardClaimed, weight, rewardState）。 */
+/** get_user_stake(roundId, owner)：6 槽（amount, nonce, principalClaimed, rewardClaimed, weight=amount, rewardState=0）。 */
 export async function getUserStake(
   client: ChainClient,
   roundController: string,
@@ -278,10 +240,7 @@ export async function getUserStake(
   return {
     amountRaw: stackNum(stack[0]),
     lastDepositNonce: stackNum(stack[1]),
-    principalClaimed: stackBool(stack[2]),
-    rewardClaimed: stackBool(stack[3]),
-    weight: stackNum(stack[4]),
-    rewardState: stackInt(stack[5], 'rewardState'),
+    claimed: stackBool(stack[2]),
   };
 }
 
@@ -295,7 +254,7 @@ export async function getUserRewardEstimate(
   return stackNum(stack[0]);
 }
 
-/** get_claimable_all(owner)：principalRaw, rewardRaw, roundsMask。 */
+/** get_claimable_all(owner)：principalRaw, rewardRaw（全额）, roundsMask（bit r-1 = 第 r 轮；bit 15 = 退款账本）。 */
 export async function getClaimableAll(
   client: ChainClient,
   roundController: string,
@@ -306,52 +265,24 @@ export async function getClaimableAll(
   return { principalRaw: stackNum(stack[0]), rewardRaw: stackNum(stack[1]), roundsMask: stackInt(stack[2], 'roundsMask') };
 }
 
-/** get_unlock_info(owner)：unlockStart、totalLockedRaw、claimedRaw、claimableRaw。 */
-export async function getUnlockInfo(
-  client: ChainClient,
-  roundController: string,
-  owner: TonAddress,
-): Promise<{ unlockStart: number; totalLockedRaw: bigint; claimedRaw: bigint; claimableRaw: bigint }> {
-  const { stack } = await client.runGetMethod(roundController, 'get_unlock_info', [addressArg(owner)]);
-  if (stack.length < 4) throw new Error('get_unlock_info 槽位不足：' + stack.length);
-  return {
-    unlockStart: stackInt(stack[0], 'unlockStart'),
-    totalLockedRaw: stackNum(stack[1]),
-    claimedRaw: stackNum(stack[2]),
-    claimableRaw: stackNum(stack[3]),
-  };
-}
-
-/** TeamVault get_team_vault_state()：3 地址 + 5 数字（8 槽）。 */
-export async function getTeamVaultState(client: ChainClient, teamVault: string): Promise<ChainTeamVaultState> {
-  const { stack } = await client.runGetMethod(teamVault, 'get_team_vault_state');
-  if (stack.length < 8) throw new Error('get_team_vault_state 槽位不足：' + stack.length);
-  return {
-    controller: stackAddress(stack[0]),
-    jettonWallet: stackAddress(stack[1]),
-    teamWallet: stackAddress(stack[2]),
-    teamRoundRaw: stackNum(stack[3]),
-    totalReleasedRaw: stackNum(stack[4]),
-    totalBurnedRaw: stackNum(stack[5]),
-    releasedCount: stackInt(stack[6], 'releasedCount'),
-    burnedCount: stackInt(stack[7], 'burnedCount'),
-  };
-}
-
-/** TeamVault get_round_state(roundId)：released, burned, amountRaw, queryId。 */
-export async function getTeamRoundState(
-  client: ChainClient,
-  teamVault: string,
-  roundId: number,
-): Promise<{ released: boolean; burned: boolean; amountRaw: bigint; queryId: bigint }> {
-  const { stack } = await client.runGetMethod(teamVault, 'get_round_state', [numArg(roundId)]);
-  if (stack.length < 4) throw new Error('get_round_state 槽位不足：' + stack.length);
-  return { released: stackBool(stack[0]), burned: stackBool(stack[1]), amountRaw: stackNum(stack[2]), queryId: stackNum(stack[3]) };
-}
-
 /** JettonMaster get_jetton_data()：total_supply, mintable, admin, content, wallet_code。 */
 export async function getJettonData(client: ChainClient, jettonMaster: string): Promise<ChainJettonData> {
   const { stack } = await client.runGetMethod(jettonMaster, 'get_jetton_data');
   if (stack.length < 2) throw new Error('get_jetton_data 槽位不足：' + stack.length);
   return { totalSupplyRaw: stackNum(stack[0]), mintable: stackBool(stack[1]), admin: stackAddress(stack[2]) };
+}
+
+/** RoundController get_jetton_wallet_address()：RC 自己的 Jetton 钱包（链上推导）。 */
+export async function getJettonWalletAddress(client: ChainClient, roundController: string): Promise<string> {
+  const { stack } = await client.runGetMethod(roundController, 'get_jetton_wallet_address');
+  const address = stackAddress(stack[0]);
+  if (!address) throw new Error('get_jetton_wallet_address 返回 null');
+  return address.raw;
+}
+
+/** TEP-74 JettonWallet get_wallet_data()：balance, owner, master, wallet_code → 只取余额。 */
+export async function getWalletBalance(client: ChainClient, wallet: string): Promise<bigint> {
+  const { stack } = await client.runGetMethod(wallet, 'get_wallet_data');
+  if (stack.length < 1) throw new Error('get_wallet_data 槽位不足：' + stack.length);
+  return stackNum(stack[0]);
 }

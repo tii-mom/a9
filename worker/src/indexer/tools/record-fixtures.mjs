@@ -3,13 +3,14 @@
  * record-fixtures.mjs — 把链上真实响应录成离线 fixture（供 fixture-server.mjs 回放）。
  *
  * 只用 node 原生能力（零依赖）。录两类数据：
- *  1. v3 /transactions：RC / TeamVault 的全部交易（只保留索引器需要的字段，减小体积）；
- *  2. v2 /runGetMethod：get_protocol_config / get_round(1..10) / get_jetton_data / get_team_vault_state /
- *     get_round_total_stake(1..10)（对账 CLI 也需要）。
+ *  1. v3 /transactions：RoundController 的全部交易（v10 没有 TeamVault；只保留索引器需要的字段）；
+ *  2. v2 /runGetMethod：get_protocol_config / get_round(1..10) / get_round_total_stake(1..10) / get_jetton_data /
+ *     get_jetton_wallet_address + RC 钱包 get_wallet_data，以及 --owners 列出的地址的 get_user_stake / get_claimable_all。
  *
  * 用法：
  *   node worker/src/indexer/tools/record-fixtures.mjs \
- *     --rc 0:... --tv 0:... --jm 0:... [--rounds 10] [--out worker/src/indexer/tools/fixtures/fasttest-v86.json]
+ *     --rc 0:... --jm 0:... --tw 0:... --keeper 0:... [--owners 0:..,0:..] [--rounds 10] \
+ *     [--out worker/src/indexer/tools/fixtures/testnet-v10.json]
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -28,12 +29,33 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 const network = (args.network || 'testnet') === 'mainnet' ? 'mainnet' : 'testnet';
 const apiBase = (network === 'mainnet' ? 'https://toncenter.com/api' : 'https://testnet.toncenter.com/api');
-const outPath = args.out || 'worker/src/indexer/tools/fixtures/fasttest-v86.json';
+const outPath = args.out || 'worker/src/indexer/tools/fixtures/testnet-v10.json';
 const roundCount = Number(args.rounds || 10);
 const rc = args.rc;
-const tv = args.tv;
 const jm = args.jm;
-if (!rc || !tv || !jm) { console.error('缺少 --rc/--tv/--jm'); process.exit(2); }
+const tw = args.tw;
+const keeper = args.keeper;
+const owners = args.owners ? String(args.owners).split(',').map((item) => item.trim()).filter(Boolean) : [];
+if (!rc || !jm || !tw || !keeper) { console.error('缺少 --rc/--jm/--tw/--keeper（raw 地址 0:…）'); process.exit(2); }
+
+/** 地址入参 slice BOC（与 worker getters.addressArg 逐字节一致，含 1 位哨兵）。 */
+function addressSliceBoc(raw) {
+  const [wc, hashHex] = raw.split(':');
+  const bits = [];
+  const push = (value, count) => {
+    let v = BigInt(value);
+    if (v < 0n) v = (1n << BigInt(count)) + v;
+    for (let i = count - 1; i >= 0; i--) bits.push(Number((v >> BigInt(i)) & 1n));
+  };
+  push(2n, 2); push(0n, 1); push(Number(wc), 8); push(BigInt('0x' + hashHex), 256); push(1n, 1);
+  const data = Buffer.alloc(Math.ceil(bits.length / 8));
+  bits.forEach((bit, index) => { if (bit) data[index >> 3] |= 0x80 >> (index & 7); });
+  const d2 = bits.length % 8 === 0 ? data.length * 2 : (data.length - 1) * 2 + 1;
+  const out = Buffer.alloc(13 + data.length);
+  out.set([0xb5, 0xee, 0x9c, 0x72, 0x01, 0x01, 0x01, 0x01, 0x00, 2 + data.length, 0x00, 0x00, d2]);
+  data.copy(out, 13);
+  return out.toString('base64');
+}
 
 let lastCallAt = 0;
 const MIN_INTERVAL = process.env.TONCENTER_API_KEY ? 200 : 5000;
@@ -128,15 +150,12 @@ async function main() {
   fixtures.meta = {
     network,
     recordedAt: new Date().toISOString(),
-    rc, tv, jm,
+    rc, jm, tw, keeper,
     note: '由 record-fixtures.mjs 从真实链上录制；仅保留索引器字段。回放用 fixture-server.mjs。',
   };
   console.log('[1/4] 录制 RC 交易…');
   fixtures.v3.transactions[rc] = await recordTransactions(rc);
   console.log('      RC txs = ' + fixtures.v3.transactions[rc].length);
-  console.log('[2/4] 录制 TeamVault 交易…');
-  fixtures.v3.transactions[tv] = await recordTransactions(tv);
-  console.log('      TV txs = ' + fixtures.v3.transactions[tv].length);
 
   const getterKeys = [];
   const put = (address, method, stack, response) => {
@@ -144,12 +163,33 @@ async function main() {
     fixtures.v2[key] = response;
     getterKeys.push(key);
   };
-  console.log('[3/4] 录制 getter（config / current_round / success_count / jetton / teamvault）…');
+  console.log('[2/4] 录制 getter（config / current_round / success_count / jetton / RC 钱包）…');
   put(rc, 'get_protocol_config', [], await recordGetter(rc, 'get_protocol_config'));
   put(rc, 'get_current_round', [], await recordGetter(rc, 'get_current_round'));
   put(rc, 'get_success_count', [], await recordGetter(rc, 'get_success_count'));
   put(jm, 'get_jetton_data', [], await recordGetter(jm, 'get_jetton_data'));
-  put(tv, 'get_team_vault_state', [], await recordGetter(tv, 'get_team_vault_state'));
+  const walletResponse = await recordGetter(rc, 'get_jetton_wallet_address');
+  put(rc, 'get_jetton_wallet_address', [], walletResponse);
+  const walletItem = walletResponse.result.stack[0];
+  const walletData = walletItem && walletItem[1] && walletItem[1].object && walletItem[1].object.data;
+  if (walletData) {
+    const bytes = Buffer.from(walletData.b64, 'base64');
+    const wcByte = ((bytes[0] & 0x1f) << 3) | (bytes[1] >> 5);
+    let hash = '';
+    for (let i = 0; i < 32; i++) hash += (((bytes[1 + i] << 3) | (bytes[2 + i] >> 5)) & 0xff).toString(16).padStart(2, '0');
+    const wallet = (wcByte > 127 ? wcByte - 256 : wcByte) + ':' + hash;
+    put(wallet, 'get_wallet_data', [], await recordGetter(wallet, 'get_wallet_data'));
+    fixtures.meta.rcWallet = wallet;
+  }
+  console.log('[3/4] 录制 getter（owners × get_claimable_all / get_user_stake）…');
+  for (const owner of owners) {
+    const ownerArg = ['slice', addressSliceBoc(owner)];
+    put(rc, 'get_claimable_all', [ownerArg], await recordGetter(rc, 'get_claimable_all', [ownerArg]));
+    for (let roundId = 1; roundId <= roundCount; roundId++) {
+      const stack = [['num', '0x' + roundId.toString(16)], ownerArg];
+      put(rc, 'get_user_stake', stack, await recordGetter(rc, 'get_user_stake', stack));
+    }
+  }
   console.log('[4/4] 录制 getter（round 1..' + roundCount + '）…');
   for (let roundId = 1; roundId <= roundCount; roundId++) {
     const stack = [['num', '0x' + roundId.toString(16)]];

@@ -6,7 +6,7 @@
  *   node worker/scripts/preflight-mainnet.mjs
  *   node worker/scripts/preflight-mainnet.mjs --tag=v8.9-audit-fixed
  *   # 真实地址尚未写进 wrangler.toml 时（与 CI 门禁同口径）：
- *   PROD_ROUND_CONTROLLER_ADDRESS=0:... PROD_TEAM_VAULT_ADDRESS=0:... \
+ *   PROD_ROUND_CONTROLLER_ADDRESS=0:... PROD_TEAM_WALLET_ADDRESS=0:... PROD_KEEPER_ADDRESS=0:... \
  *   PROD_JETTON_MASTER_ADDRESS=0:... PROD_ORACLE_CONFIG_HASH=sha256:... \
  *     node worker/scripts/preflight-mainnet.mjs
  *
@@ -38,8 +38,6 @@ const WORKER = join(ROOT, "worker");
 /** v8.9 冻结基线 code hash（hex，小写、无 0x）。来源：docs/18 §18。 */
 const V88_BASELINE_HASHES = {
   RoundController: "fe7088ed1c52949cd1cb0931d95911f757bc402fc37065502002df15ccdd50ae",
-  TeamVault: "de6be49154e3024c9b6945ea81e7181f3e1d04fecc85dbc629c08ede6a673fb6",
-  OracleAdapter: "0c91e5338e00f18b5ffc7c5c26b510424775d8089588f4147e5b667703676768",
   JettonMaster: "b8faf413176c6329a98b2474fedf765a796a14eda96c031ee1fe5b27e59ee272",
   JettonWallet: "c40f41ed05beffb7ef17e25fa0d1bb2afda72c567052546a2e310c0275d31d13",
 };
@@ -207,7 +205,8 @@ function checkConfig() {
 
   const placeholders = [
     "ROUND_CONTROLLER_ADDRESS",
-    "TEAM_VAULT_ADDRESS",
+    "TEAM_WALLET_ADDRESS",
+    "KEEPER_ADDRESS",
     "JETTON_MASTER_ADDRESS",
     "ORACLE_CONFIG_HASH",
   ];

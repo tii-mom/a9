@@ -31,7 +31,6 @@ DEMO_AUTOPLAY = "true"
 # 演示质押窗口时长（秒）
 DEMO_STAKE_SECONDS = "900"
 # 演示「解锁中」展示时长（秒）：R10 终态后先展示 ClaimUnlocked 再重置演示
-DEMO_UNLOCK_SECONDS = "1800"
 # 结算后预告期（演示加速，用于展示"距离下一轮质押开始"倒计时）
 DEMO_PREVIEW_SECONDS = "90"
 # 生产 CORS 白名单（本地 dev 走 vite 同源代理，不需要 *）
@@ -96,7 +95,8 @@ TONCENTER_V3_URL = "https://toncenter.com/api/v3"
 
 # 主网合约/配置：部署时由 CI 用 GitHub Variables 注入；仓库内只保留占位符
 ROUND_CONTROLLER_ADDRESS = "0:__ROUND_CONTROLLER_ADDRESS__"
-TEAM_VAULT_ADDRESS = "0:__TEAM_VAULT_ADDRESS__"
+TEAM_WALLET_ADDRESS = "0:__TEAM_WALLET_ADDRESS__"
+KEEPER_ADDRESS = "0:__KEEPER_ADDRESS__"
 JETTON_MASTER_ADDRESS = "0:__JETTON_MASTER_ADDRESS__"
 ORACLE_CONFIG_VERSION = "1"
 ORACLE_CONFIG_HASH = "__ORACLE_CONFIG_HASH__"

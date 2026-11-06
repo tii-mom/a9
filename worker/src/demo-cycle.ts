@@ -2,23 +2,21 @@
  * 演示数据集重置（DEMO_AUTOPLAY 循环展示用）。
  *
  * 十轮全部进入终态后，Worker 用同一套确定性算法重建初始演示数据：
- *   R1 SUCCEEDED(20/24)、R2 FAILED_PERMANENT(12/24，三笔销毁)、
+ *   R1 SUCCEEDED(20/24，1.2 亿已转团队钱包)、R2 FAILED_PERMANENT(12/24，一笔 burn)、
  *   R3 OBSERVING(12/24 已收盘、8 根达标，第 13 根为 live)、R4..R10 UNOPENED。
  *
  * 与 worker/scripts/generate-seed.mjs 保持同一份「演示数据集定义」：
  *   - 12 个确定性 UQ 地址（SHA-256("fuse-protocol-demo-wallet-{i}") → base64url）
  *   - 目标价档位按 D-28（tier = 1 + 已成功轮数；失败不升档）
- *   - V8 权重制（docs/17）：A0 为 10 轮老兵（R1/R2/R3 streak 8/9/10 → 2.00×）；
- *     2 组邀请（A5→A0、A6→A1）；A1 的 R1 奖励已滚存进 R2；A2 的 R1 奖励已早领 50%；
- *     解锁池预置 3/12（90 天）线性解锁样例；K 线滚动哈希落库。
+ *   - v10（docs/34）：奖励按质押比例；A0 已领 R1（本金 + 全额奖励一次领完）；K 线滚动哈希落库。
  * 差异仅在于时间锚点（重置时刻 vs seed 执行时刻）与成交/盘口由 demo source 现场生成。
  */
 import type { Env } from './env';
-import { CANDLE_COUNT, ROUND_COUNT, TOKEN_SCALE, ownWeightFor, type Params } from './protocol';
+import { CANDLE_COUNT, ROUND_COUNT, TOKEN_SCALE, rewardFor, type Params } from './protocol';
 import * as store from './store';
 import type { BookRow, CandleRow, RoundRewardRow, RoundRow, StakeRow } from './store';
 import { getSource } from './sources';
-import * as v8 from './v8';
+import * as rewards from './rewards';
 import { toBigInt } from './util';
 
 const DAY = 86_400_000;
@@ -32,24 +30,11 @@ const STAKE_TOTALS_TOKENS: Record<number, bigint> = {
 };
 /** R3 初始已收盘 12 根（24 根过半），其中 8 根达标（低于 16 阈值，仍在观察中）。 */
 const R3_SEEDED_CANDLES = 12;
-/** 演示夹具：A0 为「10 轮老兵」（streak 8/9/10）；其余地址从 R1 起连续参与（1/2/3）。 */
-const V8_STREAKS: Record<number, Record<number, number>> = { 0: { 1: 8, 2: 9, 3: 10 } };
-/** 演示夹具：两组邀请关系（被邀请人 index → 邀请人 index）。 */
-const V8_REFERRALS: Record<number, number> = { 5: 0, 6: 1 };
-/** 解锁池样例：seed 时刻已过 90 天（3/12 进度）。 */
-const UNLOCK_SAMPLE_DAYS = 90;
-
 function tierForRound(roundId: number): number {
   if (roundId <= 1) return 1;
   if (roundId === 2) return 2;
   if (roundId === 3) return 2;
   return 2 + (roundId - 3);
-}
-
-function streakForSeed(roundId: number, index: number): number {
-  const fixed = V8_STREAKS[index];
-  if (fixed && fixed[roundId]) return fixed[roundId];
-  return roundId;
 }
 
 async function demoAddresses(count: number): Promise<string[]> {
@@ -78,14 +63,8 @@ interface StakeRecord {
   index: number;
   address: string;
   amountRaw: bigint;
-  weightRaw: bigint;
-  streak: number;
-  referredBy: string | null;
   acceptedAt: number;
-  isRoll?: boolean;
-  rewardState: number;
-  principalClaimed: number;
-  rewardClaimed: number;
+  claimed: number;
 }
 
 function toStakeRows(records: StakeRecord[]): StakeRow[] {
@@ -94,15 +73,12 @@ function toStakeRows(records: StakeRecord[]): StakeRow[] {
     round_id: record.roundId,
     address: record.address,
     amount_raw: record.amountRaw.toString(),
-    weight_raw: record.weightRaw.toString(),
-    nonce: record.isRoll ? 'roll-r1-1' : 'seed-r' + record.roundId + '-' + record.index,
+    weight_raw: record.amountRaw.toString(),
+    nonce: 'seed-r' + record.roundId + '-' + record.index,
     risk_disclosure_version: 1,
     accept_full_principal_burn: 1,
-    streak: record.streak,
-    reward_state: record.rewardState,
-    referred_by: record.referredBy,
-    principal_claimed: record.principalClaimed,
-    reward_claimed: record.rewardClaimed,
+    principal_claimed: record.claimed,
+    reward_claimed: record.claimed,
     accepted_at: record.acceptedAt,
   }));
 }
@@ -161,6 +137,7 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
       row.candles_seen = CANDLE_COUNT;
       row.qualified_candles = 20;
       row.result = 'SUCCESS';
+      row.team_released_raw = params.teamRoundRaw.toString();
       row.updated_at = r1Close + CANDLE_COUNT * candleMs;
     } else if (roundId === 2) {
       row.state = 'FAILED_PERMANENT';
@@ -186,68 +163,25 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
   }
   const roundsById = new Map(rounds.map((row) => [row.round_id, row]));
 
-  // 质押记录（V8：streak / 邀请快照 / own weight）
+  // 质押记录（v10：weight = 质押额）
   const records: StakeRecord[] = [];
   for (const roundId of [1, 2, 3]) {
     const amounts = splitAmount(STAKE_TOTALS_TOKENS[roundId]);
     const openAt = roundId === 1 ? r1Close - 3 * DAY : roundId === 2 ? r2Close - 3 * DAY : r3Close - 3 * DAY;
     addresses.forEach((address, index) => {
-      const amountRaw = amounts[index] * TOKEN_SCALE;
-      const streak = streakForSeed(roundId, index);
       records.push({
         roundId,
         index,
         address,
-        amountRaw,
-        weightRaw: ownWeightFor(amountRaw, streak),
-        streak,
-        referredBy: V8_REFERRALS[index] !== undefined ? addresses[V8_REFERRALS[index]] : null,
+        amountRaw: amounts[index] * TOKEN_SCALE,
         acceptedAt: openAt + index * 3600_000 + ((index * 7919) % 3_600_000),
-        rewardState: 0,
-        principalClaimed: 0,
-        rewardClaimed: 0,
+        // 夹具：A0 已领 R1（本金 + 全额奖励）
+        claimed: roundId === 1 && index === 0 ? 1 : 0,
       });
     });
   }
 
-  // R1 权重与奖励（邀请加成按入账顺序累计，与合约 / seed 生成器同口径）
-  const r1Records = records.filter((record) => record.roundId === 1);
-  const r1Weights = v8.computeRoundWeights(params, toStakeRows(r1Records));
-  const rewardByAddress = new Map<string, bigint>();
-  for (const [address, entry] of r1Weights.byAddress) {
-    rewardByAddress.set(address, (params.roundRewardRaw * entry.weight) / r1Weights.totalWeight);
-  }
-
-  // 夹具 1：A1 的 R1 奖励滚存进 R2（单地址上限 2000 万，超出部分进解锁池）
-  const rollAddress = addresses[1];
-  const rollReward = rewardByAddress.get(rollAddress) ?? 0n;
-  const rollAmount = rollReward > params.rolloverCapPerAddressRaw ? params.rolloverCapPerAddressRaw : rollReward;
-  const rollLocked = rollReward - rollAmount;
-  if (rollAmount > 0n) {
-    const rollStreak = streakForSeed(2, 1);
-    records.push({
-      roundId: 2,
-      index: 1,
-      address: rollAddress,
-      amountRaw: rollAmount,
-      weightRaw: ownWeightFor(rollAmount, rollStreak),
-      streak: rollStreak,
-      referredBy: null,
-      acceptedAt: r2Close - 3 * DAY + 1,
-      isRoll: true,
-      rewardState: 0,
-      principalClaimed: 0,
-      rewardClaimed: 0,
-    });
-  }
-
-  // 夹具 2：A2 的 R1 奖励已早领（立即 50%，另 50% 进解锁池）
-  const earlyAddress = addresses[2];
-  const earlyReward = rewardByAddress.get(earlyAddress) ?? 0n;
-  const earlyPaid = earlyReward / 2n;
-  const earlyLocked = earlyReward - earlyPaid;
-
-  // 每轮总质押 / 总权重
+  // 每轮总质押
   for (const round of rounds) {
     if (round.state === 'UNOPENED') continue;
     const roundRecords = records.filter((record) => record.roundId === round.round_id);
@@ -258,75 +192,40 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
       unique.add(record.address);
     }
     round.total_accepted_stake_raw = total.toString();
+    round.total_weight_raw = total.toString();
     round.staker_count = unique.size;
-    const weights = v8.computeRoundWeights(params, toStakeRows(roundRecords));
-    round.total_weight_raw = weights.totalWeight.toString();
   }
-  // R2 三笔销毁：奖励 7 亿 + 团队额度 + 本轮本金（含滚存进来的 2000 万）
+  // R2 失败：一笔 burn = 奖励 7 亿 + 团队额度 + 本轮本金
   const r2Row = roundsById.get(2)!;
   const r2Total = toBigInt(r2Row.total_accepted_stake_raw);
   r2Row.burned_raw = (params.roundRewardRaw + params.teamRoundRaw + r2Total).toString();
 
-  // V8 奖励三态账本（只对已成功的 R1 生成）
-  const rewardRows: RoundRewardRow[] = [];
-  for (const [address, entry] of r1Weights.byAddress) {
-    const reward = rewardByAddress.get(address) ?? 0n;
-    let state = 0;
-    let paid = 0n;
-    let locked = 0n;
-    let rolled = 0n;
-    if (address === rollAddress) {
-      state = 1;
-      rolled = rollAmount;
-      locked = rollLocked;
-    } else if (address === earlyAddress) {
-      state = 2;
-      paid = earlyPaid;
-      locked = earlyLocked;
-    }
-    rewardRows.push({
-      round_id: 1,
-      address,
-      weight_raw: entry.weight.toString(),
-      reward_raw: reward.toString(),
-      state,
-      paid_raw: paid.toString(),
-      locked_raw: locked.toString(),
-      rolled_raw: rolled.toString(),
-      created_at: r1Close + CANDLE_COUNT * candleMs,
-      updated_at: now,
-    });
-  }
-  for (const record of records) {
-    if (record.roundId === 1 && record.address === rollAddress) {
-      record.rewardState = 1;
-      record.rewardClaimed = 1;
-    } else if (record.roundId === 1 && record.address === earlyAddress) {
-      record.rewardState = 2;
-      record.rewardClaimed = 1;
-    } else if (record.roundId === 1 && record.index === 0) {
-      record.principalClaimed = 1;
-    }
-  }
+  // R1 奖励账本（全额，按质押比例）
+  const r1Records = records.filter((record) => record.roundId === 1);
+  const r1Totals = rewards.roundStakeTotals(toStakeRows(r1Records));
+  const rewardRows: RoundRewardRow[] = [...r1Totals.byAddress.entries()].map(([address, amount]) => ({
+    round_id: 1,
+    address,
+    weight_raw: amount.toString(),
+    reward_raw: rewardFor(params.roundRewardRaw, amount, r1Totals.totalStake).toString(),
+    created_at: r1Close + CANDLE_COUNT * candleMs,
+    updated_at: now,
+  }));
 
-  // 领取记录：A0 已领 R1 本金；A2 已早领 50%
+  // 领取记录：A0 已领 R1 本金 + 奖励
   const a0 = r1Records.find((record) => record.index === 0);
   const claims: { round_id: number; address: string; kind: 'principal' | 'reward'; amount_raw: string; claimed_at: number }[] = [];
-  if (a0) claims.push({ round_id: 1, address: addresses[0], kind: 'principal', amount_raw: a0.amountRaw.toString(), claimed_at: r1Close + 9 * DAY });
-  claims.push({
-    round_id: 1,
-    address: earlyAddress,
-    kind: 'reward',
-    amount_raw: earlyPaid.toString(),
-    claimed_at: r1Close + CANDLE_COUNT * candleMs + 2 * DAY,
-  });
-
-  // 邀请关系（2 组，一层、不可改）
-  const referrals: store.ReferralRow[] = Object.entries(V8_REFERRALS).map(([inviteeIndex, referrerIndex]) => ({
-    address: addresses[Number(inviteeIndex)],
-    referrer: addresses[referrerIndex],
-    created_at: now - 5 * DAY,
-  }));
+  if (a0) {
+    const claimedAt = r1Close + 9 * DAY;
+    claims.push({ round_id: 1, address: a0.address, kind: 'principal', amount_raw: a0.amountRaw.toString(), claimed_at: claimedAt });
+    claims.push({
+      round_id: 1,
+      address: a0.address,
+      kind: 'reward',
+      amount_raw: rewardFor(params.roundRewardRaw, a0.amountRaw, r1Totals.totalStake).toString(),
+      claimed_at: claimedAt,
+    });
+  }
 
   // K 线 + 滚动哈希（链上只存哈希）
   const candles: CandleRow[] = [];
@@ -337,7 +236,7 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
     for (let index = 0; index < limit; index++) {
       roundCandles.push(source.buildCandle({ ...params, now }, row, index));
     }
-    row.candle_hash = await v8.computeCandleHash(roundCandles);
+    row.candle_hash = await rewards.computeCandleHash(roundCandles);
     candles.push(...roundCandles);
   }
 
@@ -358,12 +257,6 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
   await store.insertStakesBulk(env, toStakeRows(records));
   await store.insertClaimsBulk(env, claims);
   await store.insertRoundRewardsBulk(env, rewardRows);
-  await store.insertReferralsBulk(env, referrals);
-  await store.setUnlockPool(
-    env,
-    { startAt: now - UNLOCK_SAMPLE_DAYS * DAY, totalLockedRaw: (rollLocked + earlyLocked).toString(), claimedRaw: '0' },
-    now,
-  );
   await store.insertBurnsBulk(env, burns);
   await store.insertCandles(
     env,
@@ -372,7 +265,7 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
   await store.insertTrades(env, trades);
   await store.insertBookLevels(env, book);
 
-  // 时间锚点更新：config + metrics（oracle_paused 复位、解锁池标记 = R10 已终态样例）
+  // 时间锚点更新：config + metrics（oracle_paused 复位）
   await store.setConfigValues(env, { demo_epoch_ms: String(now) }, now);
   await store.setMetrics(
     env,
@@ -380,8 +273,6 @@ export async function resetDemoData(env: Env, params: Params, now: number): Prom
       demo_epoch_ms: String(now),
       demo_candle_seconds: String(params.demoCandleSeconds),
       demo_stake_seconds: String(params.demoStakeSeconds),
-      unlock_start_round: 'sample',
-      unlock_started_at: String(now - UNLOCK_SAMPLE_DAYS * DAY),
       oracle_paused: '0',
       oracle_last_update: String(now - 2500),
       seed_applied_at: String(now),

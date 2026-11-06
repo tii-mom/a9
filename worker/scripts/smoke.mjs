@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * A9 引信协议 API 冒烟测试（自测凭证，V7 口径）
+ * A9 引信协议 API 冒烟测试（自测凭证，v10 口径：奖励纯按质押比例，无邀请 / 连续参与 / 滚存 / 早领 / 解锁池）
  *
  * 用法：
  *   # 终端 1（推荐：极速演示种子做全链路覆盖）
@@ -51,15 +51,21 @@ const ADMIN_TOKEN = resolveAdminToken();
 const SETTLE_TIMEOUT_SEC = Number(process.env.SMOKE_TIMEOUT || 180);
 const UNKNOWN_ADDRESS = 'UQ' + 'A'.repeat(46);
 
-/* V7 冻结经济参数（断言用，禁止改动） */
+/* 冻结经济参数（v10，断言用，禁止改动） */
 const P0_USD_E8 = 116_000n;
 const ROUND_REWARD_RAW = 700_000_000n * 1_000_000_000n;
 const TEAM_ROUND_RAW = 120_000_000n * 1_000_000_000n;
 const TOTAL_SUPPLY_RAW = 10_000_000_000n * 1_000_000_000n;
+const MIN_STAKE_RAW = 100_000n * 1_000_000_000n; // v10：最低有效质押 100,000 A9
 const R1_STAKE_RAW = 214_800_000n * 1_000_000_000n;
-const R2_STAKE_RAW = 261_500_000n * 1_000_000_000n; // 241.5M + 滚存 20M（V8 夹具）
+const R2_STAKE_RAW = 241_500_000n * 1_000_000_000n;
 const R3_STAKE_RAW = 386_200_000n * 1_000_000_000n;
-const R2_BURNED_RAW = ROUND_REWARD_RAW + TEAM_ROUND_RAW + R2_STAKE_RAW;
+const R2_BURNED_RAW = ROUND_REWARD_RAW + TEAM_ROUND_RAW + R2_STAKE_RAW; // 1,061.5M（奖励 + 团队 + 本金）
+
+/** v10 纯质押比例：floor(本轮奖励 × 我的质押 / 本轮总质押)（与合约 rewardOf 同口径） */
+function proRataReward(stakeRaw, totalRaw) {
+  return (ROUND_REWARD_RAW * BigInt(stakeRaw)) / BigInt(totalRaw);
+}
 
 const results = [];
 const ctx = { fast: false };
@@ -210,14 +216,24 @@ async function baseline() {
     eq(data.token.decimals, 9, 'token.decimals');
     assert(data.demo && data.demo.candleSeconds >= 1, 'demo 配置缺失');
     assert(Array.isArray(data.frozenParams) && data.frozenParams.length >= 8, 'frozenParams 过少');
-    assert(data.contracts && 'jettonMaster' in data.contracts && 'teamVault' in data.contracts, 'contracts 缺失');
-    eq(data.streakBonusBps, 1000, 'streakBonusBps');
-    eq(data.streakMaxRounds, 10, 'streakMaxRounds');
-    eq(data.referralBonusBps, 2000, 'referralBonusBps');
-    eq(data.referralCapMultiple, 10000, 'referralCapMultiple');
-    eq(data.earlyClaimPenaltyBps, 5000, 'earlyClaimPenaltyBps');
-    eq(data.rolloverCapPerAddressRaw, '20000000000000000', 'rolloverCapPerAddressRaw');
-    eq(data.unlockDurationSeconds, 31104000, 'unlockDurationSeconds');
+    assert(data.contracts && 'jettonMaster' in data.contracts && 'keeper' in data.contracts && 'teamWallet' in data.contracts, 'contracts 缺失 keeper / teamWallet');
+    assert(
+      !('teamVault' in data.contracts) && !('oracleAdapter' in data.contracts) && !('adminOwner' in data.contracts),
+      'contracts 不应再含 teamVault / oracleAdapter / adminOwner',
+    );
+    eq(data.minStakeRaw, MIN_STAKE_RAW.toString(), 'minStakeRaw（100,000 A9）');
+    eq(data.teamRoundRaw, TEAM_ROUND_RAW.toString(), 'teamRoundRaw（1.2 亿）');
+    for (const key of [
+      'streakBonusBps',
+      'streakMaxRounds',
+      'referralBonusBps',
+      'referralCapMultiple',
+      'earlyClaimPenaltyBps',
+      'rolloverCapPerAddressRaw',
+      'unlockDurationSeconds',
+    ]) {
+      assert(!(key in data), 'v8 字段不应再返回：' + key);
+    }
     ctx.demoCandleSeconds = data.demo.candleSeconds;
     ctx.fast = data.demo.candleSeconds <= 5;
     return 'P0=$0.00116 reward=7e8 candle=24/16 demoCandle=' + data.demo.candleSeconds + 's';
@@ -239,10 +255,13 @@ async function baseline() {
     assert(byId.get(3).candlesSeen >= 12, 'R3 初始应有 ≥12 根已收盘 K 线，实际 ' + byId.get(3).candlesSeen);
     assert(byId.get(3).qualifiedCandles >= 8, 'R3 初始达标应 ≥8，实际 ' + byId.get(3).qualifiedCandles);
     for (const id of [1, 2, 3]) {
-      assert(BigInt(byId.get(id).totalWeightRaw) > 0n, 'R' + id + ' totalWeightRaw 应 > 0');
+      assert(BigInt(byId.get(id).totalAcceptedStakeRaw) > 0n, 'R' + id + ' totalAcceptedStakeRaw 应 > 0');
       assert(/^0x[0-9a-f]{64}$/.test(byId.get(id).candleHash ?? ''), 'R' + id + ' candleHash 格式');
+      assert(!('totalWeightRaw' in byId.get(id)), 'v10 /api/rounds 不再返回 totalWeightRaw');
     }
-    eq(byId.get(4).totalWeightRaw, '0', 'R4 totalWeightRaw');
+    eq(byId.get(1).totalAcceptedStakeRaw, R1_STAKE_RAW.toString(), 'R1 总质押');
+    eq(byId.get(1).teamReleasedRaw, TEAM_ROUND_RAW.toString(), 'R1 teamReleasedRaw（成功轮已释放 1.2 亿）');
+    eq(byId.get(2).teamReleasedRaw, null, 'R2 teamReleasedRaw（失败轮不释放）');
     eq(byId.get(4).candleHash, null, 'R4 candleHash');
     // autoplay 可能在测试启动前已把 R4 打开（尤其 10s/2s 快照），两种状态都合法；
     // 真正「不得提前开轮」由 test 26 的 autoplay 断言负责。
@@ -363,6 +382,7 @@ async function baseline() {
     eq(data.burnedRaw, R2_BURNED_RAW.toString(), 'burnedRaw');
     eq(data.supplyRaw, (TOTAL_SUPPLY_RAW - R2_BURNED_RAW).toString(), 'supplyRaw');
     eq(data.lockedStakeRaw, R3_STAKE_RAW.toString(), 'lockedStakeRaw');
+    assert(!('lockedRewardRaw' in data) && !('unlock' in data), 'v10 /api/stats 不再返回 lockedRewardRaw / unlock');
     eq(data.stakerCount, 12, 'stakerCount');
     assert(isDigits(data.volume24hUsdE8) && BigInt(data.volume24hUsdE8) > 0n, 'volume24hUsdE8');
     assert(BigInt(data.priceUsdE8) > 0n, 'priceUsdE8');
@@ -400,71 +420,59 @@ async function baseline() {
     return '买卖各 10 档，累计百分比 0~100';
   });
 
-  await test('GET /api/me（未领取地址聚合）', async () => {
+  await test('GET /api/me（未领取地址：R1 可领，纯质押比例）', async () => {
     const board = await apiOk('/api/rounds/1/leaderboard');
     const target = board[board.length - 1];
     ctx.claimAddress = target.address;
     const data = await apiOk('/api/me?address=' + encodeURIComponent(target.address));
     ctx.meBefore = data;
     eq(data.address, target.address, 'address');
-    data.stakes.forEach((row) => eq(row.address, target.address, '/api/me stake.address 未原样返回'));
+    // v10 形状：不再返回 rewards / stake / referral / unlock
+    for (const key of ['rewards', 'stake', 'referral', 'unlock']) {
+      assert(!(key in data), '/api/me 不应再返回 ' + key);
+    }
+    data.stakes.forEach((row) => {
+      eq(row.address, target.address, '/api/me stake.address 未原样返回');
+      assert(isDigits(row.rewardRaw), 'stake.rewardRaw 应为 raw 字符串');
+      assert(typeof row.claimable === 'boolean' && typeof row.claimed === 'boolean', 'stake.claimable/claimed 缺失');
+    });
     const rounds = new Set(data.stakes.map((row) => row.roundId));
     assert(rounds.has(1) && rounds.has(2) && rounds.has(3), 'stakes 未覆盖 R1/R2/R3');
     const claimableR1 = data.claimable.find((row) => row.roundId === 1);
     assert(claimableR1, 'R1 应有可领取');
-    assert(BigInt(claimableR1.principalRaw) > 0n, 'principalRaw');
-    assert(BigInt(claimableR1.rewardRaw) > 0n, 'rewardRaw');
+    eq(claimableR1.principalRaw, target.amountRaw, 'R1 principalRaw = 质押额');
+    const expectedReward = proRataReward(target.amountRaw, R1_STAKE_RAW);
+    eq(claimableR1.rewardRaw, expectedReward.toString(), 'R1 rewardRaw = floor(7 亿 × 质押 / 总质押)');
+    eq(target.rewardEstimateRaw, expectedReward.toString(), '排行榜 rewardEstimateRaw 与 /api/me 同口径');
     eq(claimableR1.state, 'SUCCEEDED', 'claimable state');
+    assert((data.claimableAll.roundsMask & 1) === 1, 'claimableAll.roundsMask 应含 R1 位');
+    eq(data.claimableAll.principalRaw, claimableR1.principalRaw, 'claimableAll.principalRaw');
+    eq(data.claimableAll.rewardRaw, claimableR1.rewardRaw, 'claimableAll.rewardRaw');
+    eq(data.refund.pendingRaw, '0', 'refund.pendingRaw');
     assert(isDigits(data.totals.stakedRaw) && BigInt(data.totals.stakedRaw) > 0n, 'totals.stakedRaw');
-    // V8：用榜首 A0（10 轮老兵 + 1 个邀请）验证夹具；A11 留给领取测试
+
+    // A0 夹具：R1 已领（本金 + 全额奖励一次领完）
     const top = board[0];
     const topMe = await apiOk('/api/me?address=' + encodeURIComponent(top.address));
     ctx.meTop = topMe;
     ctx.topAddress = top.address;
-    assert(typeof topMe.stake?.count === 'number' && topMe.stake.count >= 1, 'stake.count 缺失');
-    assert(topMe.stake.weightMultiplierBps >= 11000 && topMe.stake.weightMultiplierBps <= 20000, 'stake.weightMultiplierBps 越界');
-    eq(topMe.stake.count, 10, 'seed 夹具 A0 应为 10 轮老兵');
-    eq(topMe.stake.weightMultiplierBps, 20000, 'A0 权重倍数应为 2.00×');
-    assert(Array.isArray(topMe.rewards) && topMe.rewards.length > 0, 'rewards 缺失');
-    const r1Reward = topMe.rewards.find((row) => row.roundId === 1);
-    assert(r1Reward && r1Reward.state >= 0 && r1Reward.state <= 2, 'R1 rewards 缺失');
-    assert(BigInt(r1Reward.amountRaw) > 0n && BigInt(r1Reward.earlyAmountRaw) > 0n, 'R1 reward 金额');
-    assert(typeof topMe.referral === 'object' && typeof topMe.referral.invitedCount === 'number', 'referral 缺失');
-    eq(topMe.referral.invitedCount, 1, 'A0 应邀请 1 人');
-    assert(BigInt(topMe.referral.bonusTotalRaw) > 0n, 'A0 邀请加成累计应 > 0');
-    assert(topMe.unlock && topMe.unlock.active === true, 'unlock 样例未激活');
-    assert(topMe.unlock.progressBps >= 2400 && topMe.unlock.progressBps <= 2500, 'unlock 样例应约 3/12 进度，实际 ' + topMe.unlock.progressBps);
-    assert(BigInt(topMe.unlock.totalLockedRaw) > 0n && BigInt(topMe.unlock.claimableRaw) > 0n, 'unlock 金额');
-    assert(BigInt(topMe.totals.lockedRewardRaw) > 0n, 'totals.lockedRewardRaw');
-    topMe.stakes.forEach((row) => {
-      assert(typeof row.streak === 'number' && row.streak >= 1, 'stake.streak');
-      assert(row.weightMultiplierBps >= 11000 && row.weightMultiplierBps <= 20000, 'stake.weightMultiplierBps');
-      assert([0, 1, 2].includes(row.rewardState), 'stake.rewardState');
-    });
-    return top.address.slice(0, 6) + '… streak=' + topMe.stake.count + ' weight=' + topMe.stake.weightMultiplierBps + 'bps unlock=' + topMe.unlock.progressBps / 100 + '%';
+    const topR1 = topMe.stakes.find((row) => row.roundId === 1);
+    assert(topR1 && topR1.claimed === true && topR1.claimable === false, 'A0 R1 应已领取');
+    eq(topR1.rewardRaw, proRataReward(top.amountRaw, R1_STAKE_RAW).toString(), 'A0 R1 rewardRaw');
+    assert(!topMe.claimable.some((row) => row.roundId === 1), 'A0 R1 不应再出现在 claimable');
+    eq(
+      topMe.totals.claimedRaw,
+      (BigInt(top.amountRaw) + BigInt(topR1.rewardRaw)).toString(),
+      'A0 totals.claimedRaw = 本金 + 奖励',
+    );
+    return top.address.slice(0, 6) + '… R1 已领 claimedRaw=' + topMe.totals.claimedRaw;
   });
 
-  await test('GET /api/referral/:address（邀请关系与加成明细）', async () => {
-    const me = ctx.meTop;
-    const referrerAddress = me.referral.invitedCount > 0 ? me.address : null;
-    assert(referrerAddress, 'seed 夹具应有邀请人');
-    const ref = await apiOk('/api/referral/' + encodeURIComponent(referrerAddress));
-    eq(ref.address, referrerAddress, 'address');
-    eq(ref.invitedCount, 1, 'invitedCount');
-    assert(ref.invitees.length >= 1, 'invitees 明细缺失');
-    assert(isDigits(ref.invitees[0].stakeRaw) && BigInt(ref.invitees[0].stakeRaw) > 0n, 'invitee stakeRaw');
-    assert(isDigits(ref.invitees[0].bonusRaw) && BigInt(ref.invitees[0].bonusRaw) > 0n, 'invitee bonusRaw');
-    assert(BigInt(ref.invitedStakeRaw) > 0n, 'invitedStakeRaw');
-    assert(BigInt(ref.bonusThisRoundRaw) > 0n && BigInt(ref.bonusTotalRaw) > 0n, 'bonus 金额');
-    eq(ref.config.referralBonusBps, 2000, 'config.referralBonusBps');
-    eq(ref.config.referralCapMultiple, 10000, 'config.referralCapMultiple');
-    eq(ref.config.minStakeRaw, '10000000000000', 'config.minStakeRaw');
-    // 被邀请人视角：referrer 已绑定且不可改
-    const inviteeAddress = ref.invitees[0].address;
-    const invitee = await apiOk('/api/referral/' + encodeURIComponent(inviteeAddress));
-    eq(invitee.referrer, referrerAddress, 'invitee.referrer');
-    assert(invitee.boundAt !== null, 'invitee.boundAt');
-    return '邀请人 ' + referrerAddress.slice(0, 6) + '… → 1 人，bonus=' + ref.bonusTotalRaw;
+  await test('GET /api/referral/:address 已删除 → 404（v10 无邀请）', async () => {
+    const res = await api('/api/referral/' + encodeURIComponent(UNKNOWN_ADDRESS));
+    eq(res.status, 404, 'status');
+    eq(res.body.error.code, 'NOT_FOUND', 'code');
+    return '404 NOT_FOUND';
   });
 
   await test('GET /api/me（陌生地址返回空数组）', async () => {
@@ -474,12 +482,11 @@ async function baseline() {
     eq(data.totals.stakedRaw, '0', 'totals.stakedRaw');
     eq(data.totals.rewardRaw, '0', 'totals.rewardRaw');
     eq(data.totals.claimedRaw, '0', 'totals.claimedRaw');
-    eq(data.totals.lockedRewardRaw, '0', 'totals.lockedRewardRaw');
-    eq(data.rewards.length, 0, 'rewards');
-    eq(data.referral.invitedCount, 0, 'referral.invitedCount');
-    eq(data.referral.referrer, null, 'referral.referrer');
-    eq(data.unlock.claimableRaw, '0', 'unlock.claimableRaw');
-    return '未质押地址 → 200 + 空数组（V8 字段齐全）';
+    eq(data.claimableAll.principalRaw, '0', 'claimableAll.principalRaw');
+    eq(data.claimableAll.rewardRaw, '0', 'claimableAll.rewardRaw');
+    eq(data.claimableAll.roundsMask, 0, 'claimableAll.roundsMask');
+    eq(data.refund.pendingRaw, '0', 'refund.pendingRaw');
+    return '未质押地址 → 200 + 空数组（v10 字段齐全）';
   });
 
   await test('GET /api/me 缺少 address → 400', async () => {
@@ -647,15 +654,14 @@ async function settlementTests() {
     assert(opened, '缺少 R4 ROUND_OPENED 审计事件');
     assert(opened.detail.includes('tier=3'), '审计事件未记录 tier=3：' + opened.detail);
     ctx.r4Open = true;
-    // V8：R4 报名开启后，R3 的 PENDING 奖励应可滚存（rollableRaw > 0）
+    // v10：R3 结算成功后，奖励按质押比例一次可领（无滚存 / 早领）
     const r3Board = await apiOk('/api/rounds/3/leaderboard');
     const meR3 = await apiOk('/api/me?address=' + encodeURIComponent(r3Board[0].address));
-    const r3Reward = meR3.rewards.find((row) => row.roundId === 3);
-    assert(r3Reward, 'R3 奖励记录缺失（结算后应生成）');
-    assert(r3Reward.state === 0, 'R3 奖励应为 PENDING');
-    assert(BigInt(r3Reward.rollableRaw) > 0n, 'R4 开启后 R3 奖励应可滚存，实际 ' + r3Reward.rollableRaw);
-    assert(BigInt(r3Reward.earlyAmountRaw) > 0n, 'R3 早领可得应 > 0');
-    return 'R4 STAKING_OPEN tier3 target=928000；R3 奖励可滚存 ' + r3Reward.rollableRaw;
+    const r3Stake = meR3.stakes.find((row) => row.roundId === 3);
+    assert(r3Stake && r3Stake.state === 'SUCCEEDED', 'R3 结算后 stake.state 应为 SUCCEEDED');
+    assert(r3Stake.claimable === true, 'R3 结算成功后应可领取');
+    eq(r3Stake.rewardRaw, proRataReward(r3Board[0].amountRaw, R3_STAKE_RAW).toString(), 'R3 奖励 = 7 亿 × 质押 / 总质押');
+    return 'R4 STAKING_OPEN tier3 target=928000；R3 奖励可领 ' + r3Stake.rewardRaw + ' raw';
   });
 
   await test('POST /api/admin/rounds/advance（存在活动轮次 → 409）', async () => {
@@ -671,17 +677,17 @@ async function writeTests() {
     const calls = [
       {
         name: '非质押窗口(R1)',
-        body: { address: UNKNOWN_ADDRESS, roundId: 1, amountRaw: '1000000000', riskDisclosureVersion: 1, acceptFullPrincipalBurn: true },
+        body: { address: UNKNOWN_ADDRESS, roundId: 1, amountRaw: MIN_STAKE_RAW.toString(), riskDisclosureVersion: 1, acceptFullPrincipalBurn: true },
         status: 409,
       },
       {
         name: '风险版本不匹配',
-        body: { address: UNKNOWN_ADDRESS, roundId: 4, amountRaw: '1000000000', riskDisclosureVersion: 99, acceptFullPrincipalBurn: true },
+        body: { address: UNKNOWN_ADDRESS, roundId: 4, amountRaw: MIN_STAKE_RAW.toString(), riskDisclosureVersion: 99, acceptFullPrincipalBurn: true },
         status: 400,
       },
       {
         name: '未勾选本金销毁确认',
-        body: { address: UNKNOWN_ADDRESS, roundId: 4, amountRaw: '1000000000', riskDisclosureVersion: 1, acceptFullPrincipalBurn: false },
+        body: { address: UNKNOWN_ADDRESS, roundId: 4, amountRaw: MIN_STAKE_RAW.toString(), riskDisclosureVersion: 1, acceptFullPrincipalBurn: false },
         status: 400,
       },
       {
@@ -714,7 +720,7 @@ async function writeTests() {
     const payload = {
       address: UNKNOWN_ADDRESS,
       roundId: 4,
-      amountRaw: '1200000000000',
+      amountRaw: MIN_STAKE_RAW.toString(),
       riskDisclosureVersion: 1,
       acceptFullPrincipalBurn: true,
       nonce: 'smoke-nonce-1',
@@ -723,71 +729,87 @@ async function writeTests() {
     eq(first.status, 200, 'status');
     eq(first.body.data.accepted, true, 'accepted');
     eq(first.body.data.position.roundId, 4, 'position.roundId');
-    eq(first.body.data.position.amountRaw, '1200000000000', 'position.amountRaw');
+    eq(first.body.data.position.amountRaw, MIN_STAKE_RAW.toString(), 'position.amountRaw');
     const duplicate = await apiPost('/api/stake', payload);
     eq(duplicate.status, 409, '重复 nonce status');
     eq(duplicate.body.error.code, 'CONFLICT', '重复 nonce code');
     const me = await apiOk('/api/me?address=' + encodeURIComponent(UNKNOWN_ADDRESS));
     const row = me.stakes.find((item) => item.roundId === 4);
-    assert(row && BigInt(row.amountRaw) === 1200000000000n, '质押未写入 /api/me');
-    return 'accepted + 重复 nonce → 409 + /api/me 可见';
+    assert(row && BigInt(row.amountRaw) === MIN_STAKE_RAW, '质押未写入 /api/me');
+    return 'accepted（恰好 minStakeRaw）+ 重复 nonce → 409 + /api/me 可见';
   });
 
-  await test('POST /api/claim 幂等（R1 本金/奖励）', async () => {
-    const address = ctx.claimAddress;
-    const principal = await apiPost('/api/claim', { address, roundId: 1, kind: 'principal' });
-    eq(principal.status, 200, 'principal status');
-    eq(principal.body.data.claimed, true, 'principal claimed');
-    assert(BigInt(principal.body.data.amountRaw) > 0n, 'principal amount');
-    const principalAgain = await apiPost('/api/claim', { address, roundId: 1, kind: 'principal' });
-    eq(principalAgain.body.data.claimed, false, '重复领取应为 claimed:false');
-    eq(principalAgain.body.data.alreadyClaimed, true, 'alreadyClaimed');
-    eq(principalAgain.body.data.amountRaw, principal.body.data.amountRaw, '幂等返回同一金额');
+  await test('POST /api/stake 低于 minStakeRaw → 400（v10 最低 100,000 A9）', async () => {
+    const res = await apiPost('/api/stake', {
+      address: UNKNOWN_ADDRESS,
+      roundId: 4,
+      amountRaw: (MIN_STAKE_RAW - 1n).toString(),
+      riskDisclosureVersion: 1,
+      acceptFullPrincipalBurn: true,
+    });
+    eq(res.status, 400, 'status');
+    assert(String(res.body?.error?.message ?? '').includes('最低'), '错误信息应说明最低质押：' + res.body?.error?.message);
+    return 'minStakeRaw - 1 raw → 400';
+  });
 
-    // V8：阶梯期旧 ClaimReward 按 EARLY 语义只付 50%（earlyAmountRaw）
-    const before = ctx.meBefore;
-    const r1Before = before.rewards.find((row) => row.roundId === 1);
-    const expectedPaid = BigInt(r1Before.amountRaw) / 2n;
-    const reward = await apiPost('/api/claim', { address, roundId: 1, kind: 'reward' });
-    eq(reward.status, 200, 'reward status');
-    eq(reward.body.data.claimed, true, 'reward claimed');
-    eq(reward.body.data.amountRaw, expectedPaid.toString(), '早领只应支付 50%');
+  await test('POST /api/claim R1：本金 + 全额奖励一次领完，二次幂等', async () => {
+    const address = ctx.claimAddress;
+    const r1Before = ctx.meBefore.claimable.find((row) => row.roundId === 1);
+    assert(r1Before, '领取前 R1 应可领');
+    const first = await apiPost('/api/claim', { address, roundId: 1 });
+    eq(first.status, 200, 'status');
+    eq(first.body.data.claimed, true, 'claimed');
+    eq(first.body.data.roundsMask, 1, 'roundsMask（bit0 = R1）');
+    eq(first.body.data.principalRaw, r1Before.principalRaw, 'principalRaw');
+    eq(first.body.data.rewardRaw, r1Before.rewardRaw, 'rewardRaw（全额，无早领折扣）');
+    eq(
+      first.body.data.amountRaw,
+      (BigInt(r1Before.principalRaw) + BigInt(r1Before.rewardRaw)).toString(),
+      'amountRaw = 本金 + 奖励',
+    );
+    const second = await apiPost('/api/claim', { address, roundId: 1 });
+    eq(second.status, 200, '重复领取 status');
+    eq(second.body.data.claimed, false, '重复领取应为 claimed:false');
+    eq(second.body.data.alreadyClaimed, true, 'alreadyClaimed');
 
     const me = await apiOk('/api/me?address=' + encodeURIComponent(address));
     assert(!me.claimable.some((row) => row.roundId === 1), '领取后仍显示 R1 可领取');
-    const r1After = me.rewards.find((row) => row.roundId === 1);
-    eq(r1After.state, 2, '早领后 rewardState 应为 EARLY(2)');
-    eq(r1After.paidRaw, expectedPaid.toString(), 'paidRaw');
-    eq(r1After.lockedRaw, (BigInt(r1Before.amountRaw) - expectedPaid).toString(), 'lockedRaw');
-    assert(BigInt(me.totals.claimedRaw) >= BigInt(principal.body.data.amountRaw) + BigInt(reward.body.data.amountRaw), 'totals.claimedRaw 未累计');
-    return '本金 100% + 奖励 50%（V8 EARLY），二次调用幂等';
+    const r1After = me.stakes.find((row) => row.roundId === 1);
+    assert(r1After.claimed === true && r1After.claimable === false, 'R1 stake 应已领取');
+    eq(r1After.rewardRaw, r1Before.rewardRaw, '领取后 rewardRaw 不变');
+    eq(me.totals.claimedRaw, first.body.data.amountRaw, 'totals.claimedRaw');
+    return 'R1 本金 + 奖励 ' + first.body.data.amountRaw + ' raw 一次领完，二次 alreadyClaimed';
   });
 
-  await test('POST /api/claim kind=unlock（R10 后线性解锁样例）', async () => {
-    const address = ctx.claimAddress;
-    const me = await apiOk('/api/me?address=' + encodeURIComponent(address));
-    assert(me.unlock.active === true, 'unlock 样例未激活');
-    assert(me.unlock.progressBps >= 2400 && me.unlock.progressBps <= 2500, '样例应约 3/12 进度，实际 ' + me.unlock.progressBps);
-    const claimable = BigInt(me.unlock.claimableRaw);
-    assert(claimable > 0n, 'unlock 可领取为 0');
-    const res = await apiPost('/api/claim', { address, roundId: 10, kind: 'unlock' });
+  await test('POST /api/claim A0（seed 夹具已领 R1）→ alreadyClaimed', async () => {
+    const res = await apiPost('/api/claim', { address: ctx.topAddress, roundId: 1 });
     eq(res.status, 200, 'status');
-    eq(res.body.data.claimed, true, 'claimed');
-    eq(res.body.data.amountRaw, claimable.toString(), '领取金额应等于 claimableRaw');
-    const again = await apiPost('/api/claim', { address, roundId: 10, kind: 'unlock' });
-    eq(again.body.data.claimed, false, '二次领取应幂等');
-    return '解锁进度 25% → 领取 ' + claimable.toString() + ' raw（幂等）';
+    eq(res.body.data.claimed, false, 'claimed');
+    eq(res.body.data.alreadyClaimed, true, 'alreadyClaimed');
+    return 'claimed:false alreadyClaimed:true';
   });
 
-  await test('POST /api/claim 非法轮次状态', async () => {
-    const failedRound = await apiPost('/api/claim', { address: ctx.claimAddress, roundId: 2, kind: 'principal' });
-    eq(failedRound.status, 409, '失败轮次 status');
-    assert(failedRound.body.error.message.includes('销毁'), '失败轮次提示应说明已销毁');
-    const notSettled = await apiPost('/api/claim', { address: ctx.claimAddress, roundId: 3, kind: 'reward' });
-    assert([409, 200].includes(notSettled.status), '未结算轮次状态异常：' + notSettled.status);
-    const noStake = await apiPost('/api/claim', { address: UNKNOWN_ADDRESS, roundId: 1, kind: 'principal' });
+  await test('POST /api/claim 不可领：R2 失败 → 409；R3 未结算 → 409', async () => {
+    const failedRound = await apiPost('/api/claim', { address: ctx.claimAddress, roundId: 2 });
+    eq(failedRound.status, 409, 'R2 status');
+    assert(failedRound.body.error.message.includes('销毁'), 'R2 提示应说明已销毁');
+    const rounds = await apiOk('/api/rounds');
+    const r3 = rounds.find((row) => row.roundId === 3);
+    const r3Claim = await apiPost('/api/claim', { address: ctx.claimAddress, roundId: 3 });
+    if (r3.state === 'SUCCEEDED') {
+      // 快速模式下 R3 已结算成功：此时 R3 可领，应 200 且 roundsMask 为 bit2
+      eq(r3Claim.status, 200, 'R3 已成功结算 → 可领');
+      eq(r3Claim.body.data.roundsMask, 4, 'R3 roundsMask（bit2）');
+      return 'R2 409（已销毁）/ R3 SUCCEEDED → 200 可领';
+    }
+    eq(r3Claim.status, 409, 'R3 未成功结算 → 409');
+    return 'R2 409（已销毁）/ R3 ' + r3.state + ' → 409';
+  });
+
+  await test('POST /api/claim 无质押记录 → 404', async () => {
+    const noStake = await apiPost('/api/claim', { address: UNKNOWN_ADDRESS, roundId: 1 });
     eq(noStake.status, 404, '无质押记录 status');
-    return '失败轮次 409 / 未结算 409 / 无记录 404';
+    return '404';
   });
 }
 

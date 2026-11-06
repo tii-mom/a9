@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * chain-reconcile.mjs — 链上 ↔ Worker 对账工具（验收①，纯 node、零依赖、不 import TS）。
+ * chain-reconcile.mjs — v10 链上 ↔ Worker 对账工具（纯 node、零依赖、不 import TS）。
  *
  * 用法：
  *   node worker/src/indexer/tools/chain-reconcile.mjs \
- *     --network testnet \
- *     --api https://a9.lat \
- *     [--registry ops/config/testnet.registry.json] \
- *     [--rc kQ...] [--tv kQ...] [--jm kQ...] \
- *     [--json report.json] [--allow-public]
+ *     --network testnet --rc <RC> --jm <JM> [--tw <团队钱包>] [--keeper <keeper>] \
+ *     [--api https://a9.lat] [--v2-url … --v3-url …（fixture-server）] [--json report.json] [--allow-public]
+ *
+ * v10（docs/34 §2）：只有 RoundController + Jetton；团队释放读 RoundSettled；RC 钱包余额核对公式：
+ *   82 亿 + Σ已接受质押 + Σ退款账本记入 + Σ留存零头 − Σ已确认团队释放 − Σ已确认销毁 − Σ已领取（本金 + 奖励 + 退款）
  *
  * 环境变量：TONCENTER_API_KEY（强烈建议；无 key 时自动 5s 间隔且极易 429）
  *
@@ -33,10 +33,9 @@ const CONFIG_KEYS = [
   'candleSeconds', 'candleCount', 'minQualifiedCandles', 'observationSeconds',
   'techAbortPauseSeconds', 'techAbortObsTimeoutSeconds', 'riskDisclosureVersion', 'configVersion',
 ];
+// v10 只会出现 0/1/2/4/8/9/10
 const STATUS_TO_STATE = {
-  0: 'UNOPENED', 1: 'UNOPENED', 2: 'STAKING_OPEN', 3: 'STAKING_CLOSED', 4: 'OBSERVING',
-  5: 'ORACLE_PAUSED', 6: 'SETTLING_SUCCESS', 7: 'SETTLING_FAILURE', 8: 'SUCCEEDED',
-  9: 'FAILED_PERMANENT', 10: 'TECHNICAL_ABORTED',
+  0: 'UNOPENED', 1: 'UNOPENED', 2: 'STAKING_OPEN', 4: 'OBSERVING', 8: 'SUCCEEDED', 9: 'FAILED_PERMANENT', 10: 'TECHNICAL_ABORTED',
 };
 
 /* ------------------------------- CLI 参数 ------------------------------- */
@@ -281,24 +280,7 @@ async function getJettonData(jm) {
   const stack = await runGetMethod(jm, 'get_jetton_data');
   return { totalSupplyRaw: stackNum(stack[0]), mintable: stackNum(stack[1]) !== 0n };
 }
-async function getTeamVaultState(tv) {
-  const stack = await runGetMethod(tv, 'get_team_vault_state');
-  return {
-    controller: stackAddress(stack[0]),
-    jettonWallet: stackAddress(stack[1]),
-    teamWallet: stackAddress(stack[2]),
-    teamRoundRaw: stackNum(stack[3]),
-    totalReleasedRaw: stackNum(stack[4]),
-    totalBurnedRaw: stackNum(stack[5]),
-    releasedCount: Number(stackNum(stack[6])),
-    burnedCount: Number(stackNum(stack[7])),
-  };
-}
-
-
-/* --------------------------- docs/19 辅助：钱包 / 解锁 --------------------------- */
-function bytesToBase64Local(bytes) { return Buffer.from(bytes).toString('base64'); }
-/** 构造 MsgAddressInt 的 slice BOC（ton RunGetMethod 地址参数；含 1 位哨兵，理论见 indexer/boc.ts 注释）。 */
+/** 地址入参 slice BOC（与 worker getters.addressArg 逐字节一致，含 1 位哨兵）。 */
 function addressSliceBoc(parsed) {
   const bits = [];
   const push = (value, count) => {
@@ -318,749 +300,252 @@ function addressSliceBoc(parsed) {
   out[5] = 0x01; out[6] = 0x01; out[7] = 0x01; out[8] = 0x00; out[9] = cellSize; out[10] = 0x00;
   out[11] = 0x00; out[12] = d2;
   data.copy(out, 13);
-  return bytesToBase64Local(out);
+  return out.toString('base64');
 }
-async function getUnlockInfo(rcAddress, owner) {
-  const stack = await runGetMethod(rcAddress, 'get_unlock_info', [['slice', { bytes: addressSliceBoc(owner) }]]);
-  return { unlockStart: Number(stackNum(stack[0])), totalLockedRaw: stackNum(stack[1]), claimedRaw: stackNum(stack[2]), claimableRaw: stackNum(stack[3]) };
+/** raw → 用户友好地址（非 bounceable，UQ…；/api/me 只接受友好地址）。 */
+function toFriendly(parsed) {
+  const body = Buffer.alloc(34);
+  body[0] = 0x51;
+  body[1] = parsed.workchain & 0xff;
+  Buffer.from(parsed.hashHex, 'hex').copy(body, 2);
+  const crc = crc16(body);
+  return Buffer.concat([body, Buffer.from([crc >> 8, crc & 0xff])]).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
 }
-async function listJettonWallets(jettonMaster) {
-  const list = [];
-  for (let offset = 0; offset < 200; offset += 100) {
-    const url = V3_BASE + '/jetton/wallets?jetton_address=' + encodeURIComponent(jettonMaster) + '&limit=100&offset=' + offset;
-    const json = await httpJson(url);
-    const batch = json.jetton_wallets || json.wallets || [];
-    list.push(...batch);
-    if (batch.length < 100) break;
-  }
-  return list;
+async function getClaimableAll(rc, owner) {
+  const stack = await runGetMethod(rc, 'get_claimable_all', [['slice', addressSliceBoc(owner)]]);
+  return { principalRaw: stackNum(stack[0]), rewardRaw: stackNum(stack[1]), roundsMask: Number(stackNum(stack[2])) };
 }
-function sameAddress(left, right) {
-  const a = parseAddress(left);
-  const b = parseAddress(right);
-  return Boolean(a && b && a.raw === b.raw);
-}
-
-
-/* --------------------- v8.8 余额口径：事件解码 / 钱包 / stake --------------------- */
-const EV_OP = {
-  depositAccepted: 0x52540103,
-  technicalAborted: 0x52540104,
-  rewardEarly: 0x52540106,
-  unlockClaimed: 0x52540108,
-  claimRolledBack: 0x52540109,
-  principalClaimed: 0x5254010a,
-  teamReleased: 0x52540201,
-  teamBurned: 0x52540202,
-};
-/** 解码 v8.8 对账需要的 external-out 事件（其它 opcode 返回 null）。 */
-function decodeEventV88(opcode, body) {
-  if (!Object.values(EV_OP).includes(opcode) || !body) return null;
-  const cell = rootCell(body);
-  const reader = new BitReader(cell.data, cell.bitLen);
-  const op = Number(reader.u(32));
-  if (op !== opcode) return null;
-  switch (opcode) {
-    case EV_OP.depositAccepted:
-      return { kind: 'DepositAccepted', roundId: reader.n(8), owner: reader.address(), amountRaw: reader.u(128) };
-    case EV_OP.technicalAborted:
-      return { kind: 'TechnicalAborted', roundId: reader.n(8), reason: reader.n(8), at: reader.u(64) };
-    case EV_OP.rewardEarly:
-      return { kind: 'RewardEarly', roundId: reader.n(8), owner: reader.address(), paidRaw: reader.u(128), lockedRaw: reader.u(128) };
-    case EV_OP.unlockClaimed:
-      return { kind: 'UnlockClaimed', owner: reader.address(), amountRaw: reader.u(128) };
-    case EV_OP.claimRolledBack:
-      return { kind: 'ClaimRolledBack', queryId: reader.u(64), roundId: reader.n(8), kindCode: reader.n(8), owner: reader.address(), amountRaw: reader.u(128) };
-    case EV_OP.principalClaimed:
-      return { kind: 'PrincipalClaimed', roundId: reader.n(8), owner: reader.address(), amountRaw: reader.u(128), queryId: reader.u(64) };
-    case EV_OP.teamReleased:
-      return { kind: 'TeamReleased', roundId: reader.n(8), amountRaw: reader.u(128), to: reader.address() };
-    case EV_OP.teamBurned:
-      return { kind: 'TeamBurned', roundId: reader.n(8), amountRaw: reader.u(128), burnId: reader.u(256) };
-    default:
-      return null;
-  }
-}
-/** get_user_stake(roundId, owner)（roundId=0 即 v8.8 退款账本）。 */
-async function getUserStakeAt(rcAddress, roundId, owner) {
-  const stack = await runGetMethod(rcAddress, 'get_user_stake', [
-    ['num', '0x' + roundId.toString(16)],
-    ['slice', { bytes: addressSliceBoc(owner) }],
-  ]);
-  return {
-    amountRaw: stackNum(stack[0]),
-    lastDepositNonce: stackNum(stack[1]),
-    principalClaimed: stackNum(stack[2]) !== 0n,
-    rewardClaimed: stackNum(stack[3]) !== 0n,
-    weight: stackNum(stack[4]),
-    rewardState: Number(stackNum(stack[5])),
-  };
-}
-/** TEP-74 get_wallet_data → 余额 raw。 */
-async function getWalletBalance(walletAddress) {
-  const stack = await runGetMethod(walletAddress, 'get_wallet_data');
-  return stackNum(stack[0]);
-}
-/** 解析 TEP-74 transfer_notification 入站消息 → { amountRaw, initiator }（用于定位 round-0 退款账本 owner）。 */
-function decodeTransferNotification(body) {
-  if (!body) return null;
-  const cell = rootCell(body);
-  const reader = new BitReader(cell.data, cell.bitLen);
-  if (Number(reader.u(32)) !== 0x7362d09c) return null;
-  reader.u(64); // queryId
-  // coins = VarUInteger 16：4 bit 长度 + n 字节大端
-  const len = reader.n(4);
-  let amount = 0n;
-  for (let i = 0; i < len; i++) amount = (amount << 8n) | reader.u(8);
-  const initiator = reader.address();
-  return { amountRaw: amount, initiator };
-}
-/** 解析 TEP-74 transfer 出站消息的金额（coins，op 0x0f8a7ea5 之后 queryId 再 amount）。 */
-function decodeJettonTransferAmount(body) {
-  if (!body) return null;
-  const cell = rootCell(body);
-  const reader = new BitReader(cell.data, cell.bitLen);
-  if (Number(reader.u(32)) !== 0x0f8a7ea5) return null;
-  reader.u(64); // queryId
-  const len = reader.n(4);
-  let amount = 0n;
-  for (let i = 0; i < len; i++) amount = (amount << 8n) | reader.u(8);
-  return { amountRaw: amount };
-}
-/**
- * 从 jetton wallet 的历史交易反推「初始注资」：wallet 从 0 起，入站 transfer 中 lt < boundary 的部分即部署注资。
- * boundary 取该钱包首次对外动作（burn/转出）的 lt，或业务合约首轮活动 lt；找不到则取全部入站。
- */
-async function deriveInitialFunding(walletAddress, boundaryLt) {
-  // jetton wallet 从 0 起：第一笔入站 internal_transfer(0x178d4519) 即部署注资
-  const txs = await fetchAllTransactions(walletAddress);
-  for (const tx of txs) {
-    if (boundaryLt && BigInt(tx.lt) >= BigInt(boundaryLt)) continue;
-    const inbound = tx.in_msg;
-    if (!inbound || inbound.opcode !== '0x178d4519' || !inbound.message_content || !inbound.message_content.body) continue;
-    const amount = decodeInternalTransferAmount(inbound.message_content.body);
-    if (amount !== null) return amount;
-  }
-  return 0n;
-}
-/** TeamVault get_round_state(roundId)：released/burned/amountRaw（v8.8 以逐轮状态为准，聚合 getter 可能漏记）。 */
-async function getTeamRoundState(tvAddress, roundId) {
-  const stack = await runGetMethod(tvAddress, 'get_round_state', [['num', '0x' + roundId.toString(16)]]);
-  return { released: stackNum(stack[0]) !== 0n, burned: stackNum(stack[1]) !== 0n, amountRaw: stackNum(stack[2]) };
-}
-/** 解析 Jetton Wallet 入站 internal_transfer(0x178d4519) 的金额（coins，op 后 queryId 再 amount）。 */
-function decodeInternalTransferAmount(body) {
-  if (!body) return null;
-  const cell = rootCell(body);
-  const reader = new BitReader(cell.data, cell.bitLen);
-  if (Number(reader.u(32)) !== 0x178d4519) return null;
-  reader.u(64);
-  const len = reader.n(4);
-  let amount = 0n;
-  for (let i = 0; i < len; i++) amount = (amount << 8n) | reader.u(8);
-  return amount;
-}
-/** 拉某账户全部交易（分页 + lt 去重）。 */
+async function getJettonWalletAddress(rc) { return stackAddress((await runGetMethod(rc, 'get_jetton_wallet_address'))[0]); }
+async function getWalletBalance(wallet) { return stackNum((await runGetMethod(wallet, 'get_wallet_data'))[0]); }
 async function fetchAllTransactions(address) {
-  const list = [];
+  const all = [];
   let startLt;
-  let seenLt = null;
-  for (let page = 0; page < 15; page++) {
+  for (let page = 0; page < 50; page++) {
     const batch = await getTransactions(address, startLt);
     if (!batch.length) break;
-    for (const tx of batch) {
-      if (seenLt !== null && BigInt(tx.lt) <= BigInt(seenLt)) continue;
-      seenLt = tx.lt;
-      list.push(tx);
-    }
+    for (const tx of batch) if (!all.length || BigInt(tx.lt) > BigInt(all[all.length - 1].lt)) all.push(tx);
     const lastLt = batch[batch.length - 1].lt;
-    if (lastLt === startLt || batch.length < 100) break;
+    if (batch.length < 100 || lastLt === startLt) break;
     startLt = lastLt;
   }
-  return list;
+  return all;
 }
 
-/* ------------------------------- 对账主流程 ------------------------------- */
+/* ------------------------------ v10 事件 ------------------------------ */
+const EV = {
+  depositAccepted: 0x52540103, roundSettled: 0x52540102, claimed: 0x5254010e, depositRefunded: 0x5254010f,
+  settlementBounced: 0x52540110, unexpectedBounce: 0x52540111,
+};
+const REFUND_BIT = 1 << 15;
+function decodeEvent(opcode, body) {
+  const cell = rootCell(body);
+  const r = new BitReader(cell.data, cell.bitLen);
+  if (r.n(32) !== opcode) return null;
+  switch (opcode) {
+    case EV.depositAccepted: return { kind: 'deposit', roundId: r.n(8), owner: r.address().raw, amount: r.u(128) };
+    case EV.roundSettled: {
+      const roundId = r.n(8); const status = r.n(8); r.n(8); r.n(8); const stake = r.u(128); r.n(8);
+      return { kind: 'settled', roundId, status, stake, rewardBurn: r.u(128), teamBurn: r.u(128), principalBurn: r.u(128), teamReleased: r.u(128) };
+    }
+    case EV.claimed: return { kind: 'claimed', owner: r.address().raw, mask: r.n(16), principal: r.u(128), reward: r.u(128) };
+    case EV.depositRefunded: return { kind: 'refund', owner: r.address().raw, amount: r.u(128), instant: r.n(1) === 1, recorded: r.n(1) === 1 };
+    case EV.settlementBounced: return { kind: 'bounced', roundId: r.n(8), action: r.n(8) };
+    case EV.unexpectedBounce: return { kind: 'unexpected', op: r.n(32), queryId: r.u(64) };
+    default: return null;
+  }
+}
+function decodeSubmitCandle(body) {
+  const cell = rootCell(body);
+  const r = new BitReader(cell.data, cell.bitLen);
+  if (r.n(32) !== 0x52540003) return null;
+  r.u(64);
+  const roundId = r.n(8); const index = r.n(8); r.u(32); r.u(32);
+  return { roundId, index, twap: r.u(128), digest: r.u(256) };
+}
+
+/* ------------------------------ 主流程 ------------------------------ */
 const diffs = [];
-const failures = [];
 const notes = [];
 function diff(field, chainValue, apiValue, note) {
-  diffs.push({ field, chain: String(chainValue), api: String(apiValue), note: note || null });
+  diffs.push({ field, chain: String(chainValue), api: String(apiValue), note: note || '' });
+}
+async function apiGet(path) {
+  const response = await fetch(apiBase + path, { signal: AbortSignal.timeout(30000) });
+  const json = await response.json();
+  if (!json || json.ok !== true) throw new Error('API ' + path + ' 失败：' + JSON.stringify(json).slice(0, 200));
+  return json.data;
 }
 
 async function main() {
-  const registryPath = args.registry || (network === 'mainnet' ? 'ops/config/mainnet.registry.json' : 'ops/config/testnet.registry.json');
-  let registry = null;
-  try { registry = JSON.parse(readFileSync(registryPath, 'utf8')); } catch (error) { failures.push('读取 registry 失败（' + registryPath + '）：' + error.message); }
-  const pick = (flag, contractKey) => {
-    if (args[flag]) return parseAddress(String(args[flag]));
-    const entry = registry && registry.contracts && registry.contracts[contractKey];
-    return parseAddress(entry && entry.address);
-  };
-  const rc = pick('rc', 'roundController');
-  const tv = pick('tv', 'teamVault');
-  const jm = pick('jm', 'jettonMaster');
-  if (!rc || !tv || !jm) { failures.push('缺少地址（--rc/--tv/--jm 或 registry）'); return; }
+  const rc = parseAddress(args.rc);
+  const jm = parseAddress(args.jm);
+  if (!rc || !jm) { console.error('缺少 --rc / --jm'); process.exit(2); }
+  const tw = args.tw ? parseAddress(args.tw) : null;
+  const keeper = args.keeper ? parseAddress(args.keeper) : null;
 
-  console.log('== 链上锚点：get-method（独立于 API） ==');
-  const config = await getProtocolConfig(rc.raw);
-  const digest = configDigest(config);
-  const currentRound = await getCurrentRound(rc.raw);
-  const jetton = await getJettonData(jm.raw);
-  const teamVault = await getTeamVaultState(tv.raw);
-  console.log('configVersion=' + config.configVersion + '  configHash=' + digest);
-  console.log('currentRound=' + currentRound + '  jetton.totalSupply=' + jetton.totalSupplyRaw.toString() + '  teamVault.controller=' + (teamVault.controller ? teamVault.controller.raw : 'null'));
+  const cfg = await getProtocolConfig(rc.raw);
+  const digest = configDigest(cfg);
+  console.log('configVersion=' + cfg.configVersion + ' configHash=' + digest);
+  if (cfg.jettonMaster !== jm.raw) diff('config.jettonMaster', cfg.jettonMaster, jm.raw);
+  if (tw && cfg.teamVault !== tw.raw) diff('config.teamWallet', cfg.teamVault, tw.raw);
+  if (keeper && (cfg.admin !== keeper.raw || cfg.oracle !== keeper.raw)) diff('config.keeper', cfg.admin + '/' + cfg.oracle, keeper.raw);
+  if (cfg.admin !== cfg.oracle) diff('config.keeperSlots', cfg.admin, cfg.oracle, 'v10 admin = oracle = keeper');
 
-  // 自检：TeamVault 只接受 RC 指令
-  if (!teamVault.controller || teamVault.controller.raw !== rc.raw) failures.push('TeamVault.controller 不是 RoundController');
-  if (teamVault.teamRoundRaw !== 120000000n * 1000000000n) diff('teamVault.teamRoundRaw', teamVault.teamRoundRaw.toString(), '120000000000000000');
-
-  // 从交易里复算 K 线滚动哈希（链上唯一锚点，不依赖 API）
-  const chainCandles = new Map();
-  let startLt;
-  let seenLt = null;
-  for (let page = 0; page < 10; page++) {
-    const txs = await getTransactions(rc.raw, startLt);
-    if (!txs.length) break;
-    for (const tx of txs) {
-      // start_lt 是 inclusive：必须按 lt 去重，否则跨页会重复计数（验收①的血泪教训）
-      if (seenLt !== null && BigInt(tx.lt) <= BigInt(seenLt)) continue;
-      seenLt = tx.lt;
-      const message = tx.in_msg;
-      if (!message || message.opcode !== '0x52540003' || !message.message_content || !message.message_content.body) continue;
-      if (tx.finality && tx.finality !== 'finalized') continue;
-      const reader = new BitReader(rootCell(message.message_content.body).data, rootCell(message.message_content.body).bitLen);
-      const op = Number(reader.u(32));
-      if (op !== 0x52540003) continue;
-      reader.u(64);
-      const roundId = reader.n(8); const candleIndex = reader.n(8);
-      reader.n(32); reader.n(32);
-      const twap = reader.u(128); const digestValue = reader.u(256);
-      const list = chainCandles.get(roundId) || [];
-      if (!list.some((item) => item.candleIndex === candleIndex)) list.push({ candleIndex, twap, digest: digestValue });
-      chainCandles.set(roundId, list);
+  const txs = await fetchAllTransactions(rc.raw);
+  const events = [];
+  const candles = new Map();
+  for (const tx of txs) {
+    if (tx.aborted || (tx.description && tx.description.aborted)) continue;
+    for (const message of tx.out_msgs || []) {
+      if (message.destination || !message.opcode || !message.message_content || !message.message_content.body) continue;
+      const event = decodeEvent(Number.parseInt(message.opcode, 16), message.message_content.body);
+      if (event) events.push({ ...event, lt: tx.lt });
     }
-    const lastLt = txs[txs.length - 1].lt;
-    if (lastLt === startLt || txs.length < 100) break;
-    startLt = lastLt;
+    const inbound = tx.in_msg;
+    if (inbound && inbound.opcode === '0x52540003' && inbound.message_content && inbound.message_content.body) {
+      const candle = decodeSubmitCandle(inbound.message_content.body);
+      if (candle) {
+        const list = candles.get(candle.roundId) || [];
+        if (!list.some((item) => item.index === candle.index)) list.push(candle);
+        candles.set(candle.roundId, list);
+      }
+    }
+  }
+  console.log('transactions=' + txs.length + ' events=' + events.length);
+
+  // 事件账
+  const stakeByRound = new Map();
+  const stakeByOwnerRound = new Map();
+  const refundByOwner = new Map();
+  let refundCredited = 0n; let refundDust = 0n; let refundClaimed = 0n; let claimedPaid = 0n;
+  const claimed = new Map();
+  for (const event of events) {
+    if (event.kind === 'deposit') {
+      stakeByRound.set(event.roundId, (stakeByRound.get(event.roundId) || 0n) + event.amount);
+      const key = event.owner + '|' + event.roundId;
+      stakeByOwnerRound.set(key, (stakeByOwnerRound.get(key) || 0n) + event.amount);
+    } else if (event.kind === 'refund') {
+      if (!event.recorded) refundDust += event.amount;
+      else if (!event.instant) {
+        refundCredited += event.amount;
+        refundByOwner.set(event.owner, (refundByOwner.get(event.owner) || 0n) + event.amount);
+      }
+    } else if (event.kind === 'claimed') {
+      let roundsPrincipal = 0n;
+      const set = claimed.get(event.owner) || new Set();
+      for (let r = 1; r <= 10; r++) {
+        if (!(event.mask & (1 << (r - 1)))) continue;
+        set.add(r);
+        roundsPrincipal += stakeByOwnerRound.get(event.owner + '|' + r) || 0n;
+      }
+      claimed.set(event.owner, set);
+      let refundPart = 0n;
+      if (event.mask & REFUND_BIT) {
+        refundPart = event.principal - roundsPrincipal;
+        refundClaimed += refundPart;
+        refundByOwner.set(event.owner, 0n);
+      }
+      claimedPaid += event.principal - refundPart + event.reward;
+    } else if (event.kind === 'bounced') {
+      notes.push('R' + event.roundId + ' SettlementBounced action=' + event.action + '（需要 RetrySettlement）');
+    } else if (event.kind === 'unexpected') {
+      notes.push('UnexpectedBounce op=0x' + event.op.toString(16) + ' queryId=' + event.queryId + '（需人工核查）');
+    }
   }
 
-  const rounds = new Map();
-  for (let roundId = 1; roundId <= currentRound; roundId++) {
+  // 逐轮 getter
+  const roundViews = new Map();
+  let teamReleased = 0n; let burned = 0n;
+  const settled = new Map(events.filter((event) => event.kind === 'settled').map((event) => [event.roundId, event]));
+  for (let roundId = 1; roundId <= 10; roundId++) {
     const view = await getRound(rc.raw, roundId);
+    roundViews.set(roundId, view);
     if (view.status === 0) continue;
-    rounds.set(roundId, view);
-    const stake = await getRoundTotalStake(rc.raw, roundId);
-    if (stake !== view.totalAcceptedStakeRaw) diff('R' + roundId + '.totalStake(getter)', view.totalAcceptedStakeRaw.toString(), stake.toString());
-    const candles = (chainCandles.get(roundId) || []).sort((a, b) => a.candleIndex - b.candleIndex);
-    // 进行中的轮次（2..7）每 10s~1h 还在产生新 K 线：交易列表与 getter 不是同一瞬间的快照，
-    // 因此只对已终态轮次（8/9/10）强制「不可变」哈希/根数比对；进行中轮次仅校验已解析 K 线的连续性。
-    const inFlight = view.status >= 2 && view.status <= 7;
-    if (candles.length) {
-      const sequential = candles.every((candle, index) => candle.candleIndex === index);
-      if (!sequential) diff('R' + roundId + '.candlesSequential', '0..n', candles.map((candle) => candle.candleIndex).join(','));
-      if (!inFlight) {
-        let hash = Buffer.alloc(32);
-        for (const candle of candles) hash = rollingHash(hash, candle.candleIndex, candle.twap, candle.digest);
-        const computed = '0x' + hash.toString('hex');
-        if (computed !== view.candleHash) diff('R' + roundId + '.candleHash', view.candleHash, computed, '本地按原始 K 线复算');
-        if (candles.length !== view.candlesSeen) diff('R' + roundId + '.candlesCount', String(view.candlesSeen), String(candles.length));
-      } else {
-        notes.push('R' + roundId + ' 进行中（status=' + view.status + '）：已解析 ' + candles.length + ' 根 / 链上 ' + view.candlesSeen + ' 根，跳过不可变哈希比对');
+    if (!(view.status in STATUS_TO_STATE)) diff('R' + roundId + '.status', view.status, '-', 'v10 不应出现');
+    const stake = stakeByRound.get(roundId) || 0n;
+    if (stake !== view.totalAcceptedStakeRaw) diff('R' + roundId + '.totalStake', view.totalAcceptedStakeRaw, stake, 'DepositAccepted 合计');
+    if (view.totalWeight !== view.totalAcceptedStakeRaw) diff('R' + roundId + '.totalWeight', view.totalWeight, view.totalAcceptedStakeRaw, 'v10 = 总质押');
+    const list = (candles.get(roundId) || []).sort((a, b) => a.index - b.index);
+    if (list.length) {
+      let hash = Buffer.alloc(32);
+      for (const candle of list) hash = rollingHash(hash, candle.index, candle.twap, candle.digest);
+      if ('0x' + hash.toString('hex') !== view.candleHash) diff('R' + roundId + '.candleHash', view.candleHash, '0x' + hash.toString('hex'));
+    }
+    if (view.status === 8 || view.status === 9) {
+      const reward = BigInt(cfg.roundRewardRaw); const team = BigInt(cfg.teamRoundRaw);
+      const exp = view.status === 8
+        ? { rewardBurn: view.totalAcceptedStakeRaw === 0n ? reward : 0n, teamBurn: 0n, principalBurn: 0n, teamReleased: team }
+        : { rewardBurn: reward, teamBurn: team, principalBurn: view.totalAcceptedStakeRaw, teamReleased: 0n };
+      const event = settled.get(roundId);
+      if (!event) diff('R' + roundId + '.RoundSettled', '缺事件', '-');
+      else for (const key of Object.keys(exp)) if (event[key] !== exp[key]) diff('R' + roundId + '.settled.' + key, event[key], exp[key]);
+      const burnTotal = exp.rewardBurn + exp.teamBurn + exp.principalBurn;
+      if (burnTotal > 0n && view.rewardBurnConfirmed) burned += burnTotal;
+      if (exp.teamReleased > 0n && view.teamReleaseConfirmed) teamReleased += exp.teamReleased;
+      if (burnTotal > 0n && !view.rewardBurnConfirmed) notes.push('R' + roundId + ' burn 未确认（被退回待重试？）');
+      if (exp.teamReleased > 0n && !view.teamReleaseConfirmed) notes.push('R' + roundId + ' 团队转账未确认（被退回待重试？）');
+    }
+  }
+
+  // RC 钱包余额
+  const initial = 10n * (BigInt(cfg.roundRewardRaw) + BigInt(cfg.teamRoundRaw));
+  let totalStake = 0n;
+  for (const value of stakeByRound.values()) totalStake += value;
+  const expectedWallet = initial + totalStake + refundCredited + refundDust - teamReleased - burned - claimedPaid - refundClaimed;
+  const wallet = await getJettonWalletAddress(rc.raw);
+  if (!wallet || wallet.raw !== cfg.stakingJettonWallet) diff('rcWallet.address', wallet && wallet.raw, cfg.stakingJettonWallet);
+  const balance = wallet ? await getWalletBalance(wallet.raw) : 0n;
+  console.log('RC 钱包：chain=' + balance + ' 公式=' + expectedWallet + '（82 亿 + 质押 ' + totalStake + ' + 记入 ' + refundCredited + ' + 零头 ' + refundDust + ' − 团队 ' + teamReleased + ' − 销毁 ' + burned + ' − 领取 ' + claimedPaid + ' − 退款已领 ' + refundClaimed + '）');
+  if (balance !== expectedWallet) diff('rcWallet.balance', balance, expectedWallet, '公式推导');
+  const jetton = await getJettonData(jm.raw);
+  const initialSupply = 10_000_000_000n * 1_000_000_000n;
+  if (jetton.totalSupplyRaw !== initialSupply - burned) diff('jetton.totalSupply', jetton.totalSupplyRaw, initialSupply - burned, '初始 − 已确认 burn');
+
+  // Worker API 对账（可选）
+  if (apiBase) {
+    const apiRounds = await apiGet('/api/rounds');
+    const byId = new Map(apiRounds.map((row) => [row.roundId, row]));
+    for (const [roundId, view] of roundViews) {
+      if (view.status === 0) continue;
+      const row = byId.get(roundId);
+      if (!row) { diff('api.R' + roundId, 'exists', 'missing'); continue; }
+      if (row.state !== STATUS_TO_STATE[view.status]) diff('api.R' + roundId + '.state', STATUS_TO_STATE[view.status], row.state);
+      if (String(row.totalAcceptedStakeRaw) !== view.totalAcceptedStakeRaw.toString()) diff('api.R' + roundId + '.totalStake', view.totalAcceptedStakeRaw, row.totalAcceptedStakeRaw);
+      if (view.status === 1) continue;
+      if (String(row.targetPriceUsdE8) !== view.targetPriceUsdE8.toString()) diff('api.R' + roundId + '.target', view.targetPriceUsdE8, row.targetPriceUsdE8);
+      if (row.candlesSeen !== view.candlesSeen) diff('api.R' + roundId + '.candlesSeen', view.candlesSeen, row.candlesSeen);
+      const event = settled.get(roundId);
+      const expectTeam = view.status === 8 && view.teamReleaseConfirmed && event ? event.teamReleased.toString() : null;
+      if ((row.teamReleasedRaw ?? null) !== expectTeam) diff('api.R' + roundId + '.teamReleasedRaw', expectTeam, row.teamReleasedRaw);
+      if (event && view.rewardBurnConfirmed) {
+        const burnTotal = event.rewardBurn + event.teamBurn + event.principalBurn;
+        const expectBurn = burnTotal > 0n ? burnTotal.toString() : null;
+        if ((row.burnedRaw ?? null) !== expectBurn) diff('api.R' + roundId + '.burnedRaw', expectBurn, row.burnedRaw);
+      }
+    }
+    const stats = await apiGet('/api/stats');
+    if (BigInt(stats.burnedRaw) !== burned) diff('api.stats.burnedRaw', burned, stats.burnedRaw);
+    const owners = new Set([...stakeByOwnerRound.keys()].map((key) => key.split('|')[0]).concat([...refundByOwner.keys()]));
+    for (const owner of owners) {
+      const parsed = parseAddress(owner);
+      const chain = await getClaimableAll(rc.raw, parsed);
+      const me = await apiGet('/api/me?address=' + encodeURIComponent(toFriendly(parsed)));
+      const all = me.claimableAll;
+      if (BigInt(all.principalRaw) !== chain.principalRaw || BigInt(all.rewardRaw) !== chain.rewardRaw || all.roundsMask !== chain.roundsMask) {
+        diff('api.me.claimableAll.' + owner.slice(2, 10), chain.principalRaw + '/' + chain.rewardRaw + '/0x' + chain.roundsMask.toString(16), all.principalRaw + '/' + all.rewardRaw + '/0x' + all.roundsMask.toString(16));
+      }
+      for (const stake of me.stakes) {
+        const exp = claimed.get(owner)?.has(stake.roundId) ?? false;
+        if (stake.claimed !== exp) diff('api.me.claimed.' + owner.slice(2, 10) + '.R' + stake.roundId, exp, stake.claimed);
       }
     }
   }
 
-
-  /* ------------------------- docs/19 全生命周期对账 ------------------------- */
-  if (args.doc19) {
-    console.log('\n== docs/19 权威数字对账（不可变项必须 diff=0） ==');
-    // 权威快照（docs/19 §2/§3，2026-11-05 20:13 UTC，由 Lead getter 独立读取）
-    const DOC19 = {
-      supplyRaw: 10000000000000000000n,
-      burnedRaw: 5520910000000000000n,
-      rcWalletDocRaw: 1732259899434318040n, // 1,732,259,899.434318040
-      tvWalletDocRaw: 0n,
-      teamRaw: 600000000000000000n,
-      marketingRaw: 497000000000000000n,
-      liquidityRaw: 500000000000000000n,
-      internalRaw: 800000000000000000n,
-      docUsersRaw: [139062093023000000n, 106413953488000000n, 104354054054000000n], // 仅 3 位小数，容差 1e6 raw
-      unlockLockedRaw: 698900062853551224n,
-      rounds: {
-        1: { status: 8, tier: 1, target: 232000n, qualified: 16, stake: 0n, weight: 0n },
-        2: { status: 9, tier: 2, target: 464000n, qualified: 0, stake: 0n, weight: 0n },
-        3: { status: 8, tier: 2, target: 464000n, qualified: 16, stake: 300000000000000n, weight: 370000000000000n },
-        4: { status: 9, tier: 3, target: 928000n, qualified: 5, stake: 20110000000000000n, weight: 24142000000000000n },
-        5: { status: 8, tier: 3, target: 928000n, qualified: 16, stake: 300000000000000n, weight: 430000000000000n },
-        6: { status: 9, tier: 4, target: 1856000n, qualified: 0, stake: 200000000000000n, weight: 300000000000000n },
-        7: { status: 8, tier: 4, target: 1856000n, qualified: 16, stake: 0n, weight: 0n },
-        8: { status: 9, tier: 5, target: 3712000n, qualified: 0, stake: 300000000000000n, weight: 370000000000000n },
-        9: { status: 9, tier: 5, target: 3712000n, qualified: 0, stake: 300000000000000n, weight: 400000000000000n },
-        10: { status: 8, tier: 5, target: 3712000n, qualified: 16, stake: 300000000000000n, weight: 430000000000000n },
-      },
-    };
-    const threshold = Number(config.minQualifiedCandles);
-    let chainRewardBurn = 0n; let chainTeamBurn = 0n; let chainPrincipalBurn = 0n;
-    let roundMismatch = 0;
-    console.log('轮 | status | tier | target | seen | qualified(封顶) | 质押 raw | 权重 raw | 团队释放 | 三笔销毁确认');
-    for (const [roundId, expected] of Object.entries(DOC19.rounds)) {
-      const view = rounds.get(Number(roundId));
-      if (!view) { failures.push('docs19: 缺少 R' + roundId); roundMismatch++; continue; }
-      const qualified = Math.min(view.qualifiedCandles, threshold);
-      const rows = [];
-      if (view.status !== expected.status) rows.push('status ' + view.status + '≠' + expected.status);
-      if (view.targetTier !== expected.tier) rows.push('tier ' + view.targetTier + '≠' + expected.tier);
-      if (view.targetPriceUsdE8 !== expected.target) rows.push('target ' + view.targetPriceUsdE8 + '≠' + expected.target);
-      if (view.candlesSeen !== 24) rows.push('seen ' + view.candlesSeen + '≠24');
-      if (qualified !== expected.qualified) rows.push('qualified ' + qualified + '≠' + expected.qualified);
-      if (view.totalAcceptedStakeRaw !== expected.stake) rows.push('stake ' + view.totalAcceptedStakeRaw + '≠' + expected.stake);
-      if (view.totalWeight !== expected.weight) rows.push('weight ' + view.totalWeight + '≠' + expected.weight);
-      const success = view.status === 8;
-      const expectRewardBurn = success ? expected.stake === 0n : true;
-      const expectTeamBurn = !success;
-      const expectPrincipalBurn = !success;
-      if (view.teamReleaseConfirmed !== success) rows.push('teamRelease=' + view.teamReleaseConfirmed + '≠' + success);
-      if (view.teamBurnConfirmed !== expectTeamBurn) rows.push('teamBurn=' + view.teamBurnConfirmed + '≠' + expectTeamBurn);
-      if (view.rewardBurnConfirmed !== expectRewardBurn) rows.push('rewardBurn=' + view.rewardBurnConfirmed + '≠' + expectRewardBurn);
-      if (view.principalBurnConfirmed !== expectPrincipalBurn) rows.push('principalBurn=' + view.principalBurnConfirmed + '≠' + expectPrincipalBurn);
-      if (view.rewardBurnConfirmed) chainRewardBurn += BigInt(config.roundRewardRaw);
-      if (view.teamBurnConfirmed) chainTeamBurn += BigInt(config.teamRoundRaw);
-      if (view.principalBurnConfirmed) chainPrincipalBurn += view.totalAcceptedStakeRaw;
-      if (rows.length) { roundMismatch++; diff('R' + roundId + '.doc19', rows.join('; '), 'docs/19'); }
-      console.log(
-        'R' + roundId + ' | ' + view.status + ' | ' + view.targetTier + ' | ' + view.targetPriceUsdE8.toString() + ' | ' + view.candlesSeen +
-          ' | ' + qualified + ' | ' + view.totalAcceptedStakeRaw.toString() + ' | ' + view.totalWeight.toString() +
-          ' | ' + (view.teamReleaseConfirmed ? '✓' : '—') + ' | ' +
-          'R' + (view.rewardBurnConfirmed ? '✓' : '—') + ' T' + (view.teamBurnConfirmed ? '✓' : '—') + ' P' + (view.principalBurnConfirmed ? '✓' : '—'),
-      );
-    }
-    const burnTotal = chainRewardBurn + chainTeamBurn + chainPrincipalBurn;
-    console.log('销毁合计：奖励 ' + chainRewardBurn + ' + 团队 ' + chainTeamBurn + ' + 本金 ' + chainPrincipalBurn + ' = ' + burnTotal + ' raw');
-    if (burnTotal !== DOC19.burnedRaw) diff('doc19.burnedRaw', DOC19.burnedRaw.toString(), burnTotal.toString());
-    if (jetton.totalSupplyRaw + burnTotal !== DOC19.supplyRaw) diff('doc19.supplyInvariant', DOC19.supplyRaw.toString(), (jetton.totalSupplyRaw + burnTotal).toString());
-
-    // 持币者枚举（v3 jetton/wallets）：总量守恒 + 角色钱包 + 快照后 claim 对平
-    const wallets = await listJettonWallets(jm.raw);
-    let holdersSum = 0n;
-    const byOwner = new Map();
-    for (const wallet of wallets) {
-      const balance = BigInt(wallet.balance || '0');
-      holdersSum += balance;
-      byOwner.set(String(wallet.owner).toLowerCase(), balance);
-    }
-    console.log('持币者 ' + wallets.length + ' 个；余额合计 ' + holdersSum.toString() + ' raw（应等于链上总供应 ' + jetton.totalSupplyRaw.toString() + '）');
-    if (holdersSum !== jetton.totalSupplyRaw) diff('doc19.holdersSum', jetton.totalSupplyRaw.toString(), holdersSum.toString());
-    const rcWallet = wallets.find((wallet) => sameAddress(wallet.address, args['rc-wallet'] || ''));
-    const tvWallet = wallets.find((wallet) => sameAddress(wallet.address, args['tv-wallet'] || ''));
-    const roleKeyMap = {
-      teamWallet: 'team', marketingWallet: 'marketing', liquidityWallet: 'liquidity', teamInternalWallet: 'internal',
-    };
-    const roleExpected = { team: DOC19.teamRaw, marketing: DOC19.marketingRaw, liquidity: DOC19.liquidityRaw, internal: DOC19.internalRaw };
-    for (const [walletKey, role] of Object.entries(roleKeyMap)) {
-      const owner = registry && registry.wallets && registry.wallets[walletKey] && registry.wallets[walletKey].address;
-      const ownerParsed = parseAddress(owner);
-      if (!ownerParsed) { notes.push('registry 缺钱包 ' + walletKey + '，跳过角色余额比对'); continue; }
-      const balance = byOwner.get(ownerParsed.raw.toLowerCase()) ?? 0n;
-      if (balance !== roleExpected[role]) diff('doc19.wallet.' + role, roleExpected[role].toString(), balance.toString());
-      else console.log('角色钱包 ' + role + ' = ' + balance.toString() + ' raw ✓');
-    }
-    if (tvWallet && BigInt(tvWallet.balance) !== DOC19.tvWalletDocRaw) diff('doc19.tvWallet', '0', tvWallet.balance);
-
-    // 用户钱包：docs/19 是 20:13 UTC 快照；之后发生 claim，RC 流出必须与用户流入逐 raw 对平
-    const roleOwners = new Set();
-    for (const walletKey of Object.keys(roleKeyMap)) {
-      const parsed = parseAddress(registry && registry.wallets && registry.wallets[walletKey] && registry.wallets[walletKey].address);
-      if (parsed) roleOwners.add(parsed.raw.toLowerCase());
-    }
-    if (rc) roleOwners.add(rc.raw.toLowerCase());
-    if (tv) roleOwners.add(tv.raw.toLowerCase());
-    const userHolders = [...byOwner.entries()]
-      .filter(([owner, balance]) => balance > 0n && !roleOwners.has(owner))
-      .sort((a, b) => (b[1] > a[1] ? 1 : -1))
-      .slice(0, 3);
-    const currentUsers = userHolders.map(([, balance]) => balance);
-    const currentRc = rcWallet ? BigInt(rcWallet.balance) : 0n;
-    const rcOutflow = DOC19.rcWalletDocRaw - currentRc;
-    const usersInflow = currentUsers.reduce((sum, balance, index) => sum + (balance - (DOC19.docUsersRaw[index] ?? 0n)), 0n);
-    console.log('docs/19 之后：RC 钱包流出 ' + rcOutflow.toString() + ' raw；用户 A/B/C 流入 ' + usersInflow.toString() + ' raw');
-    const deltaGap = rcOutflow - usersInflow;
-    if (deltaGap > 1000000n || deltaGap < -1000000n) diff('doc19.postSnapshotClaimDelta', usersInflow.toString(), rcOutflow.toString());
-    else notes.push('docs/19 快照后的 claim：RC 流出 = 用户流入（Δ=' + deltaGap.toString() + ' raw ≤ 0.001 A9，文档余额为时点快照）');
-
-    // 解锁池（R10 终态后）：只读 getter，不触发 claim
-    if (userHolders.length) {
-      const topOwner = parseAddress(userHolders[0][0]);
-      if (topOwner) {
-        const unlock = await getUnlockInfo(rc.raw, topOwner);
-        console.log('解锁池（余额最高用户）：unlockStart=' + unlock.unlockStart + ' totalLockedRaw=' + unlock.totalLockedRaw.toString());
-        if (unlock.unlockStart <= 0) diff('doc19.unlockStart', '>0', String(unlock.unlockStart));
-        if (unlock.totalLockedRaw !== DOC19.unlockLockedRaw) diff('doc19.unlockLockedRaw', DOC19.unlockLockedRaw.toString(), unlock.totalLockedRaw.toString());
-      }
-    }
-    notes.push('docs/19 轮次核对：' + (10 - roundMismatch) + '/10 轮 status/tier/target/qualified/stake/weight/销毁标志全部一致');
-  }
-
-
-  /* ------------------------- v8.8 余额口径（--balances） ------------------------- */
-  if (args.balances) {
-    console.log('\n== 余额口径对账（v8.8：技术终止轮 / round-0 退款账本） ==');
-    const snapshotAt = new Date().toISOString();
-    console.log('快照时间（UTC）=' + snapshotAt + '；链上 currentRound=' + currentRound);
-
-    // 1) 事件收集（RC + TV 全量交易里的 external-out）
-    const rcTxs = await fetchAllTransactions(rc.raw);
-    const tvTxs = await fetchAllTransactions(tv.raw);
-    const events = [];
-    for (const tx of rcTxs) {
-      for (const message of tx.out_msgs || []) {
-        if (message.destination) continue;
-        if (!message.opcode || !message.message_content || !message.message_content.body) continue;
-        const opcode = Number.parseInt(message.opcode, 16);
-        const event = decodeEventV88(opcode, message.message_content.body);
-        if (event) events.push({ ...event, txLt: tx.lt });
-      }
-    }
-    for (const tx of tvTxs) {
-      for (const message of tx.out_msgs || []) {
-        if (message.destination) continue;
-        if (!message.opcode || !message.message_content || !message.message_content.body) continue;
-        const opcode = Number.parseInt(message.opcode, 16);
-        const event = decodeEventV88(opcode, message.message_content.body);
-        if (event) events.push({ ...event, txLt: tx.lt });
-      }
-    }
-    let depositTotal = 0n;
-    let rewardPaid = 0n;
-    let unlockPaid = 0n;
-    let principalPaid = 0n;
-    let teamReleasedEvents = 0n;
-    let abortedEvents = 0;
-    for (const event of events) {
-      if (event.kind === 'DepositAccepted') depositTotal += event.amountRaw;
-      else if (event.kind === 'RewardEarly') rewardPaid += event.paidRaw;
-      else if (event.kind === 'UnlockClaimed') unlockPaid += event.amountRaw;
-      else if (event.kind === 'PrincipalClaimed') principalPaid += event.amountRaw;
-      else if (event.kind === 'TeamReleased') teamReleasedEvents += event.amountRaw;
-      else if (event.kind === 'TechnicalAborted') abortedEvents++;
-      else if (event.kind === 'ClaimRolledBack') {
-        // 回滚事件：作废前序领取，按 CLAIM_KIND 冲减（1=principal 2=reward 3=claimAll 4=unlock 5=refund）
-        if (event.kindCode === 1 || event.kindCode === 5) principalPaid -= event.amountRaw;
-        else rewardPaid -= event.amountRaw;
-      }
-    }
-
-    // 1b) 被拒质押（= round-0 退款账本来源）：没有 DepositAccepted 的 transfer_notification；以及 RC 转出金额
-    const refundCandidates = new Map();
-    let rejectedInbound = 0n;
-    let refundTransfersOut = 0n;
-    for (const tx of rcTxs) {
-      const accepted = (tx.out_msgs || []).some((message) => message.opcode === '0x52540103');
-      for (const message of tx.out_msgs || []) {
-        if (message.opcode === '0x0f8a7ea5' && message.message_content && message.message_content.body) {
-          const transfer = decodeJettonTransferAmount(message.message_content.body);
-          if (transfer) refundTransfersOut += transfer.amountRaw;
-        }
-      }
-      if (accepted) continue;
-      const inbound = tx.in_msg;
-      if (!inbound || inbound.opcode !== '0x7362d09c' || !inbound.message_content || !inbound.message_content.body) continue;
-      const notification = decodeTransferNotification(inbound.message_content.body);
-      if (!notification) continue;
-      rejectedInbound += notification.amountRaw;
-      refundCandidates.set(notification.initiator.raw, (refundCandidates.get(notification.initiator.raw) ?? 0n) + notification.amountRaw);
-      if (process.env.RECONCILE_DEBUG) console.log('[debug] 被拒质押 owner=' + notification.initiator.raw + ' amount=' + notification.amountRaw.toString());
-    }
-
-    // 1c) 逐轮摘要（写入报告，便于审计核对 R1/R2 等期望）
-    console.log('轮 | status | tier | target | seen | qualified(链上/封顶) | 质押 A9 | 权重 A9 | R/T/P 销毁标志');
-    for (const [roundId, view] of [...rounds.entries()].sort((a, b) => a[0] - b[0])) {
-      console.log(
-        'R' + roundId + ' | ' + view.status + ' | ' + view.targetTier + ' | ' + view.targetPriceUsdE8.toString() + ' | ' +
-          view.candlesSeen + ' | ' + view.qualifiedCandles + '/' + Math.min(view.qualifiedCandles, Number(config.minQualifiedCandles)) + ' | ' +
-          view.totalAcceptedStakeRaw.toString() + ' | ' + view.totalWeight.toString() + ' | ' +
-          (view.rewardBurnConfirmed ? 'R✓' : 'R—') + ' ' + (view.teamBurnConfirmed ? 'T✓' : 'T—') + ' ' + (view.principalBurnConfirmed ? 'P✓' : 'P—'),
-      );
-    }
-    // 下一轮（PREVIEW/未开）状态：不计入本轮对账，但报告注明
-    if (currentRound < 10) {
-      try {
-        const next = await getRound(rc.raw, currentRound + 1);
-        if (next.status !== 0) {
-          notes.push('R' + (currentRound + 1) + ' 当前 status=' + next.status + '（PREVIEW/进行中，未计入本轮对账）');
-          console.log('R' + (currentRound + 1) + ' 当前 status=' + next.status + '（PREVIEW/进行中，未计入本轮对账）');
-        }
-      } catch (error) {
-        notes.push('读取下一轮状态失败：' + String(error.message).slice(0, 120));
-      }
-    }
-
-    // 2) 轮次级口径：销毁、技术终止
-    const abortedRounds = [...rounds.values()].filter((view) => view.status === 10);
-    const failedRoundsV88 = [...rounds.values()].filter((view) => view.status === 9);
-    let rewardBurned = 0n;
-    let principalBurned = 0n;
-    let teamBurned = 0n;
-    let abortedFlagErrors = 0;
-    for (const view of rounds.values()) {
-      if (view.rewardBurnConfirmed) rewardBurned += BigInt(config.roundRewardRaw);
-      if (view.principalBurnConfirmed) principalBurned += view.totalAcceptedStakeRaw;
-      if (view.teamBurnConfirmed) teamBurned += BigInt(config.teamRoundRaw);
-      if (view.status === 10 && (view.rewardBurnConfirmed || view.teamBurnConfirmed || view.principalBurnConfirmed || view.teamReleaseConfirmed)) {
-        abortedFlagErrors++;
-        diff('R' + view.roundId + '.abortedFlags', '全部 false（技术终止不销毁/不释放）', '存在 true');
-      }
-    }
-    const N_ABORTED = abortedRounds.length;
-    const abortedRewardRaw = BigInt(N_ABORTED) * BigInt(config.roundRewardRaw);
-    const abortedTeamRaw = BigInt(N_ABORTED) * BigInt(config.teamRoundRaw);
-    console.log('技术终止轮次 N_aborted=' + N_ABORTED + '（TechnicalAborted 事件=' + abortedEvents + '）');
-    console.log('  · RC 不可用余额 = N_aborted × 700,000,000 = ' + abortedRewardRaw.toString() + ' raw（不销毁、不分配，永久留存，**不计异常**）');
-    console.log('  · TV 不可用余额 = N_aborted × 120,000,000 = ' + abortedTeamRaw.toString() + ' raw（同上）');
-    if (abortedEvents !== N_ABORTED) notes.push('TechnicalAborted 事件数 ' + abortedEvents + ' ≠ status=10 轮次数 ' + N_ABORTED + '（可能为重复事件或历史轮次，按 status 计数）');
-
-    // 3) 持币者 / 钱包定位
-    const wallets = await listJettonWallets(jm.raw);
-    const byOwner = new Map();
-    let holdersSum = 0n;
-    for (const wallet of wallets) {
-      const owner = parseAddress(wallet.owner);
-      if (!owner) continue;
-      const balance = BigInt(wallet.balance || '0');
-      byOwner.set(owner.raw, { wallet, address: parseAddress(wallet.address), balance });
-      holdersSum += balance;
-    }
-    const rcWalletEntry = byOwner.get(rc.raw);
-    const tvWalletEntry = byOwner.get(tv.raw);
-    if (!rcWalletEntry || !tvWalletEntry) failures.push('v3 jetton/wallets 未找到 RC/TV 的 jetton wallet');
-    const rcWalletBalance = rcWalletEntry ? await getWalletBalance(rcWalletEntry.address.raw) : 0n;
-    const tvWalletBalance = tvWalletEntry ? await getWalletBalance(tvWalletEntry.address.raw) : 0n;
-    console.log('RC jetton wallet 实际余额 = ' + rcWalletBalance.toString() + ' raw；TV = ' + tvWalletBalance.toString() + ' raw');
-
-    // 4) round-0 退款账本：候选 owner = 持币者 ∪ 被拒 transfer_notification 的发起人（索引器按事件看不到，必须 getter 兜底）
-    const round0Owners = new Map();
-    for (const [ownerRaw, entry] of byOwner) {
-      if (ownerRaw === rc.raw || ownerRaw === tv.raw) continue;
-      round0Owners.set(ownerRaw, entry.address);
-    }
-    for (const [ownerRaw] of refundCandidates) {
-      if (ownerRaw === rc.raw || ownerRaw === tv.raw) continue;
-      if (!round0Owners.has(ownerRaw)) {
-        const parsed = parseAddress(ownerRaw);
-        if (parsed) round0Owners.set(ownerRaw, parsed);
-      }
-    }
-    let round0UnclaimedRaw = 0n;
-    let round0PendingRaw = 0n;
-    let round0Accounts = 0;
-    for (const [ownerRaw, ownerAddress] of round0Owners) {
-      const stake = await getUserStakeAt(rc.raw, 0, ownerAddress);
-      if (stake.amountRaw === 0n) continue;
-      round0Accounts++;
-      if (stake.principalClaimed) {
-        // 已发起退款/领取转账、尚未完成结算（pending）：钱包已出账，账本尚未清零
-        round0PendingRaw += stake.amountRaw;
-        console.log('  · round-0 退款账本（在途/待结算）：owner=' + ownerRaw + ' amount=' + stake.amountRaw.toString() + ' raw');
-      } else {
-        round0UnclaimedRaw += stake.amountRaw;
-        console.log('  · round-0 退款账本（可领）：owner=' + ownerRaw + ' amount=' + stake.amountRaw.toString() + ' raw');
-      }
-    }
-    // 计入 RC 钱包「应持有」的 round-0 口径：被拒入账 − 已发退款转账（净留存）。
-    // 该口径对 pending 也成立（钱已离开钱包、账本下个事件才清零），比单纯 getter 更稳。
-    const round0RefundRaw =
-      rewardPaid + unlockPaid + principalPaid === 0n && rejectedInbound >= refundTransfersOut
-        ? rejectedInbound - refundTransfersOut
-        : round0UnclaimedRaw;
-    console.log('round-0 退款账本：可领 ' + round0UnclaimedRaw.toString() + ' raw / 在途 ' + round0PendingRaw.toString() + ' raw（' + round0Accounts + ' 个账户）；计入预期的净留存 = ' + round0RefundRaw.toString() + ' raw');
-    if (round0UnclaimedRaw !== round0RefundRaw && round0PendingRaw > 0n) {
-      notes.push('round-0 退款账本存在在途/已领条目（getter 可领 ' + round0UnclaimedRaw.toString() + '，在途 ' + round0PendingRaw.toString() + '），预期按「被拒入账−已发退款」净额 ' + round0RefundRaw.toString() + ' 计算');
-    }
-    console.log('  · 交叉校验输入：被拒入账合计 ' + rejectedInbound.toString() + ' raw；RC 钱包转出（退款/领取）合计 ' + refundTransfersOut.toString() + ' raw');
-    if (rewardPaid + unlockPaid + principalPaid > 0n) {
-      notes.push('round-0 净留存回退到 getter 口径（链上已发生领取，转出金额不再只含退款）');
-    }
-
-    // 5) 初始注资：优先 CLI 显式值，否则从 jetton wallet 历史反推（实例注资可能不是标准 7B/1.2B）
-    const rcInitial =
-      args['rc-initial'] !== undefined
-        ? BigInt(String(args['rc-initial']))
-        : rcWalletEntry
-          ? await deriveInitialFunding(rcWalletEntry.address.raw, null)
-          : BigInt(config.roundRewardRaw);
-    const tvInitial =
-      args['tv-initial'] !== undefined
-        ? BigInt(String(args['tv-initial']))
-        : tvWalletEntry
-          ? await deriveInitialFunding(tvWalletEntry.address.raw, null)
-          : BigInt(config.teamRoundRaw) * 10n;
-    const RC_INITIAL_REWARD_POOL = rcInitial;
-    const TV_INITIAL_QUOTA = tvInitial;
-    console.log('检测初始注资：RC=' + rcInitial.toString() + ' raw；TV=' + tvInitial.toString() + ' raw（取 jetton wallet 首笔入站 internal_transfer；可用 --rc-initial/--tv-initial 覆盖）');
-    const rcExpected =
-      RC_INITIAL_REWARD_POOL + depositTotal + round0RefundRaw + abortedRewardRaw -
-      rewardPaid - unlockPaid - principalPaid - rewardBurned - principalBurned;
-    // TV 口径：逐轮 get_round_state(released/burned) 之和最接近真实现金流（v8.8 聚合 totalReleasedRaw 可能漏记，
-    // 实测 R1 钱包已转出 120M 但聚合仍为 0）；技术终止的 1.2 亿不释放也不销毁，仍留在 TV 钱包。
-    let teamReleasedEffective = 0n;
-    let teamBurnedEffective = 0n;
-    for (const [roundId] of rounds) {
-      const state = await getTeamRoundState(tv.raw, roundId);
-      if (state.released) teamReleasedEffective += state.amountRaw || BigInt(config.teamRoundRaw);
-      if (state.burned) teamBurnedEffective += state.amountRaw || BigInt(config.teamRoundRaw);
-    }
-    const tvRoundLines = [];
-    for (const [roundId] of [...rounds.entries()].sort((a, b) => a[0] - b[0])) {
-      const state = await getTeamRoundState(tv.raw, roundId);
-      tvRoundLines.push('R' + roundId + '(released=' + state.released + ',burned=' + state.burned + ',amount=' + state.amountRaw.toString() + ')');
-    }
-    console.log('TeamVault 逐轮 released/burned：' + tvRoundLines.join(' '));
-    const tvExpected =
-      TV_INITIAL_QUOTA + abortedTeamRaw - teamReleasedEffective - teamBurnedEffective;
-    if (teamReleasedEffective !== teamVault.totalReleasedRaw || teamBurnedEffective !== teamVault.totalBurnedRaw) {
-      notes.push('TeamVault 聚合 getter(totalReleased=' + teamVault.totalReleasedRaw.toString() + ', totalBurned=' + teamVault.totalBurnedRaw.toString() + ') 与逐轮状态合计(released=' + teamReleasedEffective.toString() + ', burned=' + teamBurnedEffective.toString() + ') 不一致；TV 预期按逐轮状态（现金流）计算');
-    }
-    console.log('');
-    console.log('RC 钱包应持有 = 7,000,000,000');
-    console.log('  + 质押入账(DepositAccepted) ' + depositTotal.toString());
-    console.log('  + round-0 退款账本 ' + round0RefundRaw.toString());
-    console.log('  + 技术终止不可用 ' + abortedRewardRaw.toString());
-    console.log('  − 奖励已发(RewardEarly+UnlockClaimed) ' + (rewardPaid + unlockPaid).toString());
-    console.log('  − 本金已发(PrincipalClaimed) ' + principalPaid.toString());
-    console.log('  − 奖励销毁 ' + rewardBurned.toString() + ' − 本金销毁 ' + principalBurned.toString());
-    console.log('  = ' + rcExpected.toString() + ' raw  vs 实际 ' + rcWalletBalance.toString() + ' raw  → Δ=' + (rcWalletBalance - rcExpected).toString());
-    console.log('TV 钱包应持有 = 初始注资 ' + TV_INITIAL_QUOTA.toString() + ' + 终止不可用 ' + abortedTeamRaw.toString() + ' − 团队已释放(逐轮) ' + teamReleasedEffective.toString() + ' − 团队销毁(逐轮) ' + teamBurnedEffective.toString() + ' = ' + tvExpected.toString() + ' raw  vs 实际 ' + tvWalletBalance.toString() + ' raw  → Δ=' + (tvWalletBalance - tvExpected).toString());
-    if (teamReleasedEvents !== teamVault.totalReleasedRaw) {
-      notes.push('TeamReleased 事件合计 ' + teamReleasedEvents.toString() + ' ≠ getter totalReleasedRaw ' + teamVault.totalReleasedRaw.toString() + '（v8.8 部分释放路径无 external event；以 getter 为准）');
-    }
-    const tolerance = args['tolerance-raw'] ? BigInt(String(args['tolerance-raw'])) : 0n;
-    const rcDelta = rcWalletBalance - rcExpected;
-    const tvDelta = tvWalletBalance - tvExpected;
-    // 进行中的 SETTLING 轮次：团队额度可能已从 TV 钱包转出、但 ack 尚未落账（TV 逐轮状态未置 released），
-    // 差额恰为 k × teamRoundRaw 时判为「在途」，写 NOTE 而非异常（快照时点语义）。
-    const settlingCount = [...rounds.values()].filter((view) => view.status === 6 || view.status === 7).length;
-    const tvInFlight = settlingCount > 0n ? BigInt(settlingCount) * BigInt(config.teamRoundRaw) : 0n;
-    const tvDeltaAbs = tvDelta < 0n ? -tvDelta : tvDelta;
-    if (rcDelta > tolerance || rcDelta < -tolerance) {
-      diff('v88.rcWalletExpected', rcExpected.toString(), rcWalletBalance.toString(), 'RC 应持有 vs get_wallet_data');
-    }
-    if (tvDelta > tolerance || tvDelta < -tolerance) {
-      if (tvInFlight > 0n && tvDeltaAbs > 0n && tvDeltaAbs % BigInt(config.teamRoundRaw) === 0n && tvDeltaAbs <= tvInFlight) {
-        notes.push('TV Δ=' + tvDelta.toString() + ' raw 恰为 ' + (tvDeltaAbs / BigInt(config.teamRoundRaw)).toString() + ' × teamRoundRaw，且有 ' + settlingCount + ' 个轮次处于 SETTLING（团队转账已出 TV 钱包、ack 未落账）→ 判为在途，不计异常');
-      } else {
-        diff('v88.tvWalletExpected', tvExpected.toString(), tvWalletBalance.toString(), 'TV 应持有 vs get_wallet_data');
-      }
-    }
-
-    // 6) TeamVault getter 锚点：事件合计 vs 合约累计
-    if (teamVault.totalBurnedRaw !== teamBurned) {
-      notes.push('TeamVault totalBurnedRaw(' + teamVault.totalBurnedRaw.toString() + ') ≠ 轮次 teamBurnConfirmed 合计(' + teamBurned.toString() + ')（v8.8 聚合口径差异，销毁金额以轮次 flag 为准）');
-    }
-
-    // 7) 总量守恒（技术终止轮不销毁；burned 只算真实三笔）
-    if (holdersSum !== jetton.totalSupplyRaw) diff('v88.holdersSum', jetton.totalSupplyRaw.toString(), holdersSum.toString());
-    const burnedTotal = rewardBurned + teamBurned + principalBurned;
-    if (jetton.totalSupplyRaw + burnedTotal !== 10000000000000000000n) {
-      diff('v88.supplyInvariant', '10000000000000000000', (jetton.totalSupplyRaw + burnedTotal).toString());
-    }
-    console.log('守恒：持币者合计 ' + holdersSum.toString() + ' = 链上供应 ' + jetton.totalSupplyRaw.toString() + '（Δ=' + (holdersSum - jetton.totalSupplyRaw).toString() + '）；当前供应 + 销毁 ' + burnedTotal.toString() + ' = 1e19（Δ=' + (jetton.totalSupplyRaw + burnedTotal - 10000000000000000000n).toString() + '）');
-    notes.push('v8.8 余额口径快照时间 ' + snapshotAt + '（currentRound=' + currentRound + (rounds.get(currentRound) && rounds.get(currentRound).status >= 2 && rounds.get(currentRound).status <= 7 ? '，R' + currentRound + ' 进行中' : '') + '）；技术终止 N=' + N_ABORTED + '，round-0 退款账本 ' + round0RefundRaw.toString() + ' raw 已计入 RC 预期，均不计异常');
-  }
-
-  if (!apiBase) {
-    console.log('\n（未提供 --api，跳过 Worker API 比对，仅链上自检）');
-  } else {
-    console.log('\n== Worker API 比对：' + apiBase + ' ==');
-    const apiJson = async (path) => {
-      const response = await fetch(apiBase + path, { signal: AbortSignal.timeout(20000) });
-      const json = await response.json();
-      if (!json || json.ok !== true) throw new Error(path + ' -> ' + JSON.stringify(json).slice(0, 200));
-      return json.data;
-    };
-    let apiConfig = null; let apiStats = null; let apiRounds = [];
-    try { apiConfig = await apiJson('/api/config'); } catch (error) { failures.push('GET /api/config 失败：' + error.message); }
-    try { apiStats = await apiJson('/api/stats'); } catch (error) { failures.push('GET /api/stats 失败：' + error.message); }
-    try { apiRounds = await apiJson('/api/rounds'); } catch (error) { failures.push('GET /api/rounds 失败：' + error.message); }
-
-    if (apiConfig) {
-      const pairs = [
-        ['p0UsdE8', config.p0UsdE8], ['priceMultiplier', config.priceMultiplier],
-        ['roundRewardRaw', config.roundRewardRaw], ['candleSeconds', config.candleSeconds],
-        ['candleCount', config.candleCount], ['minQualifiedCandles', config.minQualifiedCandles],
-        ['stakeDurationSeconds', config.stakeDurationSeconds], ['observationSeconds', config.observationSeconds],
-        ['riskDisclosureVersion', config.riskDisclosureVersion], ['previewSeconds', config.previewSeconds],
-      ];
-      for (const [field, chainValue] of pairs) {
-        const apiValue = apiConfig[field];
-        if (String(apiValue) !== String(chainValue)) diff('config.' + field, chainValue, apiValue);
-      }
-    }
-    if (apiStats) {
-      if (String(apiStats.supplyRaw) !== jetton.totalSupplyRaw.toString()) diff('stats.supplyRaw', jetton.totalSupplyRaw, apiStats.supplyRaw);
-      const latestRound = [...rounds.entries()].sort((a, b) => b[0] - a[0])[0];
-      if (latestRound) {
-        const candles = (chainCandles.get(latestRound[0]) || []).sort((a, b) => a.candleIndex - b.candleIndex);
-        const last = candles.length ? candles[candles.length - 1].twap.toString() : null;
-        if (last && String(apiStats.priceUsdE8) !== last) diff('stats.priceUsdE8', last, apiStats.priceUsdE8, '取最后一根已上链 K 线 TWAP');
-      }
-      if (apiStats.oracle && apiStats.oracle.paused === true && apiStats.oracle.online === true) diff('stats.oracle', 'paused&&online', 'paused=' + apiStats.oracle.paused + ' online=' + apiStats.oracle.online);
-    }
-    const apiRoundsById = new Map((apiRounds || []).map((row) => [row.roundId, row]));
-    for (const [roundId, view] of rounds) {
-      const api = apiRoundsById.get(roundId);
-      if (!api) { failures.push('API /api/rounds 缺少 R' + roundId); continue; }
-      const mapped = STATUS_TO_STATE[view.status];
-      if (mapped && api.state !== mapped) diff('R' + roundId + '.state', mapped, api.state, '链上 status=' + view.status);
-      if (String(api.targetPriceUsdE8) !== view.targetPriceUsdE8.toString()) diff('R' + roundId + '.targetPrice', view.targetPriceUsdE8, api.targetPriceUsdE8);
-      const ms = (seconds) => (seconds > 0 ? seconds * 1000 : null);
-      if ((api.stakeOpenAt ?? null) !== ms(view.stakeOpenAt)) diff('R' + roundId + '.stakeOpenAt', ms(view.stakeOpenAt), api.stakeOpenAt);
-      if ((api.stakeCloseAt ?? null) !== ms(view.stakeCloseAt)) diff('R' + roundId + '.stakeCloseAt', ms(view.stakeCloseAt), api.stakeCloseAt);
-      if ((api.observationStart ?? null) !== ms(view.observationStart)) diff('R' + roundId + '.observationStart', ms(view.observationStart), api.observationStart);
-      if ((api.observationEnd ?? null) !== ms(view.observationEnd)) diff('R' + roundId + '.observationEnd', ms(view.observationEnd), api.observationEnd);
-      if (Number(api.candlesSeen) !== view.candlesSeen) diff('R' + roundId + '.candlesSeen', view.candlesSeen, api.candlesSeen);
-      const threshold = Number(config.minQualifiedCandles);
-      const chainQualified = Math.min(view.qualifiedCandles, threshold);
-      const apiQualified = Math.min(Number(api.qualifiedCandles), threshold);
-      if (chainQualified !== apiQualified) {
-        diff('R' + roundId + '.qualifiedCandles(min' + threshold + ')', chainQualified, apiQualified, '链上封顶 ' + threshold + '，D1 真实值=' + api.qualifiedCandles);
-      }
-      if (String(api.totalAcceptedStakeRaw) !== view.totalAcceptedStakeRaw.toString()) diff('R' + roundId + '.totalStake', view.totalAcceptedStakeRaw, api.totalAcceptedStakeRaw);
-      if (view.candleHash !== '0x' + '0'.repeat(64) && api.candleHash && api.candleHash !== view.candleHash) diff('R' + roundId + '.candleHash', view.candleHash, api.candleHash);
-      try {
-        const detail = await apiJson('/api/rounds/' + roundId + '/candles');
-        const list = Array.isArray(detail) ? detail : (detail.candles || []);
-        if (list.length !== view.candlesSeen && view.candlesSeen > 0) diff('R' + roundId + '.candleRows', view.candlesSeen, list.length);
-        for (const candle of list) {
-          const expectedStart = view.observationStart * 1000 + candle.candleIndex * Number(config.candleSeconds) * 1000;
-          if (candle.periodStart !== expectedStart) { diff('R' + roundId + '.candle[' + candle.candleIndex + '].periodStart', expectedStart, candle.periodStart); break; }
-        }
-      } catch (error) { failures.push('GET /api/rounds/' + roundId + '/candles 失败：' + error.message); }
-    }
-  }
-
-  console.log('');
-  console.log('== 结果 ==');
-  console.log('getter 锚点：' + rounds.size + ' 轮；configHash=' + digest);
-  if (failures.length) {
-    console.log('FAILURES (' + failures.length + ')');
-    for (const item of failures) console.log('  ! ' + item);
-  }
-  if (notes.length) {
-    console.log('NOTES (' + notes.length + ')');
-    for (const item of notes) console.log('  · ' + item);
-  }
-  if (diffs.length) {
-    console.log('DIFFS (' + diffs.length + ')');
-    for (const item of diffs) console.log('  - ' + item.field + '  chain=' + item.chain + '  api=' + item.api + (item.note ? '  (' + item.note + ')' : ''));
-  } else {
-    console.log('DIFFS (0)  ✅ 链上与 API 完全一致');
-  }
-  const report = { at: new Date().toISOString(), network, rc: rc.raw, digest, currentRound, diffs, failures };
-  if (reportPath) writeFileSync(reportPath, JSON.stringify(report, null, 2));
-  process.exit(failures.length || diffs.length ? 1 : 0);
+  for (const note of notes) console.log('NOTE ' + note);
+  console.log('DIFFS ' + diffs.length);
+  for (const item of diffs) console.log('  - ' + item.field + ': chain=' + item.chain + ' api=' + item.api + (item.note ? '（' + item.note + '）' : ''));
+  if (reportPath) writeFileSync(reportPath, JSON.stringify({ network, rc: rc.raw, configHash: digest, diffs, notes }, null, 2));
+  process.exit(diffs.length ? 1 : 0);
 }
 
-main().catch((error) => {
-  console.error('RECONCILE ERROR: ' + (error instanceof Error ? error.stack || error.message : String(error)));
-  process.exit(1);
-});
+main().catch((error) => { console.error('RECONCILE ERROR: ' + (error && error.stack ? error.stack : error)); process.exit(1); });
