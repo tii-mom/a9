@@ -986,7 +986,9 @@ fun creditRefundLedger(mutate s: Storage, owner: address, amount: coins) {
     if (prev.isFound) {
         pos = prev.loadValue();
     }
-    pos.amountRaw = pos.amountRaw + (amount as uint128);
+    // A9-M4-01: never carry an already-claimed balance into the new ledger entry.
+    val carry: uint128 = pos.principalClaimed ? 0 as uint128 : pos.amountRaw;
+    pos.amountRaw = carry + (amount as uint128);
     pos.principalClaimed = false;
     inner.set(owner, pos);
     s.stakes.set(0, inner);

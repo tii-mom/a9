@@ -615,3 +615,68 @@ get fun `test F3 burn second-hop bounce clears dispatched and retry resends`() {
     expect(retry2).toHaveSuccessfulTx<RetryPendingActions>({ from: admin.address, to: rc.address });
     expect(retry2.findTransaction<AskToBurn>({ from: rc.address, to: wallet, success: true })).toBeNull();
 }
+
+
+// ===========================================================================
+// A9-M4-01/M4-02: refund ledger carry + claimable_all consistency
+// ===========================================================================
+
+get fun `test M4-01 claimed refund carry cannot be withdrawn twice`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    // first low-gas invalid stake -> ledger 1000
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 1000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(1000 as uint128);
+    // M4-02: claimable_all must NOT promise round-0 refunds (ClaimAll can't pay them)
+    expect(net.runGetMethod<Claimable>(r.rc.address, "get_claimable_all", [r.user]).principalRaw).toEqual(0 as uint128);
+    // claim it
+    expect(net.send(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.rc.address,
+        body: ClaimPrincipal { queryId: 0, roundId: 0 },
+    }))).toHaveSuccessfulTx<ClaimPrincipal>({ from: r.user, to: r.rc.address });
+    expect(rcUserStake(r.rc, 0, r.user).principalClaimed).toBeTrue();
+    // second low-gas invalid stake -> ledger must be 2000, not 1000 + 2000
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 2000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(2000 as uint128);
+    val before = net.runGetMethod<JettonWalletDataReply>(r.userWallet, "get_wallet_data").jettonBalance;
+    expect(net.send(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.rc.address,
+        body: ClaimPrincipal { queryId: 0, roundId: 0 },
+    }))).toHaveSuccessfulTx<ClaimPrincipal>({ from: r.user, to: r.rc.address });
+    val after = net.runGetMethod<JettonWalletDataReply>(r.userWallet, "get_wallet_data").jettonBalance;
+    expect(after).toEqual(before + (2000 as coins));
+}
+
+get fun `test M4-01 refund claim bounce preserves ledger amount and claimability`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 1000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    val counter = net.runGetMethod<uint64>(r.rc.address, "get_claim_counter");
+    val q: uint64 = ((CLAIM_KIND_PRINCIPAL as uint64) << 24) | counter;
+    // create the pending claim without delivering the transfer
+    testing.processSingleTraceStep(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.rc.address,
+        body: ClaimPrincipal { queryId: 0, roundId: 0 },
+    }));
+    expect(net.runGetMethod<bool>(r.rc.address, "has_pending_claim", [q])).toBeTrue();
+    // bounce the transfer first hop (AskToTransfer op + queryId)
+    val bounceBody = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x0f8a7ea5, 32)
+        .storeUint(q, 64)
+        .endCell();
+    testing.processSingleTraceStep(r.rcWallet, createMessage({
+        bounce: false, value: ton("0.1"), dest: r.rc.address, body: bounceBody,
+    }).bounced());
+    val pos = rcUserStake(r.rc, 0, r.user);
+    expect(pos.amountRaw).toEqual(1000 as uint128);
+    expect(pos.principalClaimed).toBeFalse();
+    // and it can be claimed again
+    expect(net.send(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.rc.address,
+        body: ClaimPrincipal { queryId: 0, roundId: 0 },
+    }))).toHaveSuccessfulTx<ClaimPrincipal>({ from: r.user, to: r.rc.address });
+}
