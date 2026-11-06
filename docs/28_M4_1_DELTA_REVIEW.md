@@ -98,3 +98,62 @@ cd contracts && acton build --clear-cache && acton check && acton test   # 期�
 ```
 
 diff：`git diff v8.7-audit-fixed v8.8-audit-fixed -- contracts/`
+---
+
+## 8. v8.8 链上回归证据（正常路径未被破坏 + 修复生效）
+
+> 实例：v8.8 干净部署，RC `kQDvMloffAiVnuZ3UxWXwB558RoXBy4oP_KiGSQjWysO0xPS`
+> 合约 hash：RC `0x4EE42C5C…3EF8`；JM/TV/OA 与 v8.7 相同；4 合约 `active`。
+> 时序：快测（preview 10 / stake 120 / candle 10 / count 24 / minQ 16 / obs 240）。
+> 以下全部由 Lead 用链上 getter 独立复核，非脚本输出。
+
+### 8.1 修复生效证据（退款账本）
+
+| 步骤 | 链上读数 |
+| --- | --- |
+| 攻击者初始 A9 | 800,000 |
+| 低 gas 无效质押 X = 100,000 | `get_user_stake(0).amountRaw = 100,000` |
+| `ClaimPrincipal(0)` | A9 → 800,000（+100,000） |
+| 再低 gas 无效质押 Y = 200,000 | **`amountRaw = 200,000`（修复前为 300,000）** |
+| `ClaimPrincipal(0)` | A9 → 800,000（+200,000） |
+| 最终 | A9 = 800,000，**净收益 0** |
+| `get_claimable_all.principalRaw` | 领取前后均为 0（M4-02 生效） |
+| RC 的 TON | 未下降（0.768 → 1.307，低 gas 留存 + claim 附值） |
+
+### 8.2 正常路径未被破坏（R1 成功轮）
+
+| 项 | 值 |
+| --- | --- |
+| status | `SUCCEEDED` |
+| candlesSeen / qualified | 24 / 16 |
+| totalAcceptedStake | 300,000 A9（3 个地址各 100,000） |
+| `stakeCloseAt − stakeOpenAt` | **120**（快测配置精确） |
+| `teamReleaseConfirmed` | **true** |
+| TV jetton wallet | 12 亿 → 10.8 亿（−1.2 亿） |
+| team 钱包 | 0 → 1.2 亿（+1.2 亿） |
+
+### 8.3 失败路径未被破坏（R2 失败轮）
+
+| 项 | 值 |
+| --- | --- |
+| status | `FAILED_PERMANENT` |
+| candlesSeen / qualified | 24 / 0 |
+| `rewardBurnConfirmed` | **true** |
+| `teamBurnConfirmed` | **true** |
+| `principalBurnConfirmed` | **true** |
+| RC jetton wallet | 70 亿 → 63.003 亿（−7 亿奖励销毁，本金部分回流调整） |
+| TV jetton wallet | 10.8 亿 → 9.6 亿（−1.2 亿团队销毁） |
+
+### 8.4 PREVIEW 时长（时序逻辑）
+
+```
+R2.settledAt    = 1793957929
+R3.stakeOpenAt  = 1793957939
+差值            = 10    ← 精确等于 previewSeconds(10)
+```
+
+**说明**：预告期是**下限**语义——`handleOpenRound` 断言 `now >= stakeOpenAt`（`PreviewNotFinished`）后，按 A9-F9 把 `stakeOpenAt` 重锚为实际开轮时间。因此：
+- **在 OpenRound 之前**读 `下一轮.stakeOpenAt − 上一轮.settledAt`，精确等于 `previewSeconds`（本节即为该口径）；
+- **已 OpenRound 之后**读只能保证 `>= previewSeconds`（差值 = 预告期 + 开轮延迟）。
+
+生产时序实例同理：11/9 结算后必须在 OpenRound 之前读取，才应精确等于 43200。
