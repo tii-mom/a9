@@ -454,14 +454,9 @@ fun handleOpenRound(sender: address, msg: OpenRound) {
         rd = ensureRoundExists(s, roundId);
         assert (rd.status == STATUS_PREVIEW) throw Errors.BadRoundStatus;
         assert (now >= rd.stakeOpenAt) throw Errors.PreviewNotFinished;
-        // Liveness fallback: if the permissioned opener missed the whole 36h
-        // window, re-anchor the window to "now" instead of leaving the round
-        // unopenable forever. stakeOpenAt is deterministic only when a keeper
-        // opens within [previewEnd, previewEnd + stakeDuration). Documented in
-        // contracts/README (ops must monitor the 3 countdowns).
-        if (now >= rd.stakeOpenAt + (t.stakeDurationSeconds as uint64)) {
-            rd.stakeOpenAt = now;
-        }
+        // A9-F9: always anchor the 36h staking window to the actual open time.
+        // This removes the "open 1s..35h59m late compresses the window" cliff.
+        rd.stakeOpenAt = now;
     }
 
     val tier: uint8 = s.successCount + 1;
