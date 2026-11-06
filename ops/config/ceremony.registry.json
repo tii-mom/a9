@@ -6,7 +6,7 @@
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-06T12:11:40.479Z",
+  "updatedAt": "2026-11-06T12:26:30.807Z",
   "contracts": {
     "jettonMaster": {
       "address": "kQD19lukcdzoEoI5DM0FjAKS7gfo9rKnkBPz2paiPX-U0mSb",
@@ -158,11 +158,17 @@
         "result": "PASS",
         "durationMs": 9792,
         "finishedAt": "2026-11-06T12:11:40.478Z"
+      },
+      "P0.5": {
+        "status": "PASS",
+        "result": "PASS",
+        "durationMs": 5400,
+        "finishedAt": "2026-11-06T12:26:30.807Z"
       }
     },
     "completed": [],
     "startedAt": "2026-11-06T12:07:50.766Z",
-    "finishedAt": "2026-11-06T12:11:40.479Z",
+    "finishedAt": "2026-11-06T12:26:30.807Z",
     "addresses": {
       "jettonMaster": "kQD19lukcdzoEoI5DM0FjAKS7gfo9rKnkBPz2paiPX-U0mSb",
       "jettonMasterTreasuryWallet": null,

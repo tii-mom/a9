@@ -24,8 +24,8 @@ const dryRun = has('dry-run');
 const execute = has('execute') && !dryRun;
 const resume = has('resume');
 const rehearsal = has('rehearsal');
-const requested = (arg('phase', 'P0,P1,P2,P3,P4,P5,P6')).split(',').map((x) => x.trim()).filter(Boolean);
-const PHASES = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+const requested = (arg('phase', 'P0,P0.5,P1,P2,P3,P4,P5,P6')).split(',').map((x) => x.trim()).filter(Boolean);
+const PHASES = ['P0', 'P0.5', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 for (const p of requested) if (!PHASES.includes(p)) { console.error('未知阶段：' + p); process.exit(2); }
 
 const registryPath = process.env.OPS_REGISTRY || arg('registry', 'ops/config/mainnet.registry.json');
@@ -109,6 +109,26 @@ async function P0() {
     return 'EXPECTED_IN_REHEARSAL';
   }
   throw new Error('preflight-mainnet FAIL（非演练预期项，硬停）：' + tail);
+}
+
+async function P05() {
+  if (dryRun) { console.log('[P0.5] dry-run: admin active + GRAM>=2 + A9==0'); return 'DRY_RUN'; }
+  const adminOwner = registry.wallets.adminOwner && registry.wallets.adminOwner.address;
+  must(adminOwner, 'P0.5：registry 缺少 wallets.adminOwner（先写 admin 地址）');
+  const info = await getAddressInformation(params, adminOwner);
+  must(info.state === 'active', 'P0.5：admin ' + adminOwner + ' 状态=' + info.state + '，不是 active；先 fund admin（部署前必须先激活）');
+  const balance = BigInt(info.balance || 0);
+  must(balance >= 2000000000n, 'P0.5：admin GRAM=' + (Number(balance) / 1e9).toFixed(3) + ' < 2.0；先 fund admin');
+  const master = registry.contracts.jettonMaster && registry.contracts.jettonMaster.address;
+  if (master) {
+    const w = await walletBalance(adminOwner);
+    const a9 = stackItemToBigInt((await runGetMethod(params, w.address, 'get_wallet_data')).stack[0]);
+    must(a9 === 0n, 'P0.5：admin A9=' + a9.toString() + ' != 0（不是全新 admin）');
+    console.log('[P0.5] PASS：admin active，GRAM=' + (Number(balance) / 1e9).toFixed(3) + '，A9=0');
+  } else {
+    console.log('[P0.5] PASS：admin active，GRAM=' + (Number(balance) / 1e9).toFixed(3) + '；master 未部署，A9 按全新实例为 0');
+  }
+  return 'PASS';
 }
 
 async function P1() {
@@ -304,7 +324,7 @@ async function P6() {
   return 'PASS';
 }
 
-const fns = { P0, P1, P2, P3, P4, P5, P6 };
+const fns = { P0, 'P0.5': P05, P1, P2, P3, P4, P5, P6 };
 
 state.startedAt = state.startedAt || new Date().toISOString();
 for (const id of requested) {
