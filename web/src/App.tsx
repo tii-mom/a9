@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import LandingPage from './features/landing/LandingPage';
+import RulesPage from './features/landing/RulesPage';
 import MePage from './features/app/MePage';
 import LeaderboardPage from './features/app/LeaderboardPage';
 import AdminPage from './features/app/AdminPage';
@@ -11,6 +12,7 @@ export default function App() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/rules" element={<RulesPage />} />
         <Route path="/me" element={<MePage />} />
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/admin" element={<AdminPage />} />

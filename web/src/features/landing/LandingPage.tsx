@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SiteHeader } from '../../components/SiteHeader';
 import { SiteFooter } from '../../components/SiteFooter';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLang } from '../../lib/lang';
 import { useCopy } from './landing.i18n';
 import './landing.css';
@@ -12,10 +12,6 @@ import { Hero } from './Hero';
 import { BattleBoard } from './BattleBoard';
 import { CommandPanel } from './CommandPanel';
 import { OrderFlow } from './OrderFlow';
-import { RoundLadder } from './RoundLadder';
-import { RulesSandbox } from './RulesSandbox';
-import { SupplyAllocation } from './SupplyAllocation';
-import { RiskDisclosure } from './RiskDisclosure';
 
 export default function LandingPage() {
   const copy = useCopy();
@@ -61,7 +57,6 @@ export default function LandingPage() {
       <SiteHeader tape={<Tape cfg={cfg} stats={stats} board={board} trades={trades} copy={copy} />} isLanding />
       <main id="main-content" tabIndex={-1}>
         <span id="top" />
-        <Hero copy={copy} cfg={cfg} board={board} onTab={setTab} />
         <div className={"wrap data-health" + (data.error || data.stale ? " degraded" : "")} role="status" aria-live="polite">
           <span>{data.loading && !data.error ? copy.common.loading : data.error ? (zh ? "部分数据刷新失败 · 显示上次可用数据" : "Some feeds failed · showing last available data") : data.stale ? (zh ? "数据已过期 · 等待刷新" : "Data is stale · awaiting refresh") : (zh ? "数据已更新" : "Data updated")}{data.updatedAt ? ` · ${new Date(data.updatedAt).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""} · {cfg?.dataSource === "demo" ? (zh ? "演示环境" : "Demo environment") : cfg?.network ?? "—"}</span>
           {data.error || data.stale ? <button className="btn sm" type="button" onClick={refreshAll}>{copy.common.retry}</button> : null}
@@ -96,10 +91,11 @@ export default function LandingPage() {
           />
         </div>
         <OrderFlow health={data.flowHealth} cfg={cfg} stats={stats} board={board} trades={trades} book={book} copy={copy} />
-        <RoundLadder cfg={cfg} rounds={rounds} copy={copy} />
-        <RulesSandbox cfg={cfg} board={board} copy={copy} />
-        <SupplyAllocation cfg={cfg} rounds={rounds} copy={copy} />
-        <RiskDisclosure cfg={cfg} copy={copy} />
+        <Hero copy={copy} cfg={cfg} board={board} onTab={setTab} />
+        <section className="wrap rules-teaser" aria-label={zh ? '规则与风险' : 'Rules and risk'}>
+          <p>{zh ? '轮次阶梯、筹码分配与完整风险披露在规则页。' : 'Round ladder, supply and the full risk disclosure are on the rules page.'}</p>
+          <Link className="btn" to="/rules">{zh ? '查看规则与风险' : 'Rules and risk'}</Link>
+        </section>
       </main>
       <SiteFooter />
       <div className="mcta">

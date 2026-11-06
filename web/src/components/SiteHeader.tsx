@@ -6,12 +6,9 @@ import { WalletButton } from '../features/wallet/WalletButton';
 import { useChainConfig } from '../features/chain/config';
 
 const NAV = [
-  { href: '#war', zh: '本轮', en: 'Round' },
-  { href: '#floor', zh: '成交流', en: 'Order flow' },
-  { href: '#ladder', zh: '轮次阶梯', en: 'Rounds' },
-  { href: '#rules', zh: '规则', en: 'Rules' },
-  { href: '#supply', zh: '筹码分配', en: 'Supply' },
-  { href: '#risk', zh: '风险', en: 'Risk' },
+  { to: '/#war', zh: '本轮', en: 'Round' },
+  { to: '/#floor', zh: '成交流', en: 'Order flow' },
+  { to: '/rules', zh: '规则与风险', en: 'Rules & risk' },
 ];
 
 /** Official A9 mark (source: brand kit 01_square/logo_square.svg). Brand colors are fixed, not theme tokens. */
@@ -72,7 +69,7 @@ export function SiteHeader({ tape }: { tape?: ReactNode; isLanding?: boolean }) 
           <Logo />A9
         </Link>
         <div className="links" id="site-navigation" data-open={menuOpen} onClick={() => setMenuOpen(false)}>
-          {NAV.map((n) => <Link key={n.href} to={'/' + n.href}>{zh ? n.zh : n.en}</Link>)}
+          {NAV.map((n) => <Link key={n.to} to={n.to}>{zh ? n.zh : n.en}</Link>)}
           <Link to="/me" aria-current={location.pathname === '/me' ? 'page' : undefined}>{zh ? '我的质押' : 'My stake'}</Link>
           <Link to="/leaderboard" aria-current={location.pathname === '/leaderboard' ? 'page' : undefined}>{zh ? '排行榜' : 'Leaderboard'}</Link>
         </div>

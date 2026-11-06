@@ -33,7 +33,7 @@ export function Hero({ copy, cfg, board, onTab }: Props) {
           <div className="cta">
             {terminal ? <Link className="btn fire" to="/me">{primary}</Link> :
               <a className="btn fire" href={open ? '#cmd' : '#war'} onClick={() => { if (open) onTab('stake'); }}>{primary}</a>}
-            <a className="btn" href="#rules">{copy.hero.ctaRules}</a>
+            <Link className="btn" to="/rules">{copy.hero.ctaRules}</Link>
             {BUY_ENTRY_OPEN ? <a className="btn ghost" href="#cmd" onClick={() => onTab('buy')}>{zh ? '买入参考' : 'Buy estimate'}</a> : null}
           </div>
           <ol className="hero-timeline" aria-label={zh ? '一轮如何进行' : 'How a round works'}>

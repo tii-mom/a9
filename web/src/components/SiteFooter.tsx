@@ -32,7 +32,7 @@ export function SiteFooter() {
           <div className="foot-links" style={{ marginTop: 16 }}>
             <Link to="/me">{zh ? '我的质押' : 'My stake'}</Link>
             <Link to="/leaderboard">{zh ? '排行榜' : 'Leaderboard'}</Link>
-            <Link to="/#risk">{zh ? '完整风险说明' : 'Risk disclosure'}</Link>
+            <Link to="/rules#risk">{zh ? '完整风险说明' : 'Risk disclosure'}</Link>
           </div>
         </div>
         <div>
