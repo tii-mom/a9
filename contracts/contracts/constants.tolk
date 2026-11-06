@@ -114,6 +114,7 @@ const CLAIM_KIND_PRINCIPAL: uint8 = 1;
 const CLAIM_KIND_REWARD: uint8 = 2;
 const CLAIM_KIND_CLAIM_ALL: uint8 = 3;
 const CLAIM_KIND_UNLOCK: uint8 = 4;
+const CLAIM_KIND_REFUND: uint8 = 5; // round 0 refund ledger
 
 // P0-2 burn queryId kind (layout: roundId<<16 | kind<<8 | nonce)
 const BURN_QUERY_REWARD: uint8 = 1; // same value as BURN_KIND_REWARD

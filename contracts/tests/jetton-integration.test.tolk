@@ -438,3 +438,107 @@ get fun `test CRIT-01 master rejects forged burn excess destination and zero amo
 }
 
 
+// ===========================================================================
+// A9-CRIT-02: refund ledger, zero TON subsidy, real-wallet refunds
+// ===========================================================================
+
+fun notificationBody(owner: address, amount: coins): cell {
+    return beginCell()
+        .storeUint(0x7362d09c, 32) // transfer_notification
+        .storeUint(0, 64)
+        .storeCoins(amount)
+        .storeAddress(owner)
+        .storeUint(0, 1) // forward_payload: inline empty
+        .endCell();
+}
+
+fun refundQueryId(counter: uint64): uint64 {
+    return ((CLAIM_KIND_REFUND as uint64) << 24) | counter;
+}
+
+fun createPendingRefund(r: RealSetup, owner: address): uint64 {
+    val counter = net.runGetMethod<uint64>(r.rc.address, "get_claim_counter");
+    testing.processSingleTraceStep(r.rcWallet, createMessage({
+        bounce: false,
+        value: ton("0.2"),
+        dest: r.rc.address,
+        body: notificationBody(owner, 1000),
+    }));
+    return refundQueryId(counter);
+}
+
+get fun `test CRIT-02 real wallet low-gas invalid stake records ledger without spending RC TON`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    val before = testing.getAccountBalance(r.rc.address);
+    // 0.02 TON forward -> RC receives a low-value notification (below 0.12 threshold)
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 1000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    val after = testing.getAccountBalance(r.rc.address);
+    expect(after >= before).toBeTrue();
+    val ledger = rcUserStake(r.rc, 0, r.user);
+    expect(ledger.amountRaw).toEqual(1000 as uint128);
+    expect(ledger.principalClaimed).toBeFalse();
+    // user pulls the refund ledger entry by paying gas
+    val userBefore = net.runGetMethod<JettonWalletDataReply>(r.userWallet, "get_wallet_data").jettonBalance;
+    expect(net.send(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.rc.address,
+        body: ClaimPrincipal { queryId: 0, roundId: 0 },
+    }))).toHaveSuccessfulTx<ClaimPrincipal>({ from: r.user, to: r.rc.address });
+    val userAfter = net.runGetMethod<JettonWalletDataReply>(r.userWallet, "get_wallet_data").jettonBalance;
+    expect(userAfter).toEqual(userBefore + (1000 as coins));
+    expect(rcUserStake(r.rc, 0, r.user).principalClaimed).toBeTrue();
+}
+
+get fun `test CRIT-02 real wallet sufficient-gas refund round-trips and does not drain RC`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    val before = testing.getAccountBalance(r.rc.address);
+    val userBefore = net.runGetMethod<JettonWalletDataReply>(r.userWallet, "get_wallet_data").jettonBalance;
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 1000, ton("0.15"), emptyPayload(), ton("0.5")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    // automatic refund: tokens go back, ledger is debited, RC keeps the inbound gas
+    val userAfter = net.runGetMethod<JettonWalletDataReply>(r.userWallet, "get_wallet_data").jettonBalance;
+    expect(userAfter).toEqual(userBefore);
+    expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(0 as uint128);
+    val after = testing.getAccountBalance(r.rc.address);
+    expect(after >= before).toBeTrue();
+}
+
+get fun `test CRIT-02 first-hop refund bounce lands in ledger`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    val q = createPendingRefund(r, r.user);
+    // simulated wallet bounce (first hop): RC only needs op+queryId
+    val bounceBody = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x0f8a7ea5, 32) // AskToTransfer
+        .storeUint(q, 64)
+        .endCell();
+    val bounced = createMessage({ bounce: false, value: ton("0.1"), dest: r.rc.address, body: bounceBody }).bounced();
+    net.send(r.rcWallet, bounced);
+    expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(1000 as uint128);
+}
+
+get fun `test CRIT-02 second-hop bounce via real JettonWallet lands in ledger`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    val q = createPendingRefund(r, r.user);
+    // bounced InternalTransferStep reaches the real RC Jetton Wallet, which restores
+    // the balance and notifies RC with TransferBounced(queryId).
+    val bounceBody = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x178d4519, 32) // InternalTransferStep
+        .storeUint(q, 64)
+        .storeCoins(1000)
+        .storeUint(0, 1) // transferInitiator null
+        .storeUint(0, 1) // sendExcessesTo null
+        .storeCoins(0)
+        .storeUint(0, 1)
+        .endCell();
+    val fakeRecipientWallet = testing.treasury("crit02-recipient-wallet").address;
+    net.send(fakeRecipientWallet, createMessage({
+        bounce: false, value: ton("0.2"), dest: r.rcWallet, body: bounceBody,
+    }).bounced());
+    expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(1000 as uint128);
+}

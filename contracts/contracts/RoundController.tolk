@@ -81,7 +81,7 @@ fun onInternalMessage(in: InMessage) {
         BurnAck => { handleBurnAck(in.senderAddress, msg); }
         TeamReleasedAck => { handleTeamReleasedAck(in.senderAddress, msg); }
         TeamBurnedAck => { handleTeamBurnedAck(in.senderAddress, msg); }
-        TransferNotification => { handleTransferNotification(in.senderAddress, msg); }
+        TransferNotification => { handleTransferNotification(in.senderAddress, msg, in.valueCoins); }
         ClaimRewardEarly => { handleClaimRewardEarly(in.senderAddress, msg); }
         RollReward => { handleRollReward(in.senderAddress, msg); }
         SetReferrer => { handleSetReferrer(in.senderAddress, msg); }
@@ -296,6 +296,8 @@ fun rollbackPendingClaim(queryId: uint64) {
         var lk = lockedStateOf(ex, owner);
         lk.lockedRaw = lk.lockedRaw > p.lockedDeltaRaw ? lk.lockedRaw - p.lockedDeltaRaw : 0;
         ex.locked.set(owner, lk);
+    } else if (p.kind == CLAIM_KIND_REFUND) {
+        // ledger was credited before forwarding; keep it (no stake flags to restore)
     } else if (p.kind == CLAIM_KIND_UNLOCK) {
         var i: uint8 = 1;
         while (i <= MAX_CLAIM_SCAN_ROUNDS) {
@@ -343,6 +345,9 @@ fun settlePendingClaim(queryId: uint64) {
         return;
     }
     val p = found.loadValue();
+    if (p.kind == CLAIM_KIND_REFUND) {
+        debitRefundLedger(mutate s, p.owner, p.amountRaw as coins);
+    }
     var lk = lockedStateOf(ex, p.owner);
     if (lk.pendingQueryId == queryId) {
         lk.pendingQueryId = 0;
@@ -779,7 +784,7 @@ fun handleAbortTechnical(_sender: address, _msg: AbortTechnical) {
     emitExternalEvent(TechnicalAborted { roundId: targetId, reason, at: now });
 }
 
-fun handleTransferNotification(sender: address, msg: TransferNotification) {
+fun handleTransferNotification(sender: address, msg: TransferNotification, valueCoins: coins) {
     var s = lazy Storage.load();
     val v = vaults(s);
     assert (sender == v.stakingJettonWallet) throw Errors.NotJettonWallet;
@@ -813,16 +818,16 @@ fun handleTransferNotification(sender: address, msg: TransferNotification) {
         acceptBurn = payload.loadUint(8) as uint8;
         parsed = op == OP_STAKE_DEPOSIT;
     }
-    if (!parsed) { refundStake(s, owner, amount, 0); return; }
-    if (version != 1) { refundStake(s, owner, amount, 0); return; }
-    if (acceptBurn != 1) { refundStake(s, owner, amount, 0); return; }
-    if (riskVersion != t.riskDisclosureVersion) { refundStake(s, owner, amount, 0); return; }
+    if (!parsed) { refundStake(mutate s, owner, amount, valueCoins); return; }
+    if (version != 1) { refundStake(mutate s, owner, amount, valueCoins); return; }
+    if (acceptBurn != 1) { refundStake(mutate s, owner, amount, valueCoins); return; }
+    if (riskVersion != t.riskDisclosureVersion) { refundStake(mutate s, owner, amount, valueCoins); return; }
     if (rd.status != STATUS_STAKING_OPEN || payloadRoundId != roundId ||
         now < rd.stakeOpenAt || now >= rd.stakeCloseAt) {
-        refundStake(s, owner, amount, 0);
+        refundStake(mutate s, owner, amount, valueCoins);
         return;
     }
-    if ((amount as uint128) < e.minStakeRaw) { refundStake(s, owner, amount, 0); return; }
+    if ((amount as uint128) < e.minStakeRaw) { refundStake(mutate s, owner, amount, valueCoins); return; }
 
     var inner: map<address, StakePosition> = [];
     val innerRes = s.stakes.get(roundId);
@@ -834,10 +839,10 @@ fun handleTransferNotification(sender: address, msg: TransferNotification) {
     if (prev.isFound) {
         prevPos = prev.loadValue();
     }
-    if (nonce <= prevPos.lastDepositNonce) { refundStake(s, owner, amount, 0); return; }
+    if (nonce <= prevPos.lastDepositNonce) { refundStake(mutate s, owner, amount, valueCoins); return; }
 
     val newTotal: uint128 = rd.totalAcceptedStakeRaw + (amount as uint128);
-    if (newTotal > e.maxTotalStakeRaw) { refundStake(s, owner, amount, 0); return; }
+    if (newTotal > e.maxTotalStakeRaw) { refundStake(mutate s, owner, amount, valueCoins); return; }
     val newOwnerAmount: uint128 = prevPos.amountRaw + (amount as uint128);
     // Per-address cap. NOTE: docs/00 says "single address <= 10% of this round's
     // total stake", which is unsatisfiable for the first depositor (he is 100%).
@@ -846,7 +851,7 @@ fun handleTransferNotification(sender: address, msg: TransferNotification) {
     // (= 20,000,000 A9 with the V6.1 parameters). Documented in contracts/README.
     val perAddressCap: uint128 = e.maxTotalStakeRaw *
         (e.maxStakePerAddressBps as uint128) / 10000;
-    if (newOwnerAmount > perAddressCap) { refundStake(s, owner, amount, 0); return; }
+    if (newOwnerAmount > perAddressCap) { refundStake(mutate s, owner, amount, valueCoins); return; }
 
     // V8 weight accounting: O(1) increments only (no user iteration).
     var exState = s.extras.load();
@@ -911,14 +916,90 @@ fun handleTransferNotification(sender: address, msg: TransferNotification) {
     });
 }
 
-fun refundStake(s: Storage, owner: address, amount: coins, queryId: uint64) {
-    sendJettonTransfer(
-        vaults(s).stakingJettonWallet,
-        queryId,
-        amount,
+// A9-CRIT-02: round 0 is a REFUND LEDGER, not a real round. It is only touched by
+// refundStake/rollback REFUND and ClaimPrincipal(0).
+fun creditRefundLedger(mutate s: Storage, owner: address, amount: coins) {
+    var inner: map<address, StakePosition> = [];
+    val innerRes = s.stakes.get(0);
+    if (innerRes.isFound) {
+        inner = innerRes.loadValue();
+    }
+    var pos = StakePosition {
+        amountRaw: 0,
+        lastDepositNonce: 0,
+        principalClaimed: false,
+        rewardClaimed: true,
+        weight: 0,
+        rewardState: REWARD_STATE_PENDING,
+    };
+    val prev = inner.get(owner);
+    if (prev.isFound) {
+        pos = prev.loadValue();
+    }
+    pos.amountRaw = pos.amountRaw + (amount as uint128);
+    pos.principalClaimed = false;
+    inner.set(owner, pos);
+    s.stakes.set(0, inner);
+}
+
+fun debitRefundLedger(mutate s: Storage, owner: address, amount: coins) {
+    val innerRes = s.stakes.get(0);
+    if (!innerRes.isFound) {
+        return;
+    }
+    var inner = innerRes.loadValue();
+    val prev = inner.get(owner);
+    if (!prev.isFound) {
+        return;
+    }
+    var pos = prev.loadValue();
+    pos.amountRaw = pos.amountRaw > (amount as uint128) ? pos.amountRaw - (amount as uint128) : 0;
+    inner.set(owner, pos);
+    s.stakes.set(0, inner);
+}
+
+fun refundStake(mutate s: Storage, owner: address, amount: coins, valueCoins: coins) {
+    // Tokens are already in the RC Jetton Wallet; never spend RC TON for a refund.
+    // Credit the ledger first; a successful refund transfer debits it again in
+    // settlePendingClaim (REFUND branch), a bounce leaves it claimable.
+    creditRefundLedger(mutate s, owner, amount);
+    var ex = s.extras.load();
+    val hasPending = lockedStateOf(ex, owner).pendingQueryId != 0;
+    if (valueCoins < ton("0.12") || hasPending) {
+        // Not enough inbound gas (or owner already has a pending action): keep the
+        // amount claimable via ClaimPrincipal(0); no outbound TON is spent.
+        s.extras = ex.toCell();
+        s.save();
+        return;
+    }
+    val q = claimQueryId(0, CLAIM_KIND_REFUND, ex.claimCounter);
+    ex.claimCounter = ex.claimCounter + 1;
+    ex.pending.set(q, PendingClaim {
         owner,
-        owner,
-    );
+        kind: CLAIM_KIND_REFUND,
+        roundId: 0,
+        principalMask: 0,
+        rewardMask: 0,
+        amountRaw: amount as uint128,
+        lockedDeltaRaw: 0,
+        lockedBeforeRaw: 0,
+    });
+    var lk = lockedStateOf(ex, owner);
+    lk.pendingQueryId = q;
+    ex.locked.set(owner, lk);
+    s.extras = ex.toCell();
+    s.save();
+
+    // 0.1 TON is covered by the >=0.12 TON inbound notification; excess goes back
+    // to RC (not the user), closing the CRIT-02 TON drain.
+    val body = buildJettonTransferBody(q, amount, owner, contract.getAddress());
+    val out = createMessage({
+        bounce: BounceMode.Only256BitsOfBody,
+        value: ton("0.1"),
+        dest: vaults(s).stakingJettonWallet,
+        body,
+    });
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
 // ===========================================================================
@@ -944,8 +1025,62 @@ fun handleSetJettonWalletCode(sender: address, msg: SetJettonWalletCode) {
     s.save();
 }
 
+// Round 0 = refund ledger. Users pay gas to pull refunds that were credited
+// because an automatic refund had insufficient inbound TON or bounced.
+fun handleClaimRefund(sender: address) {
+    var s = lazy Storage.load();
+    val innerRes = s.stakes.get(0);
+    if (!innerRes.isFound) {
+        throw Errors.NothingToClaim;
+    }
+    var inner = innerRes.loadValue();
+    val found = inner.get(sender);
+    if (!found.isFound) {
+        throw Errors.NothingToClaim;
+    }
+    var pos = found.loadValue();
+    if (pos.principalClaimed || pos.amountRaw == 0) {
+        throw Errors.NothingToClaim;
+    }
+    var ex = s.extras.load();
+    requireNoPendingClaim(ex, sender);
+    val amount: uint128 = pos.amountRaw;
+    val q = claimQueryId(0, CLAIM_KIND_PRINCIPAL, ex.claimCounter);
+    ex.claimCounter = ex.claimCounter + 1;
+    ex.pending.set(q, PendingClaim {
+        owner: sender,
+        kind: CLAIM_KIND_PRINCIPAL,
+        roundId: 0,
+        principalMask: 0,
+        rewardMask: 0,
+        amountRaw: amount,
+        lockedDeltaRaw: 0,
+        lockedBeforeRaw: 0,
+    });
+    pos.principalClaimed = true;
+    inner.set(sender, pos);
+    s.stakes.set(0, inner);
+    var lk = lockedStateOf(ex, sender);
+    lk.pendingQueryId = q;
+    ex.locked.set(sender, lk);
+    s.extras = ex.toCell();
+    s.save();
+
+    sendTrackedJettonTransfer(
+        vaults(s).stakingJettonWallet,
+        q,
+        amount as coins,
+        sender,
+        contract.getAddress(),
+    );
+}
+
 fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal) {
     var s = lazy Storage.load();
+    if (msg.roundId == 0) {
+        handleClaimRefund(sender);
+        return;
+    }
     val rd = ensureRoundExists(s, msg.roundId);
     assert (
         rd.status == STATUS_SUCCEEDED || rd.status == STATUS_TECHNICAL_ABORTED
@@ -1698,6 +1833,17 @@ get fun get_claimable_all(owner: address): Claimable {
     var principal: uint128 = 0;
     var reward: uint128 = 0;
     var mask: uint16 = 0;
+    // A9-CRIT-02: round 0 refund ledger is not a real round; include it explicitly.
+    val refundInnerRes = s.stakes.get(0);
+    if (refundInnerRes.isFound) {
+        val refundPosRes = refundInnerRes.loadValue().get(owner);
+        if (refundPosRes.isFound) {
+            val refundPos = refundPosRes.loadValue();
+            if (!refundPos.principalClaimed && refundPos.amountRaw > 0) {
+                principal += refundPos.amountRaw;
+            }
+        }
+    }
     var roundId: uint8 = 1;
     while (roundId <= MAX_CLAIM_SCAN_ROUNDS) {
         val rr = s.rounds.get(roundId);
