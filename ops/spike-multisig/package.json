@@ -1,0 +1,14 @@
+{
+  "name": "a9-multisig-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Spike-only deps for TON Multisig v2 deploy/order tools (ops/scripts/91_*, 92_*). Additive; removing this directory has no impact on existing ops flow.",
+  "dependencies": {
+    "@ton/core": "^0.62.0",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^15.0.0",
+    "@ton-community/func-js": "^0.9.0",
+    "@ton-community/func-js-bin": "^0.4.5"
+  }
+}

@@ -1,0 +1,241 @@
+# 07 — 主网部署全流程手册（MAINNET-RUNBOOK）
+
+> 状态：DRAFT，待 lead review。目标：从「测试网 v8.6 验收通过」到「主网可交易」。
+> 主网三件不可逆的事：**合约部署、admin 写入（InitController / SetJettonWallet*）、资金注入**。每一步必须先做前置检查、先小额验证、失败立即停。
+
+## 0. TL;DR
+
+1. 冻结 v8.6 tag，核对 5 个 build code hash（见 §3.1）。
+2. 新建主网 D1 库，只 apply 0001–0009 迁移，**绝不执行 seed.sql**。
+3. 生成全新主网密钥（**严禁复用测试网密钥**），完成离线备份；admin 采用多签或书面接受单钥风险（TODO：lead 决定，见 §10）。
+4. 全新部署 JettonMaster → RC/TV/OracleAdapter → wiring → 注资 70 亿/12 亿/8 亿/5 亿/5 亿。
+5. verify_deployment **STRICT 全 PASS** 后才允许开 R1（默认即是 STRICT；--lenient 输出不得作为上线依据）。
+6. 部署 Worker（chain 模式、真实地址、关闭 demo 写接口）→ health/version/rounds 验证。
+7. 小额真实资金全链路冒烟 → 公告 → 开 R1 → 按计划开放内盘/流动性。
+
+## 1. 前置门禁（全部满足才允许开始）
+
+| # | 门禁 | 检查命令/证据 | 负责人 |
+| --- | --- | --- | --- |
+| 1 | 合约 tag v8.6 已冻结 | git rev-parse + tag 指向 commit 由 lead 书面确认 | lead/contract-dev |
+| 2 | 5 个 code hash 与冻结基线一致 | §3.1 的 build 产物 hash 截图/日志 | contract-dev |
+| 3 | 测试网权威 10 轮验收通过 | ops/records/fasttest-v86-rounds.md，含 C-1、R10 解锁、总量守恒 | testnet-ops |
+| 4 | 索引器对账 diff=0 | node ops/scripts/reconcile.mjs --chain，supply.chain_drift=0 | testnet-ops |
+| 5 | verify_deployment STRICT 全 PASS（测试网实例） | node ops/scripts/verify_deployment.mjs --online，严格模式 ON、requiredFail=0 | testnet-ops |
+| 6 | 主网 admin 方案已定 | 多签地址已生成，或书面接受单钥风险 | lead + 项目方 |
+| 7 | TONCENTER_API_KEY 已申请 | 主网 key 写入 secret，1 RPS 限制解除 | lead |
+| 8 | 演示数据不会进主网 D1 | CI guard 已生效（migrations 只允许 NNNN_*.sql） | app-dev |
+| 9 | 域名/证书可用 | a9.lat / www.a9.lat DNS 指向 Cloudflare，证书 Active | 项目方 |
+
+**任一不满足 → 停止，不要用 TODO 或口头确认替代。**
+
+### 1.1 已知血泪教训（写进 checklist，不是故事）
+- **seed.sql 曾被当成迁移**：任何非迁移 SQL 混入 worker/migrations 都会被 wrangler 当迁移执行。主网 apply 前必须执行 §2.2 的守卫命令。
+- **JettonWallet 代码变更会改所有 jetton wallet 地址**：v8.6 的 JettonWallet hash 与 v8.5 不同，必须**全新部署** JettonMaster/RC/TV/OA，禁止 resume 旧实例。
+- **用户钱包 TON 会耗尽**：测试中 runner 因 C 钱包 TON 0.251 < stake value 0.35 失败退出。主网必须提前估算每用户 gas 并预留。
+- **STRICT 默认**：--lenient 只用于排查；主网开轮依据必须是 STRICT 全 PASS。
+
+## 2. 主网 D1 新库
+
+### 2.1 创建
+~~~bash
+cd worker
+wrangler d1 create a9-mainnet
+# 把返回的 database_id 写入 wrangler.toml 的 [[d1_databases]]，binding 保持 DB
+~~~
+期望：输出 database_id；wrangler.toml 中 database_name=a9-mainnet，database_id 为新值。
+失败：名称冲突/权限不足 → 换名或检查 Cloudflare 账号；**不要复用测试库**。
+
+### 2.2 migrations 守卫 + apply
+~~~bash
+cd worker
+ls migrations | sort
+# 必须恰好是 0001_init.sql ... 0009_chain_indexer.sql，且无其他 .sql
+for f in migrations/*.sql; do case "$(basename "$f")" in [0-9][0-9][0-9][0-9]_*.sql) ;; *) echo "BAD: $f"; exit 1;; esac; done
+wrangler d1 migrations apply a9-mainnet --remote
+~~~
+期望：apply 只列 0001–0009；无 seed 内容；无报错。
+失败：出现非编号文件 → 立即停止，删除/移出 migrations 后重跑；**绝不执行 seed.sql**。
+
+### 2.3 验证空库
+~~~bash
+wrangler d1 execute a9-mainnet --remote --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS rounds FROM rounds;"
+wrangler d1 execute a9-mainnet --remote --command "SELECT COUNT(*) AS trades FROM trades;"
+~~~
+期望：表存在；rounds=0、trades=0、claims/stakes/burn_ledger 全 0。
+失败：任何业务表非空 → 立即停止，禁止上线（可能是 seed 被灌入）。
+TODO（app-dev）：CI 已加 migrations guard，主网部署前再贴一次 CI 运行链接作为证据。
+
+## 3. 主网密钥与 admin 方案
+
+### 3.1 冻结基线（写入部署记录）
+~~~text
+JettonMaster    0x876F21A1A516FB0449A1D0AF5DBECEB8639373F947949C5AE8E1E9DBB769D64F
+JettonWallet    0x394E4E8D40B5D3D97D12AA950B99EA9A53387DDAC331BAAAC8923F0E6E6849A4
+TeamVault       0xCF3E6C7C9DC045F392F35E79E20AA6EDAAF9064D538CA4E78B6D1FE1443158B4
+RoundController 0xC5AD291469C3BEADBDC26A6F1733004D433F12B15B025D88B983DF098BA11500
+OracleAdapter   0x539F3597357943584A596DA2B40F901B4984D8C8307E63CE81A67F131EAB8CBA
+~~~
+核对命令（contracts 目录）：
+~~~bash
+node -e "for (const n of ['JettonMaster','JettonWallet','TeamVault','RoundController','OracleAdapter']) { const j=require('./build/'+n+'.json'); console.log(n,j.hash); }"
+~~~
+期望：逐字匹配。失败：tag 或 build 产物不对 → 停止，不要部署。
+
+### 3.2 生成主网钱包（严格隔离）
+- 使用新助记词/new hardware wallet，只在一台离线机器生成；**禁止复用测试网任何 mnemonic/私钥**。
+- 角色：deployer / admin（或多签）/ treasury / team / marketing / liquidity / internal；至少 deployer、admin、treasury 三者分离。
+- 备份：助记词离线纸质/金属，分地点保存；密码管理器只存地址与标签，不存助记词。
+- 记录：写入 ops/records/mainnet-addresses.md（**不提交私钥**），包含角色、地址、生成日期、备份位置编号。
+
+### 3.3 admin 方案（TODO：lead 决定）
+- 方案 A：TON Multisig v2（2-of-3/3-of-5）作为 RC/TV/OA admin；wiring 与资金注入打包成多签交易。
+- 方案 B：单一冷钱包 admin + 书面接受单钥风险；必须额外做 §8 的止血预案。
+- 详见 runbooks/06_mainnet_admin.md；未拍板前不得部署主网合约（admin 写入不可逆）。
+
+## 4. 合约部署（全新，禁止 resume）
+
+### 4.1 准备 mainnet 参数
+- 复制 ops/config/testnet.params.json → ops/config/mainnet.params.json（TODO：lead 确认主网值：P0、时间参数、奖励/团队额度、限额）。
+- 地址/网络字段改为 mainnet；registry 用新文件 ops/config/mainnet.registry.json，**不要覆盖测试网**。
+- preflight：node ops/scripts/00_preflight.mjs（0 阻断）。
+
+### 4.2 TON 预算（主网按实际 gas 重算）
+- 部署：JettonMaster / OA / TV / RC 的 value 用 A9_DEPLOY_TON_* 显式指定（不要用测试网压缩值，TODO：估算后 lead 审批）。
+- admin 钱包需覆盖：mint 0.55 + wiring 5×0.2 + 注资 5 笔 TON 费；RC/TV 需预留跨合约消息 gas。
+- **用户钱包 TON**：主网用户至少预留 0.5 TON 用于 stake/claim；产品侧在 UI 明确提示。
+- 失败：余额不足 → 停止，补足后重跑；不要降低合约 value 到不安全水平。
+
+### 4.3 部署命令
+~~~bash
+export OPS_NETWORK=mainnet
+export A9_DEPLOY_TON_JETTON_MASTER=<审批值>
+export A9_DEPLOY_TON_ORACLE_ADAPTER=<审批值>
+export A9_DEPLOY_TON_TEAM_VAULT=<审批值>
+export A9_DEPLOY_TON_ROUND_CONTROLLER=<审批值>
+OPS_EXECUTE=1 OPS_CONFIRM=YES node ops/scripts/15_deploy_contracts.mjs --execute
+~~~
+说明：15 会调用 contracts/scripts/deploy-emulation.tolk（mainnet）。**禁止 resume 旧实例**；v8.6 JettonWallet 代码变 → master/wallet 地址全变。
+期望：脚本打印 6 个地址；15 的链上硬门禁逐个 active + code hash 匹配才登记。
+失败：任一地址未激活/code hash 不匹配 → 15 会 FAIL 且不登记；停止，检查部署 TON/参数，不要手工填地址。
+
+### 4.4 手工核对（不看 exit 0）
+~~~bash
+cd contracts
+acton rpc info <addr> --net mainnet | grep -E 'Status|Code Hash|Last Tx Hash'
+~~~
+逐个核对 4 个合约 hash（§3.1）与 RC.get_jetton_wallet_code_hash = 0x394E…。
+失败：hash 不符 → 停止，不能开轮。
+
+### 4.5 wiring（多签时打包）
+- 全新部署脚本已包含 SetJettonWallet / SetJettonWalletCode / SetTeamWalletJettonWallet / InitController。
+- 若 admin 是多签：把上述消息按顺序打包成一个多签订单（顺序不可乱：SetJettonWallet* → InitController），附完整地址与金额，双人核对后再签。
+- 核对：RC.oracle=OA；RC.stakingJettonWallet=RC wallet；RC.teamVault=TV；TV.controller=RC；TV.jettonWallet=TV wallet；TV.teamWalletJettonWallet=team canonical wallet。
+- 失败：任一 wiring 未完成 → 停止；InitController 不可逆，**绝不重复发**。
+
+### 4.6 注资（不可逆）
+~~~bash
+OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<admin> node ops/scripts/50_fund_vaults.mjs --execute --all --probe
+~~~
+金额：RC 70 亿 A9、TV 12 亿、内盘 8 亿、流动 5 亿、营销 5 亿（合计 100 亿）。
+- 每笔先 1 A9 probe，链上确认目标钱包 +1 A9 后才发剩余；
+- 每笔后 get_wallet_data 核对增量；admin A9 归零。
+失败：任何一笔金额/地址不符 → 立即停；已错投不可逆（见 §8）。
+
+## 5. verify_deployment（严格）
+
+~~~bash
+node ops/scripts/verify_deployment.mjs --online --save
+~~~
+期望：严格模式 ON；requiredFail=0；无 FAIL；所有 gate.WARN 已人工确认。
+- 必看：5 个 code hash、RC jettonWalletCode、TV teamWalletJettonWallet、funding 5 项、registry digest、账号 active。
+- **--lenient 只能排查，不得作为开轮/上线依据**。
+失败：任何必检项 FAIL → 停止；修复后重跑。
+
+## 6. Worker 部署
+
+### 6.1 D1 与 secrets
+~~~bash
+cd worker
+wrangler secret put ADMIN_TOKEN            # 强随机 ≥32 bytes，只存密码管理器
+wrangler secret put TONCENTER_API_KEY      # 主网 key
+# 可选增加：TONCENTER_V2_URL/TONCENTER_V3_URL（默认公共端点）
+~~~
+环境变量（wrangler.toml [vars]）必须设置：
+- DATA_SOURCE=chain
+- CHAIN_NETWORK=mainnet
+- JETTON_MASTER_ADDRESS / ROUND_CONTROLLER_ADDRESS / TEAM_VAULT_ADDRESS（主网地址）
+- ORACLE_CONFIG_VERSION / ORACLE_CONFIG_HASH（与链上一致）
+- DEMO_ALLOW_UNSIGNED_WRITES=false
+- ALLOWED_ORIGINS=https://a9.lat,https://www.a9.lat
+- TON_PROOF_DOMAINS=a9.lat,www.a9.lat（去掉 localhost）
+- RATE_LIMIT_* 生产值（TODO app-dev 给建议）
+- VERSION/GIT_SHA/DEPLOYED_AT（部署时覆盖）
+
+### 6.2 部署
+~~~bash
+pnpm -C web build
+cd worker
+wrangler deploy --var GIT_SHA:<sha> --var DEPLOYED_AT:<iso>
+~~~
+期望：Worker 版本号输出；自定义域名 a9.lat / www 生效。
+失败：D1 id/绑定错误、assets 缺失、证书未 Active → 停止，不要回滚到 demo。
+
+### 6.3 验证
+~~~bash
+curl -s https://a9.lat/api/health
+curl -s https://a9.lat/api/version
+curl -s https://a9.lat/api/rounds | head
+~~~
+期望：health ok；version 与部署 sha 一致；rounds 返回链上真数据（roundId/status/target 与 RC getter 一致），不是 demo 数据。
+失败：若看到 demo 数据/假余额 → 立即停止，检查 DATA_SOURCE 与地址，禁止公告。
+
+## 7. 冒烟（必须用真实小额资金）
+
+1. 准备一个新的真实钱包（非 admin），充值少量 TON + A9。
+2. 质押 ≥ minStake（主网 10,000 A9）→ 等/触发关窗 → keeper 提交 24 根 K 线 → 结算。
+3. 领取：ClaimRewardEarly / ClaimPrincipal / ClaimAll；核对 pendingQueryId 归零、余额变化与 getter 一致。
+4. R10 后 ClaimUnlocked 连续两次（第二次 claimedRaw 增加）。
+5. e2e 指向主网 URL：node qa/e2e.mjs --base https://a9.lat（TODO app-dev 确认命令）。
+失败：任一失败 → 停止并回滚 Worker；合约问题不可回滚，需评估应急公告。
+
+## 8. 回滚与应急
+
+### 8.1 可回滚
+- Worker：wrangler rollback 到上一版本；D1：升级前 wrangler d1 export 备份，必要时恢复。
+- 域名/DNS/证书可调整。
+### 8.2 不可逆
+- 合约部署地址、admin 写入（InitController / SetJettonWallet*）、A9 注资/销毁。
+### 8.3 止血
+- Oracle 异常/价格异常：admin PauseOracle（0x5254000A）→ 公告 → 排查 → ResumeOracle；必要时 AbortTechnical。
+- Worker 被攻击/异常：rollback + 临时关闭写接口（维护页/401）；保留日志。
+- 资金错投/异常：立即停止所有签名操作，按 runbooks/03 升级；**不要尝试二次转账“补救”**。
+- 公告模板：见 runbooks/05_announcements.md；客服口径：只陈述已确认事实、不承诺赔付/时间表（TODO lead 确认）。
+
+## 9. 上线顺序
+
+1. 合约 + wiring + 注资 + verify STRICT 全 PASS。
+2. Worker chain 模式部署 + health/version/rounds 验证。
+3. 小额真实资金全链路冒烟通过。
+4. 公告（H1 必须是「押多少你定，赌 72 小时内至少翻倍。」），开 R1（admin OpenRound，twap 来源 TODO）。
+5. R1 稳定运行 ≥ 一个完整观察窗后，再开放内盘/流动性（TODO 项目方决定时间）。
+6. 首日值班：monitor_check + reconcile 每 10 分钟；P0 立即停轮。
+
+## 10. TODO / 待拍板（不得自行编答案）
+
+| # | 事项 | 决策人 | 阻塞级别 |
+| --- | --- | --- | --- |
+| 1 | admin 方案（多签 A / 单钥 B / 混合 C） | lead + 项目方 | 阻塞合约部署 |
+| 2 | 主网参数（P0、timing、奖励/团队额度、限额） | lead | 阻塞 preflight |
+| 3 | 主网 TON 预算（部署、wiring、RC/TV gas、用户 gas 补贴） | lead | 阻塞部署 |
+| 4 | TONCENTER_API_KEY 申请/付费 RPC | 项目方 | 阻塞 Worker/keeper |
+| 5 | 域名/证书与公告审批 | 项目方 | 阻塞上线 |
+| 6 | 内盘/流动性开放时间与价格 | 项目方 | 非阻塞合约 |
+| 7 | 应急公告/客服口径法律审阅 | 项目方 | 阻塞公告 |
+
+## 11. 签字
+
+- 部署负责人：__________ 日期：__________
+- 复核人（双人）：__________ 日期：__________
+- 已知不可逆操作清单已阅读：deployer/admin/treasury 三方各签一次。

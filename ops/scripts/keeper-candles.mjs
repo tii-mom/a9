@@ -91,10 +91,20 @@ async function runCandle(roundId, index, periodStart, periodEnd, twap) {
   const script = resolvePath('ops/scripts/tolk/fast_candle.tolk');
   const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' A9_PERIOD_START=' + periodStart + ' A9_PERIOD_END=' + periodEnd + ' A9_TWAP_E8=' + twap + ' acton script --manifest-path Acton.toml --net testnet ' + script + ' ' + roundId + ' ' + index;
   if (!execute) { log({ action: 'candle', dryRun: true, command: base }); return; }
-  const { ok, result } = await execWithRetry(base, 'candle r' + roundId + ' #' + index, process.env);
+  // Do not throw on broadcast failure: wallet-level rejections (seqno race /
+  // external not accepted) are retryable infra errors, not contract errors.
+  let ok = false;
+  let result = { status: 1, stdout: '', stderr: '' };
+  try {
+    const r = await execWithRetry(base, 'candle r' + roundId + ' #' + index, process.env);
+    ok = r.ok;
+    result = r.result;
+  } catch (error) {
+    result = { status: 1, stdout: '', stderr: String((error && error.message) || error) };
+  }
   const tx = String(result.stdout || '').split(String.fromCharCode(10)).filter((l) => l.includes('tx[')).join(' | ');
   log({ action: 'candle r' + roundId + ' #' + index + ' twap=' + twap, ok, exit: result.status, tx, stderr: ok ? undefined : String(result.stderr || result.stdout).slice(0, 400) });
-  if (!ok) throw new Error('candle #' + index + ' 失败: ' + String(result.stderr || result.stdout).slice(0, 500));
+  return ok;
 }
 
 function modeFor(roundId) {
@@ -126,14 +136,16 @@ async function submitCandles(roundId) {
     if (rdNow.status === 6 || rdNow.status === 7 || TERMINAL.has(rdNow.status)) break;
     const twap = candleTwap(modeChar, rdNow.target);
     let landed = false;
-    const waits = [2000, 4000, 8000, 8000, 8000];
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await runCandle(roundId, index, periodStart, periodEnd, twap.toString());
-      await sleep(2000);
+    const waits = [3000, 5000, 8000, 12000, 15000, 15000, 15000, 15000, 15000, 15000];
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const sent = await runCandle(roundId, index, periodStart, periodEnd, twap.toString());
+      // A wallet-level rejection (seqno race) means the previous external is
+      // still in flight: wait longer before resending the same candle.
+      await sleep(sent ? 2500 : 10000);
       rd = await round(roundId);
       if (rd.candlesSeen > index) { landed = true; break; }
-      log({ event: 'candle-resend', roundId, index, attempt: attempt + 1, candlesSeen: rd.candlesSeen });
-      await sleep(waits[attempt]);
+      log({ event: 'candle-resend', roundId, index, attempt: attempt + 1, sent, candlesSeen: rd.candlesSeen });
+      await sleep(waits[attempt] || 8000);
     }
     if (!landed) {
       throw new Error('candle #' + index + ' 连续 5 次未落地（当前 candlesSeen=' + rd.candlesSeen + '）');

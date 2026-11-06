@@ -219,3 +219,33 @@ treasury / teamWallet / marketingWallet / liquidityWallet / teamInternalWallet �
   - `contracts/contracts/OracleAdapter.tolk`（SetSignerSet / SetOracleAdmin）
   - `contracts/scripts/deploy-emulation.tolk`、`ops/scripts/15_deploy_contracts.mjs`、`ops/scripts/80_admin_ops.mjs`
   - `docs/07_OPEN_DECISIONS.md`（D-21/D-23 原结论）、`docs/10_LAUNCH_READINESS.md`（风险登记册）
+
+---
+
+## 11. 测试网演练步骤（spike 已验证，task-45）
+
+> 前提：用户尚未拍板方案 A；以下 spike 工具是**纯加法**，删除 `ops/scripts/91_/92_` 与 `ops/spike-multisig/` 即可回滚，不影响现有 EOA 流程。
+
+1. 安装 spike 依赖：`cd ops/spike-multisig && pnpm install`
+2. 准备官方源码/预编译产物：`node ops/scripts/91_deploy_multisig.mjs --prepare`（下载到 `ops/spike-multisig/.cache/`，不改根依赖）
+3. 部署 2-of-3 多签（测试网）：
+   ```bash
+   node ops/scripts/91_deploy_multisig.mjs --signers a9-test-a,a9-test-b,a9-test-c --threshold 2          # dry-run
+   OPS_EXECUTE=1 OPS_CONFIRM=YES node ops/scripts/91_deploy_multisig.mjs --signers a9-test-a,a9-test-b,a9-test-c --threshold 2 --value 0.3 --execute
+   ```
+   产物：`ops/records/multisig-registry.json`（地址、code hash、signers、threshold）。
+4. 发起 1 个订单（可含多条 action；`--transfer 地址,金额TON` 可重复）：
+   ```bash
+   node ops/scripts/92_multisig_order.mjs propose --signer a9-test-a --expiration 3600 --transfer <addr1>,0.02 --transfer <addr2>,0.02
+   ```
+5. 第 2 个签名人确认（达到阈值即自动执行）：
+   ```bash
+   OPS_EXECUTE=1 OPS_CONFIRM=YES node ops/scripts/92_multisig_order.mjs approve --signer a9-test-b --seqno 0
+   ```
+6. 查询：`status` / `list` / `order-status --seqno N`；`ops/records/multisig-rehearsal.jsonl` 会记录每步 tx 与费用。
+7. 负向验证（每次演练必做）：
+   - 只发 1 个签名 → `executed=false`，无转账；
+   - 订单过期后再 approve → 多签执行 tx `out_msgs=0`（expired 111），无转账；
+   - `update-signers` 更换签名人 → 多签地址不变、`get_multisig_data` 更新。
+8. 实测 gas（2026-11 测试网，详见 `ops/records/multisig-rehearsal.md`）：propose ≈0.002 TON、approve+execute ≈0.002 TON、部署 ≈0.0021 TON；多签需常备 ≥0.3 TON（建议 1 TON 以上）作为 order 执行/存储 gas。
+
