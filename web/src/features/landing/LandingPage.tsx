@@ -6,6 +6,7 @@ import { useLang } from '../../lib/lang';
 import { useCopy } from './landing.i18n';
 import './landing.css';
 import { useLandingData } from './useLandingData';
+import { BUY_ENTRY_OPEN } from './flags';
 import { Tape } from './Tape';
 import { Hero } from './Hero';
 import { BattleBoard } from './BattleBoard';
@@ -21,14 +22,14 @@ export default function LandingPage() {
   const data = useLandingData();
   const { board, cfg, stats, trades, book, me, wallet, rounds, secondsRemaining, nextStakeSeconds, candleMs, refreshAll } = data;
 
-  const [tab, setTab] = useState<'buy' | 'stake'>('buy');
+  const [tab, setTab] = useState<'buy' | 'stake'>(BUY_ENTRY_OPEN ? 'buy' : 'stake');
   const navigate = useNavigate();
   const location = useLocation();
   const { lang } = useLang();
   const zh = lang === 'zh';
   useEffect(() => {
     const action = new URLSearchParams(location.search).get('action');
-    if (action === 'stake' || action === 'buy') setTab(action);
+    if (action === 'stake' || (action === 'buy' && BUY_ENTRY_OPEN)) setTab(action);
   }, [location.search, location.key]);
   const [toastMessage, setToastMessage] = useState('');
   const [toastVisible, setToastVisible] = useState(false);

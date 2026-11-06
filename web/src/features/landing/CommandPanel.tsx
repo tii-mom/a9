@@ -9,6 +9,7 @@ import { useLang } from '../../lib/lang';
 import { fill, type LandingCopy } from './landing.i18n';
 import type { LandingWallet } from './wallet';
 import { formatCompactToken, intFmt, shortAddr, toRawUnits, tokenNum, usdNum } from './utils';
+import { BUY_ENTRY_OPEN } from './flags';
 
 interface Props {
   cfg: ProtocolConfig | null;
@@ -39,12 +40,15 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
 
   const [payTon, setPayTon] = useState('100');
   const [stakeAmount, setStakeAmount] = useState('50000');
+  // Two separate acknowledgements: (1) principal may go to zero, (2) failure burns the round's
+  // reward budget and all staked principal. Neither is pre-checked; both are required to stake.
   const [risk, setRisk] = useState(false);
+  const [burnAck, setBurnAck] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => { setRisk(false); }, [wallet.address, roundId, riskVersion]);
+  useEffect(() => { setRisk(false); setBurnAck(false); }, [wallet.address, roundId, riskVersion]);
   const onTabKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (!BUY_ENTRY_OPEN || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const next = event.key === 'Home' ? 'buy' : event.key === 'End' ? 'stake' : tab === 'buy' ? 'stake' : 'buy';
     setTab(next);
@@ -69,7 +73,7 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
   const stakeVal = Math.max(0, Number(stakeAmount) || 0);
   const amountRaw = toRawUnits(stakeAmount, decimals);
 
-  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < 10000 || amountRaw === '0' || stakeVal + myStake > 20000000 || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || submitting || roundId === null;
+  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < 10000 || amountRaw === '0' || stakeVal + myStake > 20000000 || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || !burnAck || submitting || roundId === null;
   const stakeLabel = submitting
     ? copy.cmd.btnSubmitting
     : !stakeOpen
@@ -78,7 +82,7 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
         ? copy.cmd.btnContractPending
         : !wallet.connected
           ? copy.cmd.btnConnectFirst
-          : !risk
+          : !risk || !burnAck
             ? copy.cmd.btnRiskFirst
             : copy.cmd.btnConfirm;
 
@@ -99,7 +103,7 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
       toast(copy.cmd.toastEnterAmount);
       return;
     }
-    if (!risk) {
+    if (!risk || !burnAck) {
       toast(copy.cmd.toastRisk);
       return;
     }
@@ -115,7 +119,7 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
         roundId,
         amountRaw,
         riskDisclosureVersion: riskVersion,
-        acceptFullPrincipalBurn: true,
+        acceptFullPrincipalBurn: burnAck,
       });
       setRisk(false);
       setStakeAmount('');
@@ -187,17 +191,19 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
         </div>
       ) : null}
 
-      <div className="tabs" role="tablist" aria-label={copy.cmd.title} onKeyDown={onTabKey}>
-        <button type="button" id="tab-buy" role="tab" tabIndex={tab === 'buy' ? 0 : -1} aria-selected={tab === 'buy'} aria-controls="paneBuy" onClick={() => setTab('buy')}>
-          {copy.cmd.tabBuy}
-        </button>
-        <button type="button" id="tab-stake" role="tab" tabIndex={tab === 'stake' ? 0 : -1} aria-selected={tab === 'stake'} aria-controls="paneStake" onClick={() => setTab('stake')}>
-          {copy.cmd.tabStake}
-          <span className={'tdot' + (stakeOpen ? '' : ' off')} />
-        </button>
-      </div>
+      {BUY_ENTRY_OPEN ? (
+        <div className="tabs" role="tablist" aria-label={copy.cmd.title} onKeyDown={onTabKey}>
+          <button type="button" id="tab-buy" role="tab" tabIndex={tab === 'buy' ? 0 : -1} aria-selected={tab === 'buy'} aria-controls="paneBuy" onClick={() => setTab('buy')}>
+            {copy.cmd.tabBuy}
+          </button>
+          <button type="button" id="tab-stake" role="tab" tabIndex={tab === 'stake' ? 0 : -1} aria-selected={tab === 'stake'} aria-controls="paneStake" onClick={() => setTab('stake')}>
+            {copy.cmd.tabStake}
+            <span className={'tdot' + (stakeOpen ? '' : ' off')} />
+          </button>
+        </div>
+      ) : null}
 
-      {tab === 'buy' ? (
+      {tab === 'buy' && BUY_ENTRY_OPEN ? (
         <div id="paneBuy" role="tabpanel" aria-labelledby="tab-buy" tabIndex={0}>
           <label className="f" htmlFor="payTon">
             <span className="lbl">{copy.cmd.payTon}</span>
@@ -293,9 +299,11 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
                       })}
                     </p>
                   ) : null}
-                  <button className="btn" type="button" onClick={() => setTab('buy')}>
-                    {copy.cmd.goBuy}
-                  </button>
+                  {BUY_ENTRY_OPEN ? (
+                    <button className="btn" type="button" onClick={() => setTab('buy')}>
+                      {copy.cmd.goBuy}
+                    </button>
+                  ) : null}
                 </>
               )}
             </div>
@@ -364,6 +372,10 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
               <label className="risk" htmlFor="riskOk">
                 <input id="riskOk" type="checkbox" checked={risk} onChange={(event) => setRisk(event.target.checked)} />
                 <span>{fill(copy.cmd.riskText, { need: board.need, total: board.candleCount })}</span>
+              </label>
+              <label className="risk" htmlFor="burnOk">
+                <input id="burnOk" type="checkbox" checked={burnAck} onChange={(event) => setBurnAck(event.target.checked)} />
+                <span>{copy.cmd.burnText}</span>
               </label>
               <p className="note">{lang === 'zh' ? '单笔最低 10,000 A9；单地址本轮最多 20,000,000 A9。成功奖励按最终权重分配，早领仅得 50%，其余进入解锁池。' : 'Minimum 10,000 A9; up to 20,000,000 A9 per address per round. Success rewards use final participation weights. Early claims pay 50%; the remainder enters the unlock pool.'}</p>
               {!dataReady ? <p className="note" role="status">{lang === 'zh' ? '等待数据恢复后可提交' : 'Submission waits for fresh data'}</p> : null}

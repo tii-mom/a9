@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatToken, shortAddress } from '../../lib/format';
 import { useLang } from '../../lib/lang';
 import { connect, connectDemo, disconnect, refreshBalances, resetDemoWallet } from './store';
+import { DEMO_WALLET_ENABLED } from './flags';
 import { useWalletStore } from './useWallet';
 import './wallet.css';
 
@@ -216,10 +217,14 @@ export function WalletButton() {
               <button className="btn fire full" type="button" disabled={wallet.status === 'connecting'} onClick={onConnect}>
                 {d.tonOption}
               </button>
-              <button className="btn ghost full" type="button" onClick={onDemo}>
-                {d.demoOption}
-              </button>
-              <p className="wl-note wl-muted">{d.demoHint}</p>
+              {DEMO_WALLET_ENABLED ? (
+                <>
+                  <button className="btn ghost full" type="button" onClick={onDemo}>
+                    {d.demoOption}
+                  </button>
+                  <p className="wl-note wl-muted">{d.demoHint}</p>
+                </>
+              ) : null}
             </>
           ) : (
             <>

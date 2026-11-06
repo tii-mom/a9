@@ -1,6 +1,7 @@
 import type { MeResponse, RoundSummary } from '@shared/types';
 import { api } from '../../lib/api';
 import { generateDemoAddress, rawToFriendly } from './address';
+import { DEMO_WALLET_ENABLED } from './flags';
 
 /** 演示钱包资金（与 worker 的 DEMO_WALLET_BALANCE 对齐：250,000 A9，raw units 9 位）。 */
 export const DEMO_A9_BALANCE_RAW = '250000000000000';
@@ -377,6 +378,13 @@ async function bootstrap(): Promise<void> {
   if (typeof window === 'undefined') return;
   const savedMode = read(MODE_KEY);
   const savedDemo = read(DEMO_ADDRESS_KEY);
+  if (savedMode === 'demo' && !DEMO_WALLET_ENABLED) {
+    // A demo session saved by an earlier build must not come back as a fake balance.
+    remove(MODE_KEY);
+    remove(DEMO_ADDRESS_KEY);
+    patch({ status: 'idle' });
+    return;
+  }
   if (savedMode === 'demo') {
     adoptDemo(savedDemo ?? (await resolveDemoAddress()));
     return;
@@ -425,6 +433,7 @@ export function connect(): void {
 
 /** 直接使用演示钱包（跳过 TON Connect）。 */
 export function connectDemo(): void {
+  if (!DEMO_WALLET_ENABLED) return;
   void (async () => {
     void ensureWalletInit();
     const address = await resolveDemoAddress();
@@ -434,6 +443,7 @@ export function connectDemo(): void {
 
 /** 换一个新的演示地址（用于演示空态；会覆盖已持久化的演示地址）。 */
 export function resetDemoWallet(): void {
+  if (!DEMO_WALLET_ENABLED) return;
   adoptDemo(generateDemoAddress());
 }
 

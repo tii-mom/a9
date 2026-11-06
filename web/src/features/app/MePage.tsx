@@ -6,7 +6,7 @@ import { formatDateTime, formatToken, shortAddress } from '../../lib/format';
 import { useDict, useLang } from '../../lib/lang';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
-import { connectDemo, disconnect, useWallet } from '../wallet';
+import { connectDemo, disconnect, DEMO_WALLET_ENABLED, useWallet } from '../wallet';
 import { ChainMePanel, RefundClaimPanel, RewardReferralPanel, captureInviteFromLocation } from '../chain';
 import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
 import {
@@ -679,9 +679,11 @@ export default function MePage() {
                   <button className="btn fire sm" type="button" disabled={wallet.connecting} onClick={() => wallet.connect()}>
                     {wallet.connecting ? c.connecting : d.connect}
                   </button>
-                  <button className="btn ghost sm" type="button" onClick={() => connectDemo()}>
-                    {d.demo}
-                  </button>
+                  {DEMO_WALLET_ENABLED ? (
+                    <button className="btn ghost sm" type="button" onClick={() => connectDemo()}>
+                      {d.demo}
+                    </button>
+                  ) : null}
                 </>
               )}
             </div>
@@ -696,9 +698,11 @@ export default function MePage() {
               <button className="btn fire" type="button" disabled={wallet.connecting} onClick={() => wallet.connect()}>
                 {wallet.connecting ? c.connecting : d.connect}
               </button>
-              <button className="btn ghost" type="button" onClick={() => connectDemo()}>
-                {d.demo}
-              </button>
+              {DEMO_WALLET_ENABLED ? (
+                <button className="btn ghost" type="button" onClick={() => connectDemo()}>
+                  {d.demo}
+                </button>
+              ) : null}
             </div>
             <p className="note">{d.gateHint}</p>
             {healthQuery.error ? <ErrorState error={healthQuery.error} onRetry={healthQuery.refresh} /> : null}

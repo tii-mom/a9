@@ -2,6 +2,7 @@ export { WalletButton } from './WalletButton';
 export { WalletProvider } from './WalletProvider';
 export { useWallet } from './useWallet';
 export type { WalletState } from './useWallet';
+export { DEMO_WALLET_ENABLED } from './flags';
 export {
   connect,
   connectDemo,

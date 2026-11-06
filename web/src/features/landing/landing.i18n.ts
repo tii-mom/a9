@@ -179,6 +179,7 @@ export type LandingCopy = {
     rewardEst: string;
     share: string;
     riskText: string;
+    burnText: string;
     payloadLabel: string;
     btnRiskFirst: string;
     btnConfirm: string;
@@ -478,7 +479,8 @@ export const ZH: LandingCopy = {
     lossMax: '失败时最大损失',
     rewardEst: '通过时预计奖励',
     share: '奖励占比（会被后来者稀释）',
-    riskText: "我接受：本轮 {total} 根 K 线中少于 {need} 根达标，将销毁本轮全部质押本金（包括我的 100%），无法追回。预言机故障不等于价格失败。",
+    riskText: "我接受：本轮 {total} 根 K 线中少于 {need} 根达标时，我的全部质押本金可能归零，无法追回。预言机故障不等于价格失败。",
+    burnText: "我确认：失败时本轮奖励预算与全部质押本金将被销毁（Jetton burn），销毁不可撤销。",
     payloadLabel: 'payload 预览',
     btnRiskFirst: '勾选风险确认后质押',
     btnConfirm: '确认质押 · 锁定至本轮结算',
@@ -818,7 +820,8 @@ export const EN: LandingCopy = {
     lossMax: 'Max loss on failure',
     rewardEst: 'Est. reward on pass',
     share: 'Reward share (diluted by later stakers)',
-    riskText: "I accept: if fewer than {need} of {total} candles qualify, all staked principal in this round (including 100% of mine) is burned and cannot be recovered. Oracle outages are not price failures.",
+    riskText: "I accept: if fewer than {need} of {total} candles qualify, all of my staked principal may go to zero and cannot be recovered. Oracle outages are not price failures.",
+    burnText: "I confirm: on failure the round's reward budget and all staked principal are burned (Jetton burn), and the burn is irreversible.",
     payloadLabel: 'payload preview',
     btnRiskFirst: 'Accept the risk to stake',
     btnConfirm: 'Confirm stake · locked until settlement',
