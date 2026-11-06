@@ -14,11 +14,12 @@ const NAV = [
   { href: '#risk', zh: '风险', en: 'Risk' },
 ];
 
+/** Official A9 mark (source: brand kit 01_square/logo_square.svg). Brand colors are fixed, not theme tokens. */
 export function Logo({ size = 28 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden="true">
-      <path d="M3 24C9 24 9 15 15 15S20 8 24 4" fill="none" stroke="#FF5B1F" strokeWidth="2.6" strokeLinecap="square" />
-      <circle cx="24" cy="4" r="3" fill="#FFB63D" />
+    <svg width={size} height={size} viewBox="0 0 1254 1254" aria-hidden="true" focusable="false">
+      <rect width="1254" height="1254" fill="#FF4D00" />
+      <path fill="#FFFFFF" fillRule="evenodd" d="M 627 0 L -84 1254 L 1338 1254 Z M 627 212 L 1155 1254 L 99 1254 Z" />
     </svg>
   );
 }

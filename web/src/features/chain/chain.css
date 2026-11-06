@@ -38,7 +38,7 @@
 .chain-dl > div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
 .chain-dl dt { color: var(--muted); font: 500 11px var(--f-mono); letter-spacing: .06em; text-transform: uppercase; }
 .chain-dl dd { margin: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; }
-.chain-warn { border: 1px solid #6b2a10; background: linear-gradient(rgba(255, 91, 31, .06), rgba(255, 91, 31, .02)); padding: 10px 12px; margin: 12px 0; font-size: 12px; color: var(--text-2); display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.chain-warn { border: 1px solid #6b2a10; background: linear-gradient(rgba(255, 77, 0, .06), rgba(255, 77, 0, .02)); padding: 10px 12px; margin: 12px 0; font-size: 12px; color: var(--text-2); display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
 .chain-warn b { color: var(--ember); }
 .chain-warn p { margin: 4px 0 0; font-size: 12px; }
 .chain-balances { display: flex; gap: 20px; flex-wrap: wrap; margin: 10px 0; font-size: 12px; color: var(--text-2); }
@@ -79,7 +79,7 @@
 /* ---------- V8 奖励三态 / 邀请 ---------- */
 .reward-panel,
 .referral-panel { margin-top: 18px; }
-.reward-warning { border: 1px solid #6b2a10; background: linear-gradient(rgba(255, 91, 31, .08), rgba(255, 91, 31, .02)); color: var(--text); padding: 10px 12px; font-weight: 700; font-size: 13px; line-height: 1.55; margin: 4px 0 12px; }
+.reward-warning { border: 1px solid #6b2a10; background: linear-gradient(rgba(255, 77, 0, .08), rgba(255, 77, 0, .02)); color: var(--text); padding: 10px 12px; font-weight: 700; font-size: 13px; line-height: 1.55; margin: 4px 0 12px; }
 .reward-list { display: grid; gap: 10px; }
 .reward-row { border: 1px solid var(--line); background: var(--panel-2); padding: 12px; }
 .reward-row.settled { opacity: .92; }
@@ -87,7 +87,7 @@
 .reward-row-h > b { font: 800 16px var(--f-disp); letter-spacing: .02em; }
 .reward-state { font: 600 11px var(--f-mono); letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border: 1px solid var(--line-2); color: var(--text-2); }
 .reward-state.pending { color: var(--ember); border-color: #5a3f12; background: rgba(255, 182, 61, .07); }
-.reward-state.rolled { color: var(--fire); border-color: #6b2a10; background: rgba(255, 91, 31, .08); }
+.reward-state.rolled { color: var(--fire); border-color: #6b2a10; background: rgba(255, 77, 0, .08); }
 .reward-state.early { color: var(--pass); border-color: #1d4a35; background: rgba(61, 220, 151, .08); }
 .reward-amount { margin-left: auto; font: 600 16px var(--f-mono); font-variant-numeric: tabular-nums; }
 .reward-amount small { color: var(--muted); font: 500 11px var(--f-mono); }
@@ -98,7 +98,7 @@
 .reward-btn b { font: 700 13px var(--f-body); }
 .reward-btn small { font: 500 10px/1.4 var(--f-mono); color: var(--muted); overflow-wrap: anywhere; }
 .reward-btn:hover:not(:disabled) { border-color: var(--fire); }
-.reward-btn.active { border-color: var(--fire); background: rgba(255, 91, 31, .08); }
+.reward-btn.active { border-color: var(--fire); background: rgba(255, 77, 0, .08); }
 .reward-btn:disabled { opacity: .45; cursor: not-allowed; }
 .reward-hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
 .reward-unlock { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
