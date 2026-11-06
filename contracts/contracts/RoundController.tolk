@@ -349,6 +349,13 @@ fun rollbackPendingClaim(queryId: uint64) {
     ex.pending.delete(queryId);
     s.extras = ex.toCell();
     s.save();
+    emitExternalEvent(ClaimRolledBack {
+        queryId,
+        roundId: p.roundId,
+        kind: p.kind,
+        owner,
+        amountRaw: p.amountRaw,
+    });
 }
 
 // P0-3: wallet confirmed the transfer (ReturnExcessesBack) -> drop the pending record.
@@ -511,6 +518,12 @@ fun handleCloseStaking(sender: address, msg: CloseStaking) {
     updated.observationEnd = closeAt + (timing(s).observationSeconds as uint64);
     s.rounds.set(s.currentRoundId, updated);
     s.save();
+    emitExternalEvent(StakingClosed {
+        roundId: s.currentRoundId,
+        closeAt,
+        early: closeAt != rd.stakeCloseAt,
+        twap1hUsdE8: msg.twap1hUsdE8,
+    });
 }
 
 fun handleStartObservation(_sender: address, msg: StartObservation) {
@@ -555,14 +568,24 @@ fun handleSubmitCandle(sender: address, msg: SubmitCandle) {
     val qualified: bool = msg.twapPriceUsdE8 >= rd.targetPriceUsdE8;
     var rdExtra = rd.extra.load();
     // rolling hash: H(prevHash || candleIndex || twap || dataDigest)
-    rdExtra.candleHash = beginCell()
+    val newCandleHash = beginCell()
         .storeUint(rdExtra.candleHash, 256)
         .storeUint(msg.candleIndex, 8)
         .storeUint(msg.twapPriceUsdE8, 128)
         .storeUint(msg.dataDigest, 256)
         .endCell()
         .hash();
+    rdExtra.candleHash = newCandleHash;
     rd.extra = rdExtra.toCell();
+    emitExternalEvent(CandleSubmitted {
+        roundId: msg.roundId,
+        candleIndex: msg.candleIndex,
+        periodStart: msg.periodStart,
+        periodEnd: msg.periodEnd,
+        twapPriceUsdE8: msg.twapPriceUsdE8,
+        dataDigest: msg.dataDigest,
+        candleHash: newCandleHash,
+    });
     rd.candlesSeen += 1;
     // invariant: qualified counter is capped at the success threshold
     if (qualified && rd.qualifiedCandles < t.minQualifiedCandles) {
@@ -694,6 +717,7 @@ fun handlePauseOracle(sender: address, _msg: PauseOracle) {
     s.pausedAt = now;
     s.rounds.set(s.currentRoundId, updated);
     s.save();
+    emitExternalEvent(OraclePauseChanged { roundId: s.currentRoundId, paused: true, at: now });
 }
 
 fun handleResumeOracle(sender: address, _msg: ResumeOracle) {
@@ -718,6 +742,7 @@ fun handleResumeOracle(sender: address, _msg: ResumeOracle) {
     s.pausedAt = 0;
     s.rounds.set(s.currentRoundId, updated);
     s.save();
+    emitExternalEvent(OraclePauseChanged { roundId: s.currentRoundId, paused: false, at: now });
 
     // A9-F5: tell OracleAdapter to reset its candle cursor. This is best-effort:
     // IGNORE_ERRORS ensures a failed notification can never revert ResumeOracle.
@@ -1162,6 +1187,12 @@ fun handleClaimPrincipal(sender: address, msg: ClaimPrincipal, valueCoins: coins
         sender,
         contract.getAddress(),
     );
+    emitExternalEvent(PrincipalClaimedEvent {
+        roundId: msg.roundId,
+        owner: sender,
+        amountRaw: pos.amountRaw,
+        queryId: q,
+    });
 }
 
 fun handleClaimAll(sender: address, msg: ClaimAll, valueCoins: coins) {

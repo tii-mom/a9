@@ -663,6 +663,44 @@ struct (0x52540107) ReferrerSet {
     referrer: address
 }
 
+struct (0x52540109) ClaimRolledBack {
+    queryId: uint64
+    roundId: uint8
+    kind: uint8
+    owner: address
+    amountRaw: uint128
+}
+
+struct (0x5254010A) PrincipalClaimedEvent {
+    roundId: uint8
+    owner: address
+    amountRaw: uint128
+    queryId: uint64
+}
+
+struct (0x5254010B) StakingClosed {
+    roundId: uint8
+    closeAt: uint64
+    early: bool
+    twap1hUsdE8: uint128
+}
+
+struct (0x5254010C) CandleSubmitted {
+    roundId: uint8
+    candleIndex: uint8
+    periodStart: uint32
+    periodEnd: uint32
+    twapPriceUsdE8: uint128
+    dataDigest: uint256
+    candleHash: uint256
+}
+
+struct (0x5254010D) OraclePauseChanged {
+    roundId: uint8
+    paused: bool
+    at: uint64
+}
+
 struct (0x52540108) UnlockClaimed {
     owner: address
     amountRaw: uint128
