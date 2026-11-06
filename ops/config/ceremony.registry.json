@@ -6,7 +6,7 @@
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-05T14:13:41.432Z",
+  "updatedAt": "2026-11-06T12:07:50.893Z",
   "contracts": {
     "jettonMaster": {
       "address": null,
@@ -75,8 +75,8 @@
   },
   "wallets": {
     "adminOwner": {
-      "address": "kQCwA_Fn9qKFfig_o75t-ehXQ-W9pyeg1pIaPXLrcxkwORHg",
-      "note": "ceremony admin (a9-ceremony-admin)"
+      "address": "kQB7JWfG8HAfV9ap6fasi6uzylEFcSzTYkFUvgFSlNUFIpnm",
+      "note": "ceremony admin (a9-test-a, unique master admin; new wallet activation faucet-limited)"
     },
     "treasury": {
       "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
@@ -112,5 +112,22 @@
     "checks": [],
     "digest": null
   },
-  "notes": "mainnet ceremony rehearsal: fresh instance, production timing"
+  "notes": "mainnet ceremony rehearsal: fresh instance, production timing",
+  "ceremony": {
+    "phases": {
+      "P0": {
+        "status": "EXPECTED_IN_REHEARSAL",
+        "result": "EXPECTED_IN_REHEARSAL",
+        "durationMs": 125,
+        "finishedAt": "2026-11-06T12:07:50.892Z"
+      },
+      "P1": {
+        "status": "RUNNING",
+        "startedAt": "2026-11-06T12:07:50.893Z"
+      }
+    },
+    "completed": [],
+    "startedAt": "2026-11-06T12:07:50.766Z",
+    "finishedAt": null
+  }
 }

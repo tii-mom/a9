@@ -80,6 +80,30 @@ node src/indexer/tools/chain-reconcile.mjs --network testnet \
 - 建主网 D1 后把 id 配进 GitHub Variable（不要提交仓库）
 - 域名/证书/公告（G11）与主网冷钱包（G5）等非本次演练范围
 
+## D1 备份 / 恢复演练（2026-11-06 补充）
+- 导出：`wrangler d1 export a9-drill --remote --config wrangler.drill.toml --output=/tmp/a9-drill-export.sql --skip-confirmation`
+  - 耗时 **7s**，产物 **49,452 bytes / 325 行**，17 张表、158 条 INSERT（rounds 10 / stakes 8 / candles 72 / config 21 / metrics 18 / claims 0 / burn_ledger 6 / d1_migrations 9）
+- ⚠️ **单文件恢复失败**：把默认 export 直接 `d1 execute --file` 灌入新库报 `no such table: main.rounds`（export 按字母序输出，先 INSERT `burn_ledger` 再 CREATE `rounds`，FK 检查在跨语句时不受 `PRAGMA defer_foreign_keys` 保护）。
+- ✅ 可用恢复流程（本次演练通过）：
+  ~~~bash
+  # 1) 结构
+  wrangler d1 export a9-drill --remote --config wrangler.drill.toml --output=/tmp/a9-drill-schema-only.sql --no-data --skip-confirmation
+  # 2) 数据（前置关闭 FK 再导入）
+  wrangler d1 export a9-drill --remote --config wrangler.drill.toml --output=/tmp/a9-drill-data-only.sql --no-schema --skip-confirmation
+  { echo 'PRAGMA foreign_keys=OFF;'; cat /tmp/a9-drill-data-only.sql; } > /tmp/a9-drill-data-fkoff.sql
+  wrangler d1 create a9-drill-restore
+  wrangler d1 execute a9-drill-restore --remote --config wrangler.drill.toml --file=/tmp/a9-drill-schema-only.sql
+  wrangler d1 execute a9-drill-restore --remote --config wrangler.drill.toml --file=/tmp/a9-drill-data-fkoff.sql
+  ~~~
+- 实测恢复耗时：schema 导入 **5s** + data 导入 **5s**（export 侧 7s）；恢复后行数与 a9-drill **完全一致**（rounds 10 / stakes 8 / candles 72 / config 21 / metrics 18 / claims 0 / burns 6 / migrations 9），抽样 R1 state/target/candleHash 也一致。
+- 主网估算：export 时间≈云任务固定开销 + 数据量；本次 49KB 仅 7s，主网库在预加载时接近空库（同量级），但**开轮后库会增长**，建议上线前/首次开轮前各备份一次，并按「结构/数据两阶段 + FK OFF」写入 runbook；恢复演练必须在主网前再做一次（目标库用 a9-mainnet-restore，勿覆盖生产）。
+
+## 索引器 SubmitCandle 是否依赖发送方地址（Lead 确认点）
+- **不依赖发送方**。索引器按 `transactions({account: RC, sort:'asc'})` 拉取**目标为 RoundController 的全部交易**（toncenter v3），不按 in_msg.source 过滤。
+- 入站解码 `inboundOfTx(tx, rcRaw)` 仅校验：该 tx 有 `in_msg`、`destination === RC raw`、opcode 可解析；随后按 `TX_OP.submitCandle` 解码 body（roundId/candleIndex/periodStart/periodEnd/twap/digest），**没有任何 sender/source 判断**（见 `worker/src/indexer/sync.ts:169-180, 405-415`）。
+- 因此主网接 OracleAdapter 后，无论发送方是 OA、admin 还是其它地址，只要消息发到 RC 且 opcode/布局正确就会被索引；发送方鉴权由合约负责，索引器不重复校验，也不会漏事件。
+- 唯一注意：索引器依赖 toncenter `account=RC` 的交易索引；若 RPC 漏页/分页异常会由 cursor 重试（已有退避/健康上报），与发送方无关。
+
 ## 收尾决策：保留 drill 资源
 保留 `fuse-protocol-drill` + `a9-drill` 供主网当天二次彩排/回归复用。理由：无自定义域名、仅 testnet chain 只读 + admin 索引器；ADMIN_TOKEN 为随机 ≥32B secret；成本可忽略。主网切换完成后如不再需要，用以下命令删除：
 ~~~bash
