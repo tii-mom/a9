@@ -66,7 +66,7 @@ export A9_MAINNET_API="https://toncenter.com/api/v3"
 | --- | --- | --- | --- | --- | --- |
 | **G0** | **主网 ops 适配通过**（task-54 / 前置自检脚本） | ①`grep -n -- "--net testnet" ops/config/mainnet.params.json`；②修完后 `grep -rn -- "--net testnet" ops/scripts/ \| wc -l` | ①**0 命中**；②**必须为 0**（当前已确认 **17 处**硬编码 + `OPS_NETWORK` 无人读取，已派 testnet-ops 修复）；preflight 对 mainnet 地址不再要求 `testnet` 标记；`OPS_PARAMS` 指向 mainnet 后所有 getter 走主网 RPC | 停止；把命中项交 ops 修复（改 `--net mainnet` 或参数化），修复后重跑 G0；**不要手工 sed 脚本后硬跑** | 文件可改回（代码侧），链上未动 |
 | **G0b** | **生产 D1 与 demo D1 隔离** | `grep -n "database_id" worker/wrangler.toml` 并对比 `[env.production]` 与顶层 demo 的 `[[d1_databases]]` | **[env.production] 的 database_id 必须 ≠ 顶层 demo 的 database_id**；生产绑定 `a9-mainnet`；CI/preflight 有校验 | 相同或仍指向 demo → 停止，等 backend-dev 修复后再部署；**不得用 demo 库接生产** | 是（配置） |
-| **G1** | **M4.1 复核通过** | `docs/28_M4_1_DELTA_REVIEW.md` 全文 + 复核方书面结论（姓名/日期/结论） | 复核结论明确“可进入主网”；M4-01/M4-02 回归证据齐全（177 tests / v8.8 链上回归） | 未签字 → 停止；不得用“自己看过”替代 | 是（流程） |
+| **G1** | **审计复核通过（M4.1 + M4.2）** ✅ **已完成** | `docs/28`（M4.1，v8.8）+ `docs/32`（M4.2，v8.9） | **M4.1：PASS（附 1 项 Medium，已修）**；**M4.2：PASS（无条件通过）**，复核方同意以 **`v8.9-audit-fixed`** 为主网冻结基线，并同意缺陷定级为 Low | 已完成，无需操作 | 是（已通过） |
 | **G2** | **生产时序验证（prodtest v8.7 实例）** | v8.7 prodtest **RC `kQDmIKscJAg29SKiBo23j6nR6whklaoMBM7wQ3jVQGGS9gxY`**；证据 `$OPS_RECORDS_DIR/timing-evidence.json` + 下表时间点断言 | **待 11/9 03:37 三项全部落地后转 PASS**：①`stakeCloseAt−stakeOpenAt==129600`（已验）；②**11/8 03:35 关窗**后 `observationEnd−observationStart==86400`；③**11/9 03:37 结算后、R2 被 OpenRound 之前**读 `R2.stakeOpenAt−R1.settledAt` **必须精确 ==43200**（12h 预告期）；若已 OpenRound 则只能断言 `>=43200`（A9-F9 会把 stakeOpenAt 重锚为实际开轮时间，实测偏差=keeper 的 settle-wait） | 任一不等 → 停止；**不得改参数迁就**；11/9 03:37 后仍缺证据 → G2=FAIL | 是（未上主网） |
 | **G3** | **CI 生产门禁生效** | `.github/workflows/ci.yml` 中 production guard 代码 + 最近一次 CI run URL | `DATA_SOURCE=chain`、`CHAIN_NETWORK=mainnet`、`DEMO_ALLOW_UNSIGNED_WRITES=false`、地址非占位符，否则 fail | 门禁缺失 → 停止；先修 CI 并跑一次 dry-run | 是 |
 | **G4** | **toncenter 主网 key 可用** | `curl -s -H "X-API-Key: $TONCENTER_API_KEY" "$A9_MAINNET_RPC/getAddressInformation?address=$ADMIN_ADDRESS"` | HTTP 200，`ok:true`，无限流 | 401/429 → 换 key/加配额；**不得不带 key 硬跑** | 是 |
@@ -274,7 +274,7 @@ RoundController 0x4EE42C5C0EB13CDB6689823BEA883D30E852EEA066D3C108A6531A69D4093E
 OracleAdapter   0x539F3597357943584A596DA2B40F901B4984D8C8307E63CE81A67F131EAB8CBA
 ~~~
 
-> 说明：v8.8 只改 **RoundController**（M4-01/M4-02 退款账本修复），其余 4 个 hash 与 v8.7 相同；v8.8 基线见 `docs/28_M4_1_DELTA_REVIEW.md §5`（docs/18 §16 为 v8.7，§17 尚未生成）。
+> **当前主网冻结基线：`v8.9-audit-fixed`**（RC `0xFE7088ED1C52949CD1CB0931D95911F757BC402FC37065502002DF15CCDD50AE`，179 tests）。v8.8 见 `docs/28 §5`、v8.9 见 `docs/32 §4` 与 `docs/18 §18`。仅 RoundController 逐版变化，其余 4 个合约哈希自 v8.6 起未变。
 
 核对命令（必须在 **mainnet** 上）：
 

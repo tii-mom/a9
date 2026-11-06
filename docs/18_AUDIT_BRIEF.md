@@ -435,3 +435,45 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 - 测试：175/18 → **177/18**（新增 2 条 M4 回归，均使用真 JettonWallet）。
 - 部署影响：**必须全新部署**（不要 resume 旧 RC）；由于 JettonWallet 未变，jetton wallet 地址推导与 v8.7 相同，但仍以部署脚本输出的 canonical 地址为准。
 - 审查记录：`docs/28_M4_1_DELTA_REVIEW.md`（M4.1 delta review，含修复前失败证据与链上回归）。
+
+---
+
+## 18. v8.9 冻结基线（当前主网基线）
+
+> **本节是主网部署的唯一现行基线。** §16（v8.7）、§17（v8.8）为历史版本。
+> 审计状态：**M4.1 PASS + M4.2 PASS（无条件通过）**，复核方同意以本版本作为主网冻结基线。
+
+### 18.1 冻结基线
+
+| 合约 | Code Hash | 自 v8.8 |
+| --- | --- | --- |
+| RoundController | `0xFE7088ED1C52949CD1CB0931D95911F757BC402FC37065502002DF15CCDD50AE` | **变更** |
+| JettonWallet | `0xC40F41ED05BEFFB7EF17E25FA0D1BB2AFDA72C567052546A2E310C0275D31D13` | 不变 |
+| JettonMaster | `0xB8FAF413176C6329A98B2474FEDF765A796A14EDA96C031EE1FE5B27E59EE272` | 不变 |
+| TeamVault | `0xDE6BE49154E3024C9B6945EA81E7181F3E1D04FECC85DBC629C08EDE6A673FB6` | 不变 |
+| OracleAdapter | `0x0C91E5338E00F18B5FFC7C5C26B510424775D8089588F4147E5B667703676768` | 不变 |
+
+tag：`v8.9-audit-fixed` @ `58d0be8`；验证：`acton check` 0 error 0 warning，`acton test` **179 passed / 18 files**。
+
+### 18.2 v8.9 的唯一改动（A9-M4-02b）
+
+M4.1 复核发现：round-0 退款账本在「手工领取在途 + 新退款到达 + 领取 bounce」四条件同时成立时，`creditRefundLedger` 的 `carry = 0` 会覆盖未结算余额，而 `rollbackPendingClaim` 不恢复金额 → 用户未领退款停滞。
+
+修复（`rollbackPendingClaim` 的 `CLAIM_KIND_PRINCIPAL` 分支，严格限定 `p.roundId == 0`）：
+```tolk
+if (p.roundId == 0) {
+    val carry: uint128 = pos.principalClaimed ? 0 as uint128 : pos.amountRaw;
+    pos.amountRaw = carry + p.amountRaw;
+}
+```
+影响面：仅 round-0 退款账本；1..10 轮领取回滚一行未动。成功路径无需改动（`settlePendingClaim` 仅对 `CLAIM_KIND_REFUND` 扣减）。
+
+**定级：Low**（审计方同意）。仅 bounce 路径受影响，损失为用户自身未领退款滞留，无外部盗币或通胀风险。
+
+### 18.3 验证证据
+
+| 层次 | 内容 |
+| --- | --- |
+| 单元测试 | 179 passed；新增 2 条真 JettonWallet 测试（交错 bounce → X+Y、无交错 bounce → X）；**回退修复后测试 1 实测 2000 vs 期望 3000**，证明测试能捕获缺陷 |
+| 链上回归（v8.9 测试网 `kQD9TXvf…cYAK`） | RC hash 核对 `0xFE7088ED…`；M4-01 退款回归净收益 0；R1 SUCCEEDED + team release；R3 干净 3-staker 失败轮三笔销毁全 confirmed；普通领取正常 |
+| 已知局限 | **交错 bounce 无链上证据**（无法在链上强制 bounce）；链上仅证明正常路径未被改坏。审计方确认单元测试覆盖充分，无需构造恶意收款合约 |
