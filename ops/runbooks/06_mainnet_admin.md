@@ -46,7 +46,7 @@
 | `AbortTechnical` | 0x52540010 | **任何人** | 连续暂停 ≥14d 或观察超时 ≥7d | 退 100% 本金、不销毁 | 逃生舱 |
 | `RetryPendingActions` | — | **任何人** | 任意（value ≥0.3 TON） | 重试卡住的跨合约动作 | 逃生舱 |
 
-**结论**：R1 开轮后 RC admin 剩下的真实权力主要是「OpenRound/早关/Pause/Resume/SubmitCandle」——这些 **oracle（3/5 签名）都可替代**，且失败/超时都有 permissionless 逃生舱。admin 泄露的后果是 **grief（扰轮次、抬成本、毁信誉）而非直接盗币**——但仍足以毁掉项目，且 admin 永久不可换。
+**结论**：R1 开轮后 RC admin 剩下的真实权力主要是「OpenRound/早关/Pause/Resume/SubmitCandle」——这些 **oracle（3/5 签名）都可替代**，且失败/超时都有 permissionless 逃生舱。**admin 单钥泄露不可直接转移资金，但可强制任意轮次判负，从而销毁该轮全部用户本金与奖励**：`SubmitCandle` 提交 24 根低价 K 线即可；另可 `OpenRound` 直接传 TWAP 操纵目标价、替换 OracleAdapter 签名人。**这是 D-36 已书面接受的单钥风险；用户风险披露中必须明示。**
 
 ### 2.2 TeamVault（admin = 永久，风险被低估）
 
@@ -56,7 +56,7 @@
 | `SetTeamWalletJettonWallet` | **仅 admin** | **任何时间**（无 controller-null 限制） | **可把团队 12% 额度收款地址改到任意 Jetton Wallet**（提议者需自行构造合法钱包地址） |
 | `InitController` | 仅 admin | 一次性（controller==null） | 绑定 RC（不可逆） |
 
-**结论**：TV admin 是**可造成资金去向改变的永久权限**（团队额度重定向）。当前部署脚本里 RC admin 与 TV admin 是同一个 `admin` 钱包，所以「admin 泄露」不只 grief，还包含团队额度的托管风险。这一条是推荐多签的最强理由。
+**结论**：TV admin 是**可造成资金去向改变的永久权限**（团队额度重定向）。当前部署脚本里 RC admin 与 TV admin 是同一个 `admin` 钱包，所以「admin 泄露」不止轮次干扰，还包括**强制判负销毁用户本金**与**团队额度重定向**两类资金后果。这一条是推荐多签的最强理由。
 
 ### 2.3 OracleAdapter（admin 可转移）
 
@@ -137,7 +137,7 @@ treasury / teamWallet / marketingWallet / liquidityWallet / teamInternalWallet �
 ### 方案 B — 单一冷钱包（硬件）作为 admin + 逃生舱
 
 - **优点**：零改造（沿用 acton admin_op）；操作最快；gas 最低。
-- **缺点**：**永久单点**——私钥丢失/持有人失联 = 永久失去 OpenRound/暂停/早关能力（虽仍有逃生舱，但协议节奏失控、可能被迫技术中止退款）；私钥泄露/内鬼 = 可永久 grief + **TV 团队额度重定向**；无追责分离。
+- **缺点**：**永久单点**——私钥丢失/持有人失联 = 永久失去 OpenRound/暂停/早关能力（虽仍有逃生舱，但协议节奏失控、可能被迫技术中止退款）；私钥泄露/内鬼 = **可强制任意轮判负销毁本金** + **TV 团队额度重定向**；无追责分离。
 - **逃生舱**：到期关窗（任何人）、SETTLING_* finalize（任何人）、技术中止超时（任何人）、retry pending（任何人）、oracle 3/5 覆盖 open/close/candle —— 协议**不会永久死锁**，但「及时性操作」会受影响。
 
 ### 方案 C — 混合：admin 多签 + 金库独立冷钱包
@@ -153,7 +153,7 @@ treasury / teamWallet / marketingWallet / liquidityWallet / teamInternalWallet �
 | 场景 | A. 多签（2-of-3） | B. 单一冷钱包 | C. 混合 |
 |---|---|---|---|
 | **私钥丢失** | 丢 1 把仍可执行（2/3）；丢 2 把才失能；可用旧集合换人 | **直接永久失能**：无法 OpenRound/暂停/早关；只能靠 oracle 与逃生舱，最终可能中止退款 | 同 A；金库另有多套独立备份 |
-| **私钥泄露** | 攻击者需 2 把才能动；泄露 1 把可被替换（旧集合签名更新）；有响应窗口 | **单点全失**：TV 团队额度可被重定向、轮次可被持续 grief、无可撤销 | 同 A；且金库密钥与 admin 分离，损失面更小 |
+| **私钥泄露** | 攻击者需 2 把才能动；泄露 1 把可被替换（旧集合签名更新）；有响应窗口 | **单点全失**：TV 团队额度可被重定向、**可强制任意轮判负销毁用户本金**、无可撤销 | 同 A；且金库密钥与 admin 分离，损失面更小 |
 | **单人跑路** | 1 人跑路 = 损失 1 票，剩余 2 票仍可执行 + 换人 | **协议控制权随人走**：跑路即永久失控 | 同 A；金库另有独立托管 |
 | **多签方失联导致紧急操作无法执行** | 2-of-3 需 2 人；紧急场景可由 oracle 3/5 覆盖 open/close/candle + permissionless 逃生舱兜底；风险主要是「及时性」而非「安全性」 | 无此问题（单人可动），但换来前两项的致命风险 | 同 A；可加「紧急单人 break-glass」但会削弱多签价值，不建议 |
 

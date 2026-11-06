@@ -4,7 +4,7 @@
 **代码基线**：tag `v8.8-audit-fixed` @ `fb6bb45`（`git rev-parse v8.8-audit-fixed^{}` = `fb6bb45`）；`acton check` 0 error 0 warning；`acton test` **177 passed / 18 files**。
 **定位**：本文件不是概念说明，而是**主网切换的可执行清单**。每一步都写清「命令 / 期望输出 / 失败怎么办 / 是否可逆」。
 
-> **当前状态：不是上线许可。** §1 的门禁尚未全部满足（特别是 G0 主网 ops 适配、G2 生产时序（待 11/9 03:37 三项断言落地）、G5 admin 冷钱包、G6 GRAM 到账、G7 TON 预算）。未满足项**禁止开始**；不要在聊天里用“已确认/没问题”替代链上证据。
+> **当前状态：不是上线许可。** §1 的门禁尚未全部满足（特别是 G0 主网 ops 适配、G0b 生产 D1 隔离、G2 生产时序（待 11/9 03:37 三项断言落地）、G5 admin 冷钱包、G6 GRAM 到账、G7 TON 预算）。未满足项**禁止开始**；不要在聊天里用“已确认/没问题”替代链上证据。
 
 **三件不可逆的事（先记住）**：
 1. **合约部署**（地址与 code hash 永久固定，RC 不可升级）；
@@ -65,14 +65,15 @@ export A9_MAINNET_API="https://toncenter.com/api/v3"
 | # | 门禁 | 命令 / 证据 | 期望 | 失败怎么办 | 可逆？ |
 | --- | --- | --- | --- | --- | --- |
 | **G0** | **主网 ops 适配通过**（task-54 / 前置自检脚本） | ①`grep -n -- "--net testnet" ops/config/mainnet.params.json`；②修完后 `grep -rn -- "--net testnet" ops/scripts/ \| wc -l` | ①**0 命中**；②**必须为 0**（当前已确认 **17 处**硬编码 + `OPS_NETWORK` 无人读取，已派 testnet-ops 修复）；preflight 对 mainnet 地址不再要求 `testnet` 标记；`OPS_PARAMS` 指向 mainnet 后所有 getter 走主网 RPC | 停止；把命中项交 ops 修复（改 `--net mainnet` 或参数化），修复后重跑 G0；**不要手工 sed 脚本后硬跑** | 文件可改回（代码侧），链上未动 |
+| **G0b** | **生产 D1 与 demo D1 隔离** | `grep -n "database_id" worker/wrangler.toml` 并对比 `[env.production]` 与顶层 demo 的 `[[d1_databases]]` | **[env.production] 的 database_id 必须 ≠ 顶层 demo 的 database_id**；生产绑定 `a9-mainnet`；CI/preflight 有校验 | 相同或仍指向 demo → 停止，等 backend-dev 修复后再部署；**不得用 demo 库接生产** | 是（配置） |
 | **G1** | **M4.1 复核通过** | `docs/28_M4_1_DELTA_REVIEW.md` 全文 + 复核方书面结论（姓名/日期/结论） | 复核结论明确“可进入主网”；M4-01/M4-02 回归证据齐全（177 tests / v8.8 链上回归） | 未签字 → 停止；不得用“自己看过”替代 | 是（流程） |
-| **G2** | **生产时序验证（prodtest v8.7 实例）** | v8.7 prodtest **RC `kQDmIKscJAg29SKiBo23j6nR6whklaoMBM7wQ3jVQGGS9gxY`**；证据 `$OPS_RECORDS_DIR/timing-evidence.json` + 下表时间点断言 | **待 11/9 03:37 三项全部落地后转 PASS**：①`stakeCloseAt−stakeOpenAt==129600`（已验）；②**11/8 03:35 关窗**后 `observationEnd−observationStart==86400`；③**11/9 03:37 结算**后 `R2.stakeOpenAt−R1.settledAt==43200`（12h 预告期） | 任一不等 → 停止；**不得改参数迁就**；11/9 03:37 后仍缺证据 → G2=FAIL | 是（未上主网） |
+| **G2** | **生产时序验证（prodtest v8.7 实例）** | v8.7 prodtest **RC `kQDmIKscJAg29SKiBo23j6nR6whklaoMBM7wQ3jVQGGS9gxY`**；证据 `$OPS_RECORDS_DIR/timing-evidence.json` + 下表时间点断言 | **待 11/9 03:37 三项全部落地后转 PASS**：①`stakeCloseAt−stakeOpenAt==129600`（已验）；②**11/8 03:35 关窗**后 `observationEnd−observationStart==86400`；③**11/9 03:37 结算后、R2 被 OpenRound 之前**读 `R2.stakeOpenAt−R1.settledAt` **必须精确 ==43200**（12h 预告期）；若已 OpenRound 则只能断言 `>=43200`（A9-F9 会把 stakeOpenAt 重锚为实际开轮时间，实测偏差=keeper 的 settle-wait） | 任一不等 → 停止；**不得改参数迁就**；11/9 03:37 后仍缺证据 → G2=FAIL | 是（未上主网） |
 | **G3** | **CI 生产门禁生效** | `.github/workflows/ci.yml` 中 production guard 代码 + 最近一次 CI run URL | `DATA_SOURCE=chain`、`CHAIN_NETWORK=mainnet`、`DEMO_ALLOW_UNSIGNED_WRITES=false`、地址非占位符，否则 fail | 门禁缺失 → 停止；先修 CI 并跑一次 dry-run | 是 |
 | **G4** | **toncenter 主网 key 可用** | `curl -s -H "X-API-Key: $TONCENTER_API_KEY" "$A9_MAINNET_RPC/getAddressInformation?address=$ADMIN_ADDRESS"` | HTTP 200，`ok:true`，无限流 | 401/429 → 换 key/加配额；**不得不带 key 硬跑** | 是 |
 | **G5** | **admin 冷钱包地址已定**（D-36） | 硬件钱包地址 + 双人核对记录（首尾 6 字符 + CRC，§3.3） | 地址固定；钱包 `seqno=0`（从未发交易）；私钥离线 ≥2 份 | 不符 → 停止；**部署后 admin 永久不可改** | **否（部署后）** |
 | **G6** | **主网 GRAM ≥5 已到 deployer** | toncenter v3：`GET /jetton/wallets?jetton_address=<GRAM_MASTER>&owner_address=<DEPLOYER>` | `balance` ≥ 5 GRAM（按项目方确认的 decimals 换算 raw） | 未到账 → 停止，先转够；**不要用测试网 GRAM** | 是（转账可再操作） |
 | **G7** | **TON 预算已批准** | 部署记录中的 TON 预算表（部署 4 笔 + wiring + 注资 5 笔 + RC/TV gas + 用户提示） | deployer ≥30 TON；RC 部署后 ≥20 TON、TV ≥10 TON；用户 UI 明确“至少 0.5 TON gas” | 不足 → 停止补足；**不要压低合约 value 到 0.05 级** | 是（充值） |
-| **G8** | **主网 D1 方案就绪** | Cloudflare 账号权限、`wrangler whoami`、计划库名 `a9-mainnet` | 有权限创建/迁移；无同名冲突 | 无权限 → 换账号/授权；**不得复用测试库** | 是 |
+| **G8** | **主网 D1 方案就绪** | Cloudflare 账号权限、`wrangler whoami`、计划库名 `a9-mainnet`；**且 `[env.production]` database_id 与顶层 demo 不同（见 G0b）** | 有权限创建/迁移；无同名冲突；生产/演示库 id 不同 | 无权限 → 换账号/授权；**不得复用测试库** | 是 |
 | **G9** | **tag 与 5 个 code hash 一致** | `git rev-parse v8.8-audit-fixed^{}`；`node -e` 读 `contracts/build/*.json` 的 hash | commit=`fb6bb45`；5 个 hash 与 §4.2 表逐字一致 | 不一致 → 停止；重新 clean build；**不要用旧 build 产物** | 是（未上链） |
 | **G10** | **主网参数双人复核 + 哈希存档** | `mainnet.params.json` 逐项过表；`sha256sum` 存档 | P0/时间参数/限额/分配/opcode 全对；SHA-256 写入证据文件 | 任一项错 → 停止改文件后重算哈希；**部署后参数不可改** | 是（部署前） |
 | **G11** | **域名/公告就绪** | `dig a9.lat`、Cloudflare 证书 Active、公告审批记录 | 解析正确、证书有效、公告含 H1「押多少你定，赌 72 小时内至少翻倍。」 | 未就绪 → 停止；**不要先部署后补公告** | 是 |
@@ -122,7 +123,7 @@ jq -e '
 > | --- | --- | --- | --- |
 > | 已验 | `stakeCloseAt − stakeOpenAt` | `129600`（36h） | ✅ 已通过 |
 > | **11/8 03:35**（关窗后） | `observationEnd − observationStart` | `86400`（24h） | ⏳ 待验 |
-> | **11/9 03:37**（结算后） | `R2.stakeOpenAt − R1.settledAt` | `43200`（12h PREVIEW） | ⏳ 待验 |
+> | **11/9 03:37**（结算后**立即**，R2 尚未 OpenRound） | `R2.stakeOpenAt − R1.settledAt` | **精确 `43200`**（12h PREVIEW）；若已 OpenRound 则只保证 `>=43200` | ⏳ 待验 |
 >
 > **为什么用 v8.7 实例验证**：v8.8 只改了 RoundController 的退款账本逻辑（M4-01/02），**不改变任何时序常量/状态机路径**（见 docs/18 §17.4）；因此 11/8、11/9 两项在 v8.7 prodtest 实例上验证即有效，无需等 v8.8 新实例。三项全部 PASS 后，G2 转 PASS，方可进入 §4。
 

@@ -854,10 +854,26 @@ P0 v2 / P1 / P2（task-27，delta 复审）——用真 Jetton 合约补集成�
 > **部署/运维**：`deploy-emulation.tolk` 支持**全新空链一条命令完整部署**（JettonMaster → mint 100 亿并永久关闭 → OracleAdapter/TeamVault/RoundController → 全套 wiring → RC 7e18 / TV 1.2e18 raw A9 注入 + 回读校验）。
 > **JettonWallet 代码变更会导致所有 jetton wallet 地址变化，必须干净重部署，不能 resume。**
 
+### 9.5 可信 burn ack（实现与链上实证）
+
+**实际机制不是依赖外部 ack 合约，而是复用 TEP-74 的 `ReturnExcessesBack`：**
+1. RC 发起 burn；
+2. JettonMaster 处理后在 `ReturnExcessesBack`（`0xd53276db`）里回传该 queryId；
+3. RC 校验 `sender == jettonMaster` 后置 `rewardBurnConfirmed / teamBurnConfirmed / principalBurnConfirmed`。
+
+**加固链：**
+- **v8.6**：`confirmBurn` 断言 `*BurnDispatched` —— 未派发则拒绝确认，防「先确认后派发」伪造；
+- **v8.7 F1**：JettonWallet 限制 `sendExcessesTo == null || == owner`、JettonMaster 限制 `== burnInitiator`，封死伪造 `ReturnExcessesBack` 路径；同时禁止 0 金额 burn/transfer；
+- TeamVault 的 team burn 由其自身 ack（同源校验），bounce 不回 ack、可重试。
+
+**链上实证（v8.7 测试网）**：R2 / R5 / R8 三个失败轮的三笔销毁（reward / team / principal）全部 `confirmed=true`，且 `total_supply` 对应减少。
+
+因此 §10 的「可信 burn ack」项**当前已闭环**；主网仍需按 `docs/29_MAINNET_CUTOVER.md` 做全新部署，并用 `verify_deployment` 回读确认标志。
+
 ## 10. 主网前阻塞项（从测试网升级必须处理）
 
 - [ ] **OracleAdapter 签名验证**：替换 admin 传入的 twap24hUsdE8 / twap1hUsdE8 / 每根 K 线，防止价格操纵（docs/00 §3 #3、docs/03、docs/11 §7）。
-- [ ] **可信 burn ack**：见 §9.5；否则失败轮的“三笔销毁”无法链上自证。
+- [x] **可信 burn ack（v8.7 已闭环，见 §9.5）**：RC 校验 jettonMaster 回传 queryId 后置确认；v8.6 未派发拒绝、v8.7 F1 封死伪造路径；R2/R5/R8 三笔销毁已联调确认。
 - [ ] **第三方审计**：RoundController + TeamVault（资金安全核心：三笔销毁、claimAll、0 质押分支、权限边界、不可升级）。
 - [ ] **Jetton 版本锁定**：官方 Jetton commit + 审计报告覆盖范围 + burn 行为核对（docs/11 §3）。
 - [ ] **运营监控**：三倒计时、K 线缺失、burn pending、total_supply 对账（ops/ task-6）。

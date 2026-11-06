@@ -268,3 +268,65 @@ v8.7 的 F2 修复引入 `stakes[roundId=0]` 作为**质押退款账本**：当�
 4. **前端直接读链上 `get_user_stake(0, owner)`** 展示与领取（不改 worker / shared/types）。
 
 对账时若发现「RC 钱包余额 > 已分配−已发放−已销毁」的差额，首先要怀疑的就是 round-0 账本余额与技术终止轮余额（附录 B），而不是数据错误。
+---
+
+## 附录 C — v8.8 对账口径（2026-11-06，代码冻结 `fb6bb45` / `v8.8-audit-fixed`）
+
+**代码哈希**（本次冻结只在 v8.8 改动，其余 4 个不变）：
+
+| 合约 | code hash | 相对 v8.6 |
+| --- | --- | --- |
+| RoundController | `0x4EE42C5C…3EF8` | **变**（退款账本 carry、移除 `get_claimable_all` 的 round-0） |
+| TeamVault | `0xCF3E6C7C…58B4` | 不变 |
+| JettonMaster | `0x876F21A1…D64F` | 不变 |
+| JettonWallet | `0x394E4E8D…49A4` | 不变 |
+| OracleAdapter | `0x539F3597…8CBA` | 不变 |
+
+### C-1 技术终止轮不可用余额（对应附录 B / D-39）
+
+- `N_aborted` = `get_round(r).status == 10 (TECHNICAL_ABORTED)` 的轮次数（并用 `TechnicalAborted(0x52540104)` 事件交叉校验，以 status 为准）。
+- **RC 不可用余额 = `N_aborted × 700,000,000 A9`；TV 不可用余额 = `N_aborted × 120,000,000 A9`。**
+- 该金额**不销毁、不分配、不释放**，永久留存于 RC / TV 的 jetton wallet；对账报告单独成行，**不计入异常/差额**。
+- 技术终止轮的三笔销毁与团队释放标志必须全为 false（索引器校验；若出现 true 视为异常）。
+- `burned` 只统计真实三笔销毁，**不得把终止轮奖励计入 burned**（总量守恒里它们仍在持有者余额中）。
+
+### C-2 round-0 退款账本（对应附录 B-2，v8.7 F2 / v8.8 M4-01）
+
+- 索引器按 `DepositAccepted` 事件同步，**看不到** round-0（退款不是轮次）——这是正确的；D1 `stakes` 不写 round 0。
+- 余额对账必须把 round-0 的 A9 计入「RC 钱包应持有」：
+  - **主口径（现金流）**：`round0Held = Σ被拒入账(transfer_notification 且同 tx 无 DepositAccepted) − ΣRC 钱包退款/领取转出`。
+    该口径对 pending（钱已出账、账本尚未清零）也成立，不会因中途快照产生假差异。
+  - **辅助口径（getter）**：对候选 owner（持币者 ∪ 被拒 transfer 发起人）逐个读 `get_user_stake(0, owner)`：
+    `principalClaimed == false` 计入可领；`true` 且 `amountRaw > 0` 是**在途/待结算**（报告中单列，不计入持有）。
+  - 两者不一致时报告注明在途条目，不判数据错误。
+- 前端直接读链上 `get_user_stake(0, owner)` 展示与领取（`ClaimPrincipal(0)`），worker / shared/types 不变。
+
+### C-3 v8.8 余额预期公式（reconcile CLI `--balances` 实现）
+
+```
+RC 应持有 = RC 初始注资（first inbound internal_transfer）
+          + Σ DepositAccepted.amountRaw
+          + round0Held（C-2 净留存）
+          + N_aborted × 700,000,000
+          − Σ RewardEarly.paidRaw − Σ UnlockClaimed.amountRaw
+          − Σ PrincipalClaimedEvent.amountRaw（含 ClaimRolledBack 冲减）
+          − Σ 奖励销毁(flag) − Σ 本金销毁(flag)
+
+TV 应持有 = TV 初始注资
+          + N_aborted × 120,000,000
+          − Σ 逐轮 get_round_state(r).released 金额
+          − Σ 逐轮 get_round_state(r).burned 金额
+```
+
+要点：
+1. **初始注资不写死 7B / 1.2B**：测试实例可能手工注资，取 jetton wallet 首笔入站 `internal_transfer(0x178d4519)` 金额（可用 `--rc-initial/--tv-initial` 覆盖）；生产实例应等于 70 亿 / 12 亿，若不等会在报告里显式列出。
+2. **TV 释放以逐轮 `get_round_state` 为准**：v8.8 聚合 `totalReleasedRaw` 在部分路径可能漏记（实测 R1 钱包已转出 120M 而聚合仍为 0）；聚合值仅作交叉校验，不一致写 NOTE 不判索引错误。
+3. 总量守恒：`Σ持币者 == totalSupply`、`totalSupply + burned == 10,000,000,000 A9`（技术终止轮不销毁）；两项误差必须 0 raw。
+4. 所有金额 raw units / BigInt；报告同时打印 raw 与 A9 便于审计。
+
+### C-4 v8.8 回归实例对账快照（`ops/config/regress-v88.registry.json`）
+
+- RC `kQAIVoxXHrWkiH88k9yq_DPKiJR8-IfIf2BdeoocUsgGJs6F`（`0:08568c57…c80626`）、TV `kQBwpAyxSG23IAnfem0-OFqf-b-kH7_fv4rt6UsjpJSrO_7A`、JettonMaster `kQAwyGvhZ2IxD6nktU-d2jyvZ9rJkwbFfoS6h5OcA_xijh-u`。
+- 该实例仍在跑轮次，**对账以报告头部的「快照时间（UTC）」为准**；进行中轮次只校验已解析 K 线的连续性，终态轮次才做不可变哈希比对。
+- 结果见 §C-5（每次重跑以当次输出为准）。
+

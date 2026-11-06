@@ -101,7 +101,7 @@ node -e "for (const n of ['JettonMaster','JettonWallet','TeamVault','RoundContro
 | TV admin 可改 `teamWalletJettonWallet` | 即重定向团队 12% 额度的收款地址 | **无** |
 | OA admin 可 `SetOracleAdmin` 换人 | 单钥泄露 = 可换掉全部 3/5 预言机签名人 = 伪造结果 | **无** |
 | 单密钥丢失 | 无法执行 admin 操作 | 仅依赖合约逃生舱（到期任何人可关窗、SETTLING_* 任何人可推、观察超时可技术中止） |
-| 单密钥泄露 | 可持续 grief（判断不构成直接盗币路径，但足以毁掉项目） | **无** |
+| 单密钥泄露 | **不可直接转走资金，但可强制任意轮次判负，销毁该轮 100% 用户本金与奖励**（SubmitCandle 低价 K 线）；足以毁掉项目 | **无** |
 
 **因此本节强制要求：**
 1. admin 私钥必须生成在**硬件钱包**上，助记词离线抄写、异地存放 ≥2 份，**绝不进入任何联网设备、绝不复用测试网密钥**；

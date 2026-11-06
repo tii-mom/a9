@@ -30,13 +30,35 @@ npm run typecheck && npm run build
 
 ## 部署
 
+> ⚠️ **绝对禁止：对生产 Worker 执行不带 `--env production` 的 `wrangler deploy`。**
+> 顶层 `[vars]` 是 **demo 配置**（`DEMO_ALLOW_UNSIGNED_WRITES=true`），且顶层与 `[env.production]` 的 Worker name 相同；不带 env 部署会**用演示配置覆盖生产 Worker 并开放匿名写接口**。
+> 生产部署由 CI 门禁校验 `[env.production]` 的 vars、真实地址与占位符；**门禁不通过直接 fail**。
+
+### 本地 / demo（不出网）
+
+```bash
+npm run dev:worker          # wrangler dev → http://127.0.0.1:8787（本地，不出网）
+npm run dev                 # 前端 → http://127.0.0.1:5173（/api 代理本地 worker）
+# demo D1 只用本地库：不要加 --remote
+```
+
+### 主网 / 生产（必须 `--env production`）
+
 ```bash
 cd worker
-./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote
-./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql
-./node_modules/.bin/wrangler secret put ADMIN_TOKEN       # 运维后台 token
-cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
+# 仅首次：主网新库，只 apply 0001–0009，绝不执行 seed（详见 docs/29 §2）
+./node_modules/.bin/wrangler d1 migrations apply <prod-db-name> --remote
+./node_modules/.bin/wrangler secret put ADMIN_TOKEN --env production
+./node_modules/.bin/wrangler secret put TONCENTER_API_KEY --env production
+cd .. && npm run build && cd worker
+./node_modules/.bin/wrangler deploy --env production \
+  --var ROUND_CONTROLLER_ADDRESS:"$PROD_ROUND_CONTROLLER_ADDRESS" \
+  --var TEAM_VAULT_ADDRESS:"$PROD_TEAM_VAULT_ADDRESS" \
+  --var JETTON_MASTER_ADDRESS:"$PROD_JETTON_MASTER_ADDRESS" \
+  --var ORACLE_CONFIG_HASH:"$PROD_ORACLE_CONFIG_HASH"
 ```
+
+> 地址/哈希来自 GitHub Variables（`PROD_*`），**禁止把主网地址提交进仓库**（D-38）。完整主网切换流程见 `docs/29_MAINNET_CUTOVER.md`。
 
 自定义域名：
 
@@ -71,14 +93,15 @@ cd worker && ./node_modules/.bin/wrangler domains add fuse.<your-domain>
 | 运维后台 | `/admin`（Bearer token，见 worker secret `ADMIN_TOKEN`） |
 | 健康检查 | `/api/health`、`/api/version` |
 
-### 重新灌演示数据（部署前必做，让 R3 锚定部署时刻）
+### 重新灌演示数据（**仅本地/独立 demo 环境，不得对生产执行**）
 
 ```bash
-cd worker
-node scripts/generate-seed.mjs                                  # 重新生成 worker/seed/seed.sql
-./node_modules/.bin/wrangler d1 execute fuse-protocol --remote --file=./seed/seed.sql
-cd .. && npm run build && cd worker && ./node_modules/.bin/wrangler deploy
+npm run db:seed:local     # 写入本地 D1
+npm run dev:worker        # 本地 wrangler dev
+# 禁止：wrangler deploy（生产必须 chain 模式 + --env production + CI 门禁）
 ```
+
+> 生产环境（a9.lat）已切换 chain 模式后，**demo 数据与 demo 部署命令一律不得用于生产**；如仍需演示站，使用独立 Worker/独立环境，不要覆盖生产。
 
 ### 绑定自定义域名
 
