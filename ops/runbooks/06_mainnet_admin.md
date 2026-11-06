@@ -249,3 +249,20 @@ treasury / teamWallet / marketingWallet / liquidityWallet / teamInternalWallet �
    - `update-signers` 更换签名人 → 多签地址不变、`get_multisig_data` 更新。
 8. 实测 gas（2026-11 测试网，详见 `ops/records/multisig-rehearsal.md`）：propose ≈0.002 TON、approve+execute ≈0.002 TON、部署 ≈0.0021 TON；多签需常备 ≥0.3 TON（建议 1 TON 以上）作为 order 执行/存储 gas。
 
+
+
+---
+
+## 12. 热钱包 admin 的运维要求（D-41，2026-11-06）
+
+> **变更**：主网 admin 由「硬件冷钱包」改为 **服务器专用热钱包（acton keystore）**；D-36 的冷钱包部分推迟到 OA 迁移。原因：keeper 每小时用 `fast_candle.tolk` + `A9_SIGNER_WALLET` 签 `SubmitCandle`，**acton 不支持硬件钱包签名**，无 OA 签名工具；硬件 admin 会导致 keeper 无法发 K 线。
+
+因为 key 在线上，以下要求**强制**：
+
+1. **主机隔离**：admin 钱包只跑在**运维跳板机**上，**不与公开服务（worker/web/keeper 公开端点）同机**；跳板机不跑任何对外监听服务。
+2. **访问控制**：**SSH key-only、禁用密码登录**；仅部署/运维账号可登录；最小权限（能跑 acton 与签名脚本即可）；跳板机本身有访问日志与登录告警。
+3. **监控告警**：**admin 地址的任何出账（发消息）都必须告警**——这是唯一能发现密钥被盗的方式；告警覆盖：链上 external 消息、提交的 opcode、目标合约、时间；无出账也要有周期性心跳。
+4. **定期审计**：**每周**核对 admin 钱包 nonce 历史与预期操作对账；异常增加立即停用并按事故流程处理。
+5. **资产边界**：admin 钱包**只放 ~2 GRAM 做 gas，不放任何 A9/USDT 或其他资产**。
+6. **不可逆边界**：**合约不可升级、无 `SetAdmin`；密钥泄露后无法更换 admin，攻击者可永久强制任意轮次判负（销毁该轮全部用户本金与奖励）**——**无补救路径**，只能重新部署新协议。
+7. **备份**：助记词离线 ≥2 份、异地存放；恢复演练需在隔离环境验证（禁止把助记词录入联网聊天/工单）。

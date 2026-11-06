@@ -4,7 +4,7 @@
 **代码基线**：tag `v8.8-audit-fixed` @ `fb6bb45`（`git rev-parse v8.8-audit-fixed^{}` = `fb6bb45`）；`acton check` 0 error 0 warning；`acton test` **177 passed / 18 files**。
 **定位**：本文件不是概念说明，而是**主网切换的可执行清单**。每一步都写清「命令 / 期望输出 / 失败怎么办 / 是否可逆」。
 
-> **当前状态：不是上线许可。** §1 的门禁尚未全部满足（特别是 G0 主网 ops 适配、G0b 生产 D1 隔离、G2 生产时序（待 11/9 03:37 三项断言落地）、G5 admin 冷钱包、G6 GRAM 到账、G7 TON 预算）。未满足项**禁止开始**；不要在聊天里用“已确认/没问题”替代链上证据。
+> **当前状态：不是上线许可。** §1 的门禁尚未全部满足（特别是 G0 主网 ops 适配、G0b 生产 D1 隔离、G2 生产时序（待 11/9 03:37 三项断言落地）、G5 admin 热钱包、G6 GRAM 到账、G7 TON 预算）。未满足项**禁止开始**；不要在聊天里用“已确认/没问题”替代链上证据。
 
 **三件不可逆的事（先记住）**：
 1. **合约部署**（地址与 code hash 永久固定，RC 不可升级）；
@@ -70,8 +70,8 @@ export A9_MAINNET_API="https://toncenter.com/api/v3"
 | **G2** | **生产时序验证（prodtest v8.7 实例）** | v8.7 prodtest **RC `kQDmIKscJAg29SKiBo23j6nR6whklaoMBM7wQ3jVQGGS9gxY`**；证据 `$OPS_RECORDS_DIR/timing-evidence.json` + 下表时间点断言 | **待 11/9 03:37 三项全部落地后转 PASS**：①`stakeCloseAt−stakeOpenAt==129600`（已验）；②**11/8 03:35 关窗**后 `observationEnd−observationStart==86400`；③**11/9 03:37 结算后、R2 被 OpenRound 之前**读 `R2.stakeOpenAt−R1.settledAt` **必须精确 ==43200**（12h 预告期）；若已 OpenRound 则只能断言 `>=43200`（A9-F9 会把 stakeOpenAt 重锚为实际开轮时间，实测偏差=keeper 的 settle-wait） | 任一不等 → 停止；**不得改参数迁就**；11/9 03:37 后仍缺证据 → G2=FAIL | 是（未上主网） |
 | **G3** | **CI 生产门禁生效** | `.github/workflows/ci.yml` 中 production guard 代码 + 最近一次 CI run URL | `DATA_SOURCE=chain`、`CHAIN_NETWORK=mainnet`、`DEMO_ALLOW_UNSIGNED_WRITES=false`、地址非占位符，否则 fail | 门禁缺失 → 停止；先修 CI 并跑一次 dry-run | 是 |
 | **G4** | **toncenter 主网 key 可用** | `curl -s -H "X-API-Key: $TONCENTER_API_KEY" "$A9_MAINNET_RPC/getAddressInformation?address=$ADMIN_ADDRESS"` | HTTP 200，`ok:true`，无限流 | 401/429 → 换 key/加配额；**不得不带 key 硬跑** | 是 |
-| **G5** | **admin 冷钱包地址已定**（D-36） | 硬件钱包地址 + 双人核对记录（首尾 6 字符 + CRC，§3.3） | 地址固定；钱包 `seqno=0`（从未发交易）；私钥离线 ≥2 份 | 不符 → 停止；**部署后 admin 永久不可改** | **否（部署后）** |
-| **G6** | **主网 GRAM 已到 deployer（≥7 GRAM）** | 查 deployer 的 GRAM 余额 | **≥7 GRAM**（预算 6.20，见下表）；< 6.2 → 停止 | 未到账 → 停止，先转够；**不要用测试网 GRAM** | 是（转账可再操作） |
+| **G5** | **admin 热钱包地址已定**（D-41） | acton keystore 地址 + 双人核对记录（首尾 6 字符 + CRC，§3.3） | 地址固定；钱包 `seqno=0`（新钱包）；私钥在跳板机、助记词离线 ≥2 份；**只放 ~2 GRAM gas** | 不符 → 停止；**部署后 admin 永久不可改** | **否（部署后）** |
+| **G6** | **主网 GRAM 已到 deployer（≥9 GRAM）** | 查 deployer 的 GRAM 余额 | **≥9 GRAM**（预算 8.20，见下表）；< 8.2 → 停止 | 未到账 → 停止，先转够；**不要用测试网 GRAM** | 是（转账可再操作） |
 > **主网 GRAM 预算表（v8.8 实测推导）**
 >
 > | 项 | GRAM | 说明 |
@@ -82,10 +82,11 @@ export A9_MAINNET_API="https://toncenter.com/api/v3"
 > | A9 分配 3 笔 | 0.60 | 每笔 0.2（内盘 8亿 / 流动 5亿 / 营销 5亿）；**RC/TV 由部署脚本自动注资，另 2 笔已含在合约部署费用里，勿重复** |
 > | deployer 作业余量 | 1.00 | 开轮 / 关窗 / 结算 / 重试 |
 > | 缓冲 | 1.00 | 429 重试、失败重放 |
-> | **合计** | **6.20** | 建议备 7 GRAM |
+> | admin 钱包 gas（**D-41 新增**） | 2.00 | mint + 3 笔分发 + 后续开轮/喂价；只放 ~2 GRAM，不放资产 |
+> | **合计** | **8.20** | 建议备 **9 GRAM**（deployer 部分按 6.20 预算，各项明细合计 5.81，余量作缓冲；+admin 2.00 = 8.20） |
 >
 > **不要照抄早期估计的 30 GRAM**：那是按「RC 20 / TV 10」的极端保守值算的，与 v8.8 实测不符，会无谓推迟上线。
-| **G7** | **GRAM 预算已批准（6.20 GRAM）** | 上表逐项签字 | 合计 6.20，建议备 7 | 不足 → 停止补足；**不要把 mint 的 tonAmount 压到 0.55 以下** | 是（充值） |
+| **G7** | **GRAM 预算已批准（8.20 GRAM）** | 上表逐项签字 | 合计 8.20，建议备 **9** | 不足 → 停止补足；**不要把 mint 的 tonAmount 压到 0.55 以下** | 是（充值） |
 | **G8** | **主网 D1 方案就绪** | Cloudflare 账号权限、`wrangler whoami`、计划库名 `a9-mainnet`；**且 `[env.production]` database_id 与顶层 demo 不同（见 G0b）** | 有权限创建/迁移；无同名冲突；生产/演示库 id 不同 | 无权限 → 换账号/授权；**不得复用测试库** | 是 |
 | **G9** | **tag 与 5 个 code hash 一致** | `git rev-parse v8.8-audit-fixed^{}`；`node -e` 读 `contracts/build/*.json` 的 hash | commit=`fb6bb45`；5 个 hash 与 §4.2 表逐字一致 | 不一致 → 停止；重新 clean build；**不要用旧 build 产物** | 是（未上链） |
 | **G10** | **主网参数双人复核 + 哈希存档** | `mainnet.params.json` 逐项过表；`sha256sum` 存档 | P0/时间参数/限额/分配/opcode 全对；SHA-256 写入证据文件 | 任一项错 → 停止改文件后重算哈希；**部署后参数不可改** | 是（部署前） |
@@ -227,25 +228,36 @@ wrangler d1 execute a9-mainnet-restore --remote --env production --command "SELE
 
 ## 3. 密钥仪式（主网全新，严禁复用测试网）
 
+> **D-41（2026-11-06 变更）**：**主网 admin 改为「服务器专用热钱包」**（D-36 的冷钱包部分**推迟到 OA 迁移**）。
+> **原因**：keeper 每小时经 `fast_candle.tolk` 用 `A9_SIGNER_WALLET` 直接签 `SubmitCandle`；**acton 不支持硬件钱包签名**，仓库里也没有 OA 的签名提交工具。**admin 若是硬件冷钱包，keeper 一根 K 线都发不出去。** 这是已接受的取舍。
+
 ### 3.1 角色与用途
 
 | 角色 | 用途 | 是否上链 | 地址是否公开 |
 | --- | --- | --- | --- |
 | deployer | 部署/注资签名（acton 钱包） | 是（发交易） | 不公开 |
-| admin | RC / TV / OA 的唯一 owner（D-36 冷钱包） | 是（写 admin） | 不公开 |
+| **admin** | RC / TV / OA 的唯一 owner（**D-41：服务器专用热钱包，acton keystore**） | 是（写 admin） | 不公开 |
 | treasury | 接收 100 亿 mint，A9 分发来源 | 是 | 不公开 |
 | team / marketing / liquidity | 收款热钱包 | 是（收款） | 不公开（团队内盘钱包除外） |
 | internal | 团队内盘管理钱包（未售/撤回内盘） | 是 | **公开可查** |
 
 ### 3.2 生成与备份
 
-- 在**离线机器/硬件钱包**生成，使用全新助记词；**禁止复用测试网任何 mnemonic/私钥**；
-- 每个角色独立助记词（至少 deployer / admin / treasury 三者分离）；
-- 助记词离线抄写 ≥2 份、异地存放；密码管理器只存**地址与标签**，不存助记词；
+- deployer / treasury / team / marketing / liquidity / internal：**离线机器 + 硬件钱包/冷钱包**生成，全新助记词，**禁止复用测试网任何 mnemonic/私钥**；
+- **admin（D-41）**：部署时在**运维跳板机**上新建 **acton keystore 钱包**：
+
+~~~bash
+acton wallet new --name a9-admin        # 生成后记下地址；助记词离线备份 ≥2 份
+acton wallet list                       # 确认地址（部署后才能用 A9_SIGNER_WALLET 指定）
+~~~
+
+- admin 钱包**只放 ~2 GRAM 做 gas**（mint + 3 笔分发 + 后续开轮/喂价），**不放任何资产**；
+- 助记词离线备份 ≥2 份、异地存放；但**私钥在服务器上**——这是 D-41 已接受的取舍；
+- 其余角色助记词离线抄写 ≥2 份；密码管理器只存**地址与标签**，不存助记词；
 - 环境变量（不落盘、不进命令历史）：`TON_DEPLOYER_WALLET`、`TON_DEPLOYER_MNEMONIC`、`TON_ADMIN_OWNER_ADDRESS`、`TON_TREASURY_ADDRESS`；收款地址由 registry 登记。
 
 **期望**：7 个地址（deployer / admin / treasury / team / marketing / liquidity / internal）全部生成并记录。
-**失败**：复用/混用 → 停止，重新生成。**可逆**：是（尚未上链）；一旦部署后 admin 不可改。
+**失败**：复用/混用 → 停止，重新生成；admin 用硬件钱包 → 停止（keeper 发不出 K 线）。**可逆**：是（尚未上链）；一旦部署后 admin 永久不可改。
 
 ### 3.3 双人核对（首尾 6 字符 + CRC）
 
@@ -261,16 +273,20 @@ EOF
 两人各自在离线环境执行并口头/纸质比对；**首尾 6 字符、长度、CRC32 全部一致**才算通过。
 失败：任一不一致 → 停止，重新导出地址核对。**可逆**：是。
 
-### 3.4 admin 冷钱包硬性要求（D-36 风险已接受）
+### 3.4 admin 服务器热钱包硬性要求（D-41：D-36 冷钱包推迟到 OA 迁移）
 
-- 硬件钱包生成，助记词离线 ≥2 份；**部署后 admin 永久不可改**；
-- 部署前检查该地址 `seqno=0`（从未发出交易）：
+- admin 私钥在**运维跳板机**上（acton keystore），**不与公开服务/worker 同机**；
+- 跳板机：**SSH key-only、禁用密码登录、最小权限**；仅部署/运维账号可登；
+- **监控 admin 地址的任何出账（发消息）并告警**——这是唯一能发现密钥被盗的方式；
+- **每周**核对 admin 钱包 nonce 历史与链上 admin 配置未变；
+- **部署后 admin 永久不可改（无 SetAdmin）；密钥泄露即永久失控，无补救路径**；
+- 部署前检查该地址 `seqno=0`（新钱包天然为 0）：
 
 ~~~bash
 curl -s -H "X-API-Key: $TONCENTER_API_KEY" "$A9_MAINNET_RPC/getWalletInformation?address=$ADMIN_ADDRESS" | jq
 ~~~
 
-期望：`seqno` 为 0（或钱包未初始化、无历史交易）。失败：有历史交易 → 不是干净冷钱包 → 停止更换。**可逆**：部署前是。
+期望：`seqno` 为 0（或钱包未初始化、无历史交易）。失败：有历史交易 → 不是新钱包 → 停止更换。**可逆**：部署前是。
 
 ### 3.5 登记
 
@@ -347,7 +363,7 @@ Deploy complete: contracts + wiring + A9 funding are on-chain.
 1. G0~G11 全绿；
 2. `$OPS_PARAMS` 指向 mainnet，且 `grep -- "--net testnet"` 为 0；
 3. dry-run 已命中 `Funded RC Jetton Wallet`；
-4. admin 冷钱包地址已双人核对；
+4. admin 服务器热钱包（acton keystore）地址已双人核对；
 5. deployer TON ≥30。
 
 ~~~bash
@@ -408,7 +424,7 @@ done
 ### 5.1 铸造去向
 
 - mint-once 把 100 亿铸给 **treasury**（`TON_TREASURY_ADDRESS`，部署者冷钱包）；
-- 若项目方按 D-36 决定先铸给 admin 冷钱包再分发：把 treasury 换成 admin 地址，**必须双人签字**；两种方式都只能选一种，不能重复 mint；
+- 若项目方决定先铸给 **admin 服务器热钱包（D-41）** 再分发：把 treasury 换成 admin 地址，**必须双人签字**；两种方式都只能选一种，不能重复 mint；
 - 铸造后 `total_supply == 1e19` 且 `mintable == false`。
 
 ### 5.2 三笔分配（**RC/TV 由部署脚本自动注资，勿重复**）
@@ -707,7 +723,7 @@ curl -s https://a9.lat/api/health | jq '.data.oracle'
 5 个 hash：见 §4.2（与 docs/28 §5 一致）
 D1：a9-mainnet / database_id=____________
 合约地址：JM=____ OA=____ TV=____ RC=____ RCwallet=____ TVwallet=____
-admin 冷钱包：____________（首尾6 + CRC：____ / ____）
+admin 热钱包（keystore）：____________（首尾6 + CRC：____ / ____）
 treasury：____________　内盘：____________（公开）
 注资 tx：RC=____ TV=____ 内盘=____ 流动=____ 营销=____
 Worker 版本：____　CI run：____

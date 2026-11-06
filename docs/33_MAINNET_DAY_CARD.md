@@ -11,7 +11,7 @@
 **当天终端先填一次**（后面命令直接复制）：
 ~~~bash
 export A9_MAINNET_RPC=https://toncenter.com/api/v2 A9_MAINNET_API=https://toncenter.com/api/v3 TONCENTER_API_KEY=<mainnet key>
-export RC=<RC> TV=<TV> JM=<JettonMaster> OA=<OracleAdapter> JW=<JettonWallet> ADMIN_ADDRESS=<冷钱包>
+export RC=<RC> TV=<TV> JM=<JettonMaster> OA=<OracleAdapter> JW=<JettonWallet> ADMIN_ADDRESS=<admin keystore 地址>
 export PROD_D1_DATABASE_ID=<a9-mainnet-id> A9_SIGNER_WALLET=<signer> OPS_RECORDS_DIR=$PWD/ops/records/mainnet-$(date +%Y%m%d)
 export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> PROD_JETTON_MASTER_ADDRESS=<JM-raw> PROD_ORACLE_CONFIG_HASH=<sha256:...>
 ~~~
@@ -19,10 +19,16 @@ export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> P
 ---
 
 [ ] 1. 物料核对（5 样）
-    命令：`test -n "$TONCENTER_API_KEY" && test -n "$ADMIN_ADDRESS" && test -n "$PROD_D1_ID" && grep -q "可上线" docs/22_EXTERNAL_AUDIT_REPORT.md && echo MATERIALS_OK`
-    期望：`MATERIALS_OK`（主网 key 有效 / 冷钱包地址已双人核对 / deployer ≥7 GRAM / D1 库 ID 已建 / 审计 PASS 有签字）
+    命令：`test -n "$TONCENTER_API_KEY" && test -n "$ADMIN_ADDRESS" && test -n "$PROD_D1_DATABASE_ID" && grep -q "可上线" docs/22_EXTERNAL_AUDIT_REPORT.md && echo MATERIALS_OK`
+    期望：`MATERIALS_OK`（主网 key 有效 / **admin keystore 已生成并 ≥2 GRAM**、双人核对 / deployer ≥9 GRAM / D1 库 ID 已建 / 审计 PASS 有签字）
     失败：缺任何一项 → **停止**（见 docs/29 §1 G4/G5/G6/G7）
     可逆：—
+
+[ ] 1.5 密钥仪式（**admin = 服务器专用热钱包**，D-41）
+    命令：`acton wallet new --name a9-admin && acton wallet list; # 双人核对首尾6+CRC；助记词离线≥2份；只充 ~2 GRAM gas`
+    期望：admin keystore 地址已生成、seqno=0、双人核对通过、余额 ≥2 GRAM；其他角色密钥离线生成；**不用硬件钱包做 admin**（keeper 发不出 K 线）
+    失败：admin 用硬件钱包 / 未备份 / 未双人核对 → **停止**（D-41；部署后 admin 永久不可改，泄露无补救）
+    可逆：是（部署前）
 
 [ ] 2. preflight 全绿
     命令：`node worker/scripts/preflight-mainnet.mjs --tag=v8.9-audit-fixed`

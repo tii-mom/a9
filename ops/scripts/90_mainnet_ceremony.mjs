@@ -133,12 +133,12 @@ async function P1() {
     A9_DEPLOY_MINT_FORWARD_TON: '0.4',
     A9_DEPLOY_WIRING_TON: '0.06',
     A9_DEPLOY_FUND_TON: '0.2',
-    A9_TIMING_PREVIEW_SECONDS: '43200',
-    A9_TIMING_STAKE_SECONDS: '129600',
-    A9_TIMING_CANDLE_SECONDS: '3600',
-    A9_TIMING_CANDLE_COUNT: '24',
-    A9_TIMING_MIN_QUALIFIED: '16',
-    A9_TIMING_OBSERVATION_SECONDS: '86400',
+    A9_TIMING_PREVIEW_SECONDS: String(params.timeline.previewSeconds),
+    A9_TIMING_STAKE_SECONDS: String(params.timeline.stakeDurationSeconds),
+    A9_TIMING_CANDLE_SECONDS: String(params.timeline.candleSeconds),
+    A9_TIMING_CANDLE_COUNT: String(params.timeline.candleCount),
+    A9_TIMING_MIN_QUALIFIED: String(params.timeline.minQualifiedCandles),
+    A9_TIMING_OBSERVATION_SECONDS: String(params.timeline.observationSeconds),
   };
   if (dryRun) { console.log('[P1] dry-run: 15_deploy_contracts.mjs --execute（env 参数化 v8.9）'); return 'DRY_RUN'; }
   must(execute, 'P1 需要 --execute（或 --dry-run）');
@@ -275,7 +275,7 @@ async function P5() {
     }
     const final = (await walletBalance(owner)).balance;
     must(final === target, kind + ' 金额不符：' + final.toString() + ' != ' + target.toString());
-    console.log('[P5] ' + kind + ' = ' + final.toString());
+    console.log('[P5] ' + kind + ' probe=1 → ' + target.toString() + '（probe 回读/Q确认，余量已发）');
   }
   console.log('[P5] PASS：RC/TV 已由部署注资，内部/流动/营销 probe 完成');
   return 'PASS';
@@ -286,8 +286,10 @@ async function P6() {
   // 主网上线开轮后 totalSupply 会因奖励/本金/团队销毁而下降，admin 也会因分发而不再归零；
   // 不得拿本断言去校验运行中的实例。
   const master = registry.contracts.jettonMaster.address;
-  const adminWallet = registry.contracts.jettonMasterTreasuryWallet.address;
-  must(master && adminWallet, 'registry 缺少 master/admin wallet');
+  must(master, 'registry 缺少 jettonMaster');
+  const adminOwner = registry.wallets.adminOwner && registry.wallets.adminOwner.address;
+  must(adminOwner, 'registry 缺少 wallets.adminOwner');
+  const adminWallet = (await walletBalance(adminOwner)).address;
   const rc = registry.contracts.roundController.address;
   const cur = await runGetMethod(params, rc, 'get_current_round');
   const round = stackItemToBigInt(cur.stack[0]);
