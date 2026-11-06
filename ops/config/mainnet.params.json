@@ -1,0 +1,465 @@
+{
+  "meta": {
+    "project": "A9 Protocol / 引信机制",
+    "network": "mainnet",
+    "chainId": -3,
+    "version": "V7",
+    "sourceOfTruth": "docs/00_DECISIONS_V2.md",
+    "configVersion": 1,
+    "riskDisclosureVersion": 1,
+    "generatedAt": "2026-11-06",
+    "notes": [
+      "本文件是主网部署的唯一参数输入；部署前必须双人复核并生成 SHA-256 存档。",
+      "所有 *_Raw 均为 9 位精度原始单位字符串（1 A9 = 1e9），禁止浮点数。",
+      "V7 时间参数：12h PREVIEW + 36h 报名 + 24h 观察（24 根 x 1h，阈值 16）= 72h/轮；10 轮 30 天。",
+      "admin = 单一冷钱包（D-36 方案 B），风险已书面接受：admin 永久不可改、TV 可重定向团队额度、OA 可换签名人、单钥无补救。",
+      "主网严禁复用测试网任何密钥。"
+    ]
+  },
+  "network": {
+    "name": "ton-mainnet",
+    "chainId": -239,
+    "explorerBaseUrl": "https://tonscan.org",
+    "toncenter": {
+      "v2": "https://toncenter.com/api/v2",
+      "v3": "https://toncenter.com/api/v3",
+      "apiKeyEnv": "TONCENTER_API_KEY"
+    },
+    "deployer": {
+      "walletVersion": "v4r2",
+      "walletNameEnv": "TON_DEPLOYER_WALLET",
+      "walletNameDefault": "a9-deployer",
+      "mnemonicEnv": "TON_DEPLOYER_MNEMONIC",
+      "treasuryAddressEnv": "TON_TREASURY_ADDRESS",
+      "minTonBalance": 30,
+      "keyPolicy": "主网部署者钱包必须全新生成，助记词离线备份 >=2 份、异地存放，绝不进入仓库或命令历史；严禁复用测试网密钥。"
+    }
+  },
+  "token": {
+    "name": "A9",
+    "symbol": "A9",
+    "decimals": 9,
+    "totalSupplyTokens": 10000000000,
+    "totalSupplyRaw": "10000000000000000000",
+    "mintOpcode": "0x00000015",
+    "burnNotificationOpcode": "0x7bdd97de",
+    "burnNotificationAlias": "0x7bcdefa0",
+    "mintPolicy": "mint-once：op 0x15，金额必须 1e19，同一笔交易内 admin 置 null（mintable=false）；二次 mint 报 MintClosed(75)。burn_notification 标准 op 0x7bdd97de（旧别名 0x7bcdefa0 也接受；链上对账按标准 op 过滤）。"
+  },
+  "supply": {
+    "roundCount": 10,
+    "allocations": {
+      "roundRewards": {
+        "percent": 70,
+        "tokens": 7000000000,
+        "raw": "7000000000000000000",
+        "recipient": "roundControllerJettonWallet (owner = RoundController；同时托管本金+奖励)"
+      },
+      "internalSale": {
+        "percent": 8,
+        "tokens": 800000000,
+        "raw": "800000000000000000",
+        "recipient": "teamInternalWallet (公开可查；硬上限 8 亿，不可超卖)"
+      },
+      "liquidity": {
+        "percent": 5,
+        "tokens": 500000000,
+        "raw": "500000000000000000",
+        "recipient": "liquidityWallet (热钱包；冷启动 2 亿 A9 + $232,000 USDT（同价 $0.00116，占 5 亿流动性额度 40%，剩余 3 亿后续加池）)",
+        "coldStartTokens": 200000000,
+        "coldStartRaw": "200000000000000000",
+        "coldStartUsdtUsdE8": "23200000000000",
+        "coldStartPercentOfLiquidity": 40
+      },
+      "team": {
+        "percent": 12,
+        "tokens": 1200000000,
+        "raw": "1200000000000000000",
+        "recipient": "TeamVault (teamVaultJettonWallet)"
+      },
+      "marketing": {
+        "percent": 5,
+        "tokens": 500000000,
+        "raw": "500000000000000000",
+        "recipient": "marketingWallet (热钱包)"
+      }
+    },
+    "invariant": "sum(allocations) === totalSupplyTokens === 10000000000"
+  },
+  "rounds": {
+    "roundCount": 10,
+    "roundRewardTokens": 700000000,
+    "roundRewardRaw": "700000000000000000",
+    "rewardPoolRaw": "7000000000000000000",
+    "teamRoundTokens": 120000000,
+    "teamRoundRaw": "120000000000000000",
+    "teamPoolRaw": "1200000000000000000",
+    "initialStakeGrantedRaw": "0",
+    "notes": "十轮奖励 10 × 7 亿 = 70 亿；团队 10 × 1.2 亿 = 12 亿。失败轮三笔销毁：reward + team + 本轮全部本金。"
+  },
+  "price": {
+    "p0UsdE8": "116000",
+    "p0Usd": "0.00116",
+    "usdPriceScale": 100000000,
+    "priceMultiplier": 2,
+    "multiplierFixed": true,
+    "targetMode": "LOCK_AT_OPEN",
+    "targetFormula": "max(P0 × 2^tier, 2 × TWAP24hAtOpen)",
+    "targetLockedAtOpen": true,
+    "touchPriceEarlyCloseEnabled": true,
+    "tierRule": "tier = 1 + successfulRounds; failure keeps tier (D-28)",
+    "ladderRefUsdE8": {
+      "1": "232000",
+      "2": "464000",
+      "3": "928000",
+      "4": "1856000",
+      "5": "3712000",
+      "6": "7424000",
+      "7": "14848000",
+      "8": "29696000",
+      "9": "59392000",
+      "10": "118784000"
+    },
+    "fdvAtP0Usd": "11600000",
+    "gramRatio": "1 GRAM = 1000 A9 (anchor only; targets are USD_E8)"
+  },
+  "timeline": {
+    "previewSeconds": 43200,
+    "stakeDurationSeconds": 129600,
+    "candleSeconds": 3600,
+    "candleCount": 24,
+    "minQualifiedCandles": 16,
+    "observationSeconds": 86400,
+    "roundSeconds": 259200,
+    "roundsTotalSeconds": 2592000,
+    "formula": "previewEnd = prevSettledAt + 43200; stakeOpenAt = previewEnd; stakeCloseAt = stakeOpenAt + 129600 (触价可提前); observationStart = stakeCloseAt; observationEnd = observationStart + 86400",
+    "boundaryRule": "关窗即观察，不做整点取整；主网若需对齐应在结算时让 prevSettledAt 落在整点边界"
+  },
+  "stakeLimits": {
+    "minStakeTokens": 10000,
+    "minStakeRaw": "10000000000000",
+    "maxStakePerAddressBps": 1000,
+    "maxStakePerAddressRaw": "20000000000000000",
+    "maxStakePerAddressTokens": 20000000,
+    "maxStakePerAddressNote": "固定硬顶 20,000,000 A9（= 200,000,000 × 1000/10000，contracts/README §9.1 裁决）；首个存款人不再被 10% 动态规则卡死",
+    "maxTotalStakeTokens": 200000000,
+    "maxTotalStakeRaw": "200000000000000000",
+    "cancelStakeAllowed": false
+  },
+  "techAbort": {
+    "pauseSeconds": 1209600,
+    "pauseDays": 14,
+    "observationTimeoutSeconds": 604800,
+    "observationTimeoutDays": 7,
+    "anyoneCanTrigger": true,
+    "refundPrincipalBps": 10000,
+    "burnsRewardOnAbort": false,
+    "burnsTeamOnAbort": false,
+    "tierConsumed": false
+  },
+  "risk": {
+    "disclosureVersion": 1,
+    "requiredCheckbox": "acceptFullPrincipalBurn = true",
+    "mandatoryWarnings": [
+      "高风险实验：失败轮 100% 质押本金销毁，可能损失全部本金",
+      "目标价可能因 2× 开窗 TWAP 上移；通过率不保证",
+      "项目方不提供外部法律意见，合规风险由项目方承担（D-34）",
+      "奖励 pull claim：用户自付 gas，跨轮累积一次性领取"
+    ]
+  },
+  "roles": {
+    "adminOwner": {
+      "env": "TON_ADMIN_OWNER_ADDRESS",
+      "note": "RoundController / TeamVault / OracleAdapter 的单密钥 owner；硬件钱包冷存储，永久离线；RC 不可升级（D-36 风险已书面接受）"
+    },
+    "treasury": {
+      "env": "TON_TREASURY_ADDRESS",
+      "note": "初始铸造 100 亿接收地址（部署者冷钱包）"
+    },
+    "teamWallet": {
+      "registry": "teamWallet",
+      "public": false,
+      "note": "团队收款热钱包；每轮成功由 TeamVault 转 1.2 亿"
+    },
+    "marketingWallet": {
+      "registry": "marketingWallet",
+      "public": false,
+      "note": "营销 5 亿热钱包"
+    },
+    "liquidityWallet": {
+      "registry": "liquidityWallet",
+      "public": false,
+      "note": "流动性 5 亿热钱包"
+    },
+    "teamInternalWallet": {
+      "registry": "teamInternalWallet",
+      "public": true,
+      "note": "团队内盘管理钱包，公开可查；未售/撤回内盘转入；不得二级直砸"
+    }
+  },
+  "permissions": {
+    "adminOwnerAllowed": [
+      "OpenRound (R1 无 PREVIEW 必须手动；R2~R10 自动开窗后的确认)",
+      "SetJettonWallet (RC/TV 部署后、InitController 前，一次性)",
+      "CloseStaking",
+      "PauseOracle / ResumeOracle",
+      "FinalizeRound (必要时触发结算)",
+      "AbortTechnical (任何人都可触发；owner 不独占)"
+    ],
+    "adminOwnerForbidden": [
+      "修改已开轮目标价 / K 线阈值 / oracle config hash",
+      "转移用户质押本金",
+      "取消质押 / 提前退款（除 TECHNICAL_ABORTED 的合约内路径）",
+      "升级 / 替换 RoundController 代码",
+      "把 FAILED_PERMANENT / SUCCEEDED 改回活动状态",
+      "绕过 TeamVault 直接动用团队额度"
+    ],
+    "teamVault": {
+      "acceptsOnly": "RoundController",
+      "releaseMsg": "ReleaseTeamQuota(0x5254000C)",
+      "burnMsg": "BurnTeamQuota(0x5254000D)",
+      "mutexPerRound": true
+    },
+    "opcodes": {
+      "OpenRound": "0x52540001",
+      "CloseStaking": "0x52540002",
+      "SubmitCandle": "0x52540003",
+      "JettonBurnNotification": "0x7bdd97de",
+      "OracleCandleVerified": "0x52540004",
+      "FinalizeRound": "0x52540005",
+      "ClaimPrincipal": "0x52540006",
+      "ClaimReward": "0x52540007",
+      "StartFailureBurn": "0x52540008",
+      "BurnAck": "0x52540009",
+      "PauseOracle": "0x5254000A",
+      "ResumeOracle": "0x5254000B",
+      "ReleaseTeamQuota": "0x5254000C",
+      "BurnTeamQuota": "0x5254000D",
+      "ClaimAll": "0x5254000E",
+      "StakeDeposit": "0x5254000F",
+      "SetJettonWallet": "0x52540016",
+      "SetJettonWalletCode": "0x5254001B",
+      "SetTeamWalletJettonWallet": "0x5254001C",
+      "AbortTechnical": "0x52540010",
+      "StartObservation": "0x52540011",
+      "InitController": "0x52540012",
+      "TeamReleasedAck": "0x52540013",
+      "TeamBurnedAck": "0x52540014",
+      "RetryPendingActions": "0x52540015",
+      "JettonTransfer": "0x0F8A7EA5",
+      "JettonBurn": "0x595F07BC",
+      "JettonTransferNotification": "0x7362D09C",
+      "TopUpTons": "0xD372158C"
+    },
+    "events": {
+      "TargetPriceSet": "0x52540101",
+      "RoundSettled": "0x52540102",
+      "DepositAccepted": "0x52540103",
+      "TechnicalAborted": "0x52540104",
+      "TeamReleased": "0x52540201",
+      "TeamBurned": "0x52540202"
+    },
+    "opcodeNote": "0x52540001~0E 为 docs/04 §5 注册值；0F~15 与事件 0x525401xx/0x525402xx 为 contracts/contracts/constants.tolk 的项目扩展，测试网按此实现并纳入 ABI 清单。"
+  },
+  "toolchain": {
+    "contractsDir": "contracts",
+    "buildDir": "contracts/build",
+    "language": "Tolk (RoundController + TeamVault) / FunC (Jetton official reuse)",
+    "activeAdapter": "acton",
+    "pinned": true,
+    "pinnedVersion": "acton 1.1.0 / tolk 1.4.1（与 contracts/Acton.toml 一致；升级需重新评审并更新本字段）",
+    "adapters": {
+      "acton": {
+        "bin": "acton",
+        "versionEnv": "ACTON_VERSION",
+        "walletNameEnv": "TON_DEPLOYER_WALLET",
+        "commands": {
+          "buildAll": "cd {contractsDir} && acton build",
+          "deployAllContracts": "cd {contractsDir} && acton script --net testnet scripts/deploy-emulation.tolk",
+          "deployJettonMaster": "cd {contractsDir} && acton script --net testnet scripts/deploy/deploy_jetton_master.tolk {treasury} {totalSupplyRaw}",
+          "mintAndLockJetton": "cd {contractsDir} && acton script --net testnet scripts/deploy/mint_and_lock_jetton.tolk {master} {treasury} {totalSupplyRaw}",
+          "fundVault": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} JETTON_MASTER_ADDRESS={jettonMaster} acton script --net testnet scripts/deploy/fund_jetton.tolk {recipient} {amount}",
+          "fundTon": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} acton script --net testnet scripts/deploy/fund_ton.tolk {recipient} {amountTon}",
+          "adminOp": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} acton script --net testnet scripts/deploy/admin_op.tolk {op} {roundId} {extra}",
+          "submitCandle": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_CANDLE_INDEX={candleIndex} A9_PERIOD_START={periodStart} A9_PERIOD_END={periodEnd} A9_TWAP_E8={twapUsdE8} A9_DIGEST={digest} acton script --net testnet scripts/deploy/admin_op.tolk submit-candle {roundId} 0",
+          "setJettonWallet": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} A9_TARGET_ADDRESS={targetContract} A9_JETTON_WALLET_ADDRESS={walletAddress} acton script --net testnet scripts/deploy/admin_op.tolk set-jetton-wallet 0",
+          "bindRoles": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} TEAM_VAULT_ADDRESS={teamVault} A9_CONTROLLER_ADDRESS={roundController} acton script --net testnet scripts/deploy/admin_op.tolk init-controller 0"
+        },
+        "note": "Acton script 只接受位置参数（按 main() 参数顺序），不支持 flag；广播脚本默认 dry-run，OPS_EXECUTE=1 才广播、OPS_CONFIRM=YES 二次确认、A9_SIGNER_WALLET 指定签名钱包；真实网络必须带 --net testnet；本地验证广播可加 OPS_ALLOW_EMULATION=true。deploy-emulation.tolk 是整体顺序部署（无子命令）；分步只保留 Jetton 两步。地址文件 contracts/deploy/{jetton-master,round-controller,team-vault}.addr 可直接读取。ABI v8.4-audit-fixed：SetJettonWalletCode=0x5254001B（code:cell，RC，仅 currentRoundId==0）、SetTeamWalletJettonWallet=0x5254001C（wallet:address，TV，admin 一次性）；TV 不通过 InitController 传 teamWallet 钱包。注意：admin_op 不提供这两个一次性 op（contract-dev 确认不补），因此测试网只走整体部署路径：15（内置 wiring）→ 65 --query-only → 70。",
+        "stepwiseDeployment": {
+          "enabled": false,
+          "blockedCommands": [
+            "setJettonWalletCode",
+            "setTeamWalletJettonWallet"
+          ],
+          "reason": "admin_op.tolk 未实现 set-jetton-wallet-code / set-team-wallet-jetton-wallet；仅 deploy-emulation 内置这两笔 wiring",
+          "recommendedPath": "15 deploy-emulation → 65 --query-only → 70 → 55 → 50 → 60 → 90"
+        }
+      },
+      "manual": {
+        "bin": null,
+        "note": "若 Acton/Blueprint 不可用：由合约负责人在钱包/IDE 完成部署，再用 --adopt <address> 登记（见 runbooks/01_deploy_testnet.md §7）。"
+      }
+    }
+  },
+  "deployPlan": [
+    {
+      "id": "preflight",
+      "step": 0,
+      "script": "00_preflight.mjs",
+      "modes": [
+        "whole",
+        "jetton"
+      ],
+      "dependsOn": []
+    },
+    {
+      "id": "jettonMaster",
+      "step": 10,
+      "script": "10_deploy_jetton.mjs",
+      "modes": [
+        "jetton"
+      ],
+      "dependsOn": [
+        "preflight"
+      ],
+      "artifact": "contracts/build/JettonMaster.json"
+    },
+    {
+      "id": "jettonMint",
+      "step": 11,
+      "script": "11_mint_and_lock_jetton.mjs",
+      "modes": [
+        "jetton"
+      ],
+      "dependsOn": [
+        "jettonMaster"
+      ],
+      "artifact": "contracts/build/JettonMaster.json"
+    },
+    {
+      "id": "contracts",
+      "step": 15,
+      "script": "15_deploy_contracts.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "preflight"
+      ]
+    },
+    {
+      "id": "jettonWallets",
+      "step": 65,
+      "script": "65_set_jetton_wallets.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "contracts"
+      ]
+    },
+    {
+      "id": "params",
+      "step": 40,
+      "script": "40_init_params.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "contracts"
+      ]
+    },
+    {
+      "id": "tonGas",
+      "step": 55,
+      "script": "55_fund_ton.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "params"
+      ]
+    },
+    {
+      "id": "funding",
+      "step": 50,
+      "script": "50_fund_vaults.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "tonGas"
+      ]
+    },
+    {
+      "id": "register",
+      "step": 60,
+      "script": "60_verify_and_register.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "funding"
+      ]
+    },
+    {
+      "id": "verify",
+      "step": 90,
+      "script": "verify_deployment.mjs",
+      "modes": [
+        "whole"
+      ],
+      "dependsOn": [
+        "register"
+      ]
+    }
+  ],
+  "tonBalances": {
+    "roundControllerMinTon": 20,
+    "teamVaultMinTon": 10,
+    "note": "contracts/deploy/params.testnet.json：RC ≥20 TON、TV ≥10 TON 作为 gas/存储；每条跨合约指令约 0.05 TON。"
+  },
+  "deployOrder": [
+    "1. 部署 Jetton Master，铸造 100 亿，关闭 mint 权限",
+    "2. 部署 TeamVault：jettonWallet 用占位地址（admin），controller = null",
+    "3. 部署 RoundController：teamVault = TV 地址，stakingJettonWallet 用占位地址",
+    "4. Jetton Master get_wallet_address(RC) → admin RC.SetJettonWallet(0x52540016)",
+    "4b. admin RC.SetJettonWalletCode(0x5254001B)：写入 jetton wallet code hash（仅 currentRoundId==0），供 ReturnExcessesBack 推导接收方 canonical 钱包（由 deploy-emulation 内置）",
+    "5. Jetton Master get_wallet_address(TV) → admin TV.SetJettonWallet(0x52540016)",
+    "5b. 查询 teamWallet 的 canonical Jetton Wallet（get_wallet_address），由 admin 调 TV.SetTeamWalletJettonWallet(0x5254001C) 写入（不是 InitController 参数；由 deploy-emulation 内置）",
+    "6. admin TV.InitController(roundController)（一次性，不带 teamWallet 参数）",
+    "7. 给 RC Jetton Wallet 打 70 亿 A9；给 TV Jetton Wallet 打 12 亿 A9；其余按 8/5/5 分配",
+    "8. 给 RC ≥20 TON、TV ≥10 TON；admin OpenRound(round=1, twap24h) 开首轮（R1 无 PREVIEW）"
+  ],
+  "monitoring": {
+    "workerBaseUrlEnv": "OPS_WORKER_BASE_URL",
+    "workerBaseUrlDefault": "http://127.0.0.1:8787",
+    "healthStaleMinutes": 5,
+    "candleLagAllowed": 1,
+    "supplyDriftRaw": "0",
+    "vaultMinBalanceRaw": "0",
+    "burnPendingMinutes": 30,
+    "adminQuietWindowMinutes": 15,
+    "expectedRoundSeconds": 259200,
+    "alertLevels": {
+      "P0": "15 分钟内响应，7×24",
+      "P1": "30 分钟内响应",
+      "P2": "4 小时内响应",
+      "P3": "次工作日"
+    }
+  },
+  "notifications": {
+    "telegram": {
+      "botTokenEnv": "TELEGRAM_BOT_TOKEN",
+      "chatIdEnv": "TELEGRAM_OPS_CHAT_ID",
+      "enabled": false
+    },
+    "email": {
+      "smtpHostEnv": "OPS_SMTP_HOST",
+      "toEnv": "OPS_ALERT_EMAIL",
+      "enabled": false
+    },
+    "channelsNote": "所有密钥/Token 只从环境变量读取，绝不写入本文件或仓库。"
+  }
+}
