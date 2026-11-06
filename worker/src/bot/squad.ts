@@ -1,7 +1,8 @@
 /**
  * 战队等级与排名的纯函数（无 I/O，便于单测）。
- * 等级按成员数：5 / 20 / 100 / 500 → Lv1..Lv4（见 docs/35 §4.3）。
+ * 等级按本城上车人数（distinct 报名地址）：5 / 20 / 100 / 500 → Lv1..Lv4（见 docs/35 §4.3）。
  */
+import { parseTonAddress } from '../indexer/address';
 
 /** 各等级所需人数（Lv1..Lv4） */
 export const SQUAD_LEVELS = [5, 20, 100, 500] as const;
@@ -61,4 +62,31 @@ export function newSquadCode(): string {
     const code = squadCodeFromBytes(bytes);
     if (code) return code;
   }
+}
+
+/** 地址归一键：友好地址 / raw 地址统一成 raw，与 social/snapshot.ts 的 addressKey 同口径。 */
+function addressKeyOf(address: string): string {
+  return parseTonAddress(address)?.raw ?? address;
+}
+
+/**
+ * 本城上车人数按战队计数（纯函数）。同一地址只计一次；地址不属于任何战队的不计。
+ * 与 social/snapshot.ts 的 stakersBySquad 同口径（地址归一后按 users.squad_code 归队）。
+ */
+export function countStakersBySquad(
+  stakerAddresses: readonly string[],
+  users: ReadonlyArray<{ wallet: string; squadCode: string }>,
+): Map<string, number> {
+  const squadByKey = new Map<string, string>();
+  for (const user of users) squadByKey.set(addressKeyOf(user.wallet), user.squadCode);
+  const seen = new Set<string>();
+  const counts = new Map<string, number>();
+  for (const address of stakerAddresses) {
+    const key = addressKeyOf(address);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const code = squadByKey.get(key);
+    if (code) counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  return counts;
 }

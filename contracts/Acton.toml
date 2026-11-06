@@ -22,6 +22,16 @@ display-name = "StakeTicket"
 src = "contracts/StakeTicket.tolk"
 depends = []
 
+[contracts.ClaimRecord]
+display-name = "ClaimRecord"
+src = "contracts/ClaimRecord.tolk"
+depends = []
+
+[contracts.JunxiangDistributor]
+display-name = "JunxiangDistributor"
+src = "contracts/JunxiangDistributor.tolk"
+depends = ["JettonWallet", "ClaimRecord"]
+
 [contracts.RoundController]
 display-name = "RoundController"
 src = "contracts/RoundController.tolk"

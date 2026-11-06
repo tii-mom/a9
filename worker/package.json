@@ -13,12 +13,16 @@
     "db:seed:local": "wrangler d1 execute fuse-protocol --local --file=./seed/seed.sql",
     "seed:gen": "node scripts/generate-seed.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "test:social": "node --import ./src/social/test-register.mjs --test src/social/social.test.ts src/social/initdata.test.ts",
-    "test:bot": "node --import ./src/bot/test/register.mjs --test src/bot/*.test.ts"
+    "test:social": "node --import ./src/social/test-register.mjs --test src/social/social.test.ts src/social/initdata.test.ts src/social/junxiang.test.ts src/social/merkle-payout.test.ts src/social/junxiang-db.test.ts",
+    "test:bot": "node --import ./src/bot/test/register.mjs --test src/bot/*.test.ts",
+    "test:auth": "node --import ./src/social/test-register.mjs --test src/tonproof.test.ts"
   },
   "devDependencies": {
     "wrangler": "^4.157.0",
     "typescript": "^5.9.2",
     "@cloudflare/workers-types": "^4.20250901.0"
+  },
+  "dependencies": {
+    "@resvg/resvg-wasm": "^2.6.2"
   }
 }

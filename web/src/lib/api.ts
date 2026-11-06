@@ -40,9 +40,43 @@ export class ApiError extends Error {
   }
 }
 
+/** 登录会话桥：钱包模块注册，请求层据此给 POST 附加 Authorization（避免 api.ts 反向依赖钱包模块）。 */
+export interface AuthBridge {
+  /** 当前钱包的有效会话 token；没有则 null */
+  token(): string | null;
+  /** 写请求发出时没有会话（仅用于提示「签名登录」，不阻止请求） */
+  missingSession(): void;
+}
+
+let authBridge: AuthBridge = { token: () => null, missingSession: () => undefined };
+
+export function setAuthBridge(bridge: AuthBridge): void {
+  authBridge = bridge;
+}
+
+export interface AuthChallenge {
+  /** 形如 a9-auth:<nonce>，作为 TON Connect ton_proof 的 payload */
+  payload: string;
+  /** 毫秒时间戳 */
+  expiresAt: number;
+}
+
+export interface AuthSession {
+  token: string;
+  address: string;
+  /** 毫秒时间戳 */
+  expiresAt: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('content-type', 'application/json');
+  // POST 默认带会话 token（调用方显式传了 Authorization 的，如管理端，保持不变）
+  if ((init?.method ?? 'GET').toUpperCase() === 'POST' && !headers.has('authorization')) {
+    const token = authBridge.token();
+    if (token) headers.set('authorization', `Bearer ${token}`);
+    else if (path !== '/api/auth/session') authBridge.missingSession(); // 登录请求本身不算「写操作缺会话」
+  }
   const res = await fetch(path, { ...init, headers, credentials: 'same-origin' });
   let body: ApiResponse<T> | null = null;
   try {
@@ -63,6 +97,11 @@ function adminHeaders(token: string): HeadersInit {
 
 export const api = {
   health: () => request<HealthResponse>(ENDPOINTS.health),
+  /** 登录挑战（不绑定地址，10 分钟一次性） */
+  authChallenge: () => request<AuthChallenge>('/api/auth/challenge'),
+  /** 用 TON Connect 回传的 ton_proof 换取会话 token（7 天） */
+  authSession: (payload: { address: string; proof: unknown }) =>
+    request<AuthSession>('/api/auth/session', { method: 'POST', body: JSON.stringify(payload) }),
   config: () => request<ProtocolConfig>(ENDPOINTS.config),
   stats: () => request<ProtocolStats>(ENDPOINTS.stats),
   rounds: () => request<RoundSummary[]>(ENDPOINTS.rounds),
@@ -202,9 +241,9 @@ export type { Claimable };
 
 /* ------------------------------------------------------------------ */
 /* 社交层（Telegram 小程序 / X 拉新）：/api/social/*                     */
-/* 写接口（bind / squads / join）请求体必须带 wallet；鉴权为 TON Proof：   */
-/* body.proof 或 X-Ton-Proof 头，二选一。目前 web 尚未获取 proof（见报告），  */
-/* 未带 proof 时后端仅在 demo 且 DEMO_ALLOW_UNSIGNED_WRITES=true 下放行。    */
+/* 写接口（bind / squads / join）请求体必须带 wallet；鉴权为会话 token        */
+/* （Authorization: Bearer，由请求层自动附加）或 TON Proof（body.proof 或      */
+/* X-Ton-Proof 头）。无会话且无 proof 时，仅 demo 且 DEMO_ALLOW_UNSIGNED_WRITES=true 放行。 */
 /* ------------------------------------------------------------------ */
 
 export const socialApi = {

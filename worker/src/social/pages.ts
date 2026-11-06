@@ -7,6 +7,7 @@ import { TOKEN_DECIMALS } from '../protocol';
 import { insertShareClick } from './db';
 import { escapeMarkup, isInviteCode, type SocialEnv } from './common';
 import { buildGate, sharerRank } from './handlers';
+import { renderPng } from './og/render';
 import type { SocialGateResponse } from '@shared/types';
 
 const CLICK_SOURCES = ['x', 'tg', 'web'] as const;
@@ -96,32 +97,42 @@ export async function landingPage(request: Request, env: SocialEnv, rawCode: str
 }
 
 /**
- * 动态分享图（SVG 内容）。
- * TODO(og-png)：X 卡片只接受 PNG，本路由仍返回 image/svg+xml，路径名 /og/:code.png 与类型不一致。
- *   未安装渲染依赖（worker/node_modules 中没有 @resvg/resvg-wasm），本次保持 SVG。接入步骤：
- *   1. 在 worker 目录执行 `pnpm add @resvg/resvg-wasm`（新依赖，需要审核后再加）；
- *   2. 以 wasm 模块方式导入并初始化一次（按所装版本文档的 wasm 入口，Workers 支持 .wasm 模块导入）；
- *   3. `new Resvg(svg, { font: { loadSystemFonts: false } }).render().asPng()`，返回 Content-Type: image/png；
- *   4. 中文需要 CJK 字体，体积大：未嵌入前 PNG 只放数字与英文（文案改为 "A9" 与英文标签），中文版待字体方案定稿。
+ * 动态分享图 /og/:code.png：SVG 渲染为 1200x630 PNG（@resvg/resvg-wasm）。
+ * 卡片只含数字与英文（内嵌字体为 Latin Barlow Bold，无 CJK 字形）。
+ * 渲染失败时回退为同一份 SVG 且返回 200，路由不会 500；回退时 Content-Type 为 image/svg+xml。
  */
+function ogAsciiPrice(value: number | null): string {
+  return value === null ? '--' : formatUsd(value);
+}
+
+function ogSvg(gate: SocialGateResponse, rank: number | null, found: boolean): string {
+  const prize = escapeMarkup(formatA9(gate.rewardBudgetRaw));
+  const unlock = escapeMarkup(ogAsciiPrice(gate.remainingUsd));
+  const rankLabel = escapeMarkup(rank !== null ? `RANK #${rank}` : found ? 'NOT RANKED YET' : 'JOIN TO RANK');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+<rect width="1200" height="630" fill="#0b0b0f"/>
+<rect x="40" y="40" width="1120" height="550" rx="28" fill="none" stroke="#FF4D00" stroke-width="4"/>
+<text x="90" y="150" font-size="56" font-weight="700" fill="#FF4D00" font-family="Barlow">A9</text>
+<text x="1110" y="150" text-anchor="end" font-size="44" font-weight="700" fill="#b8b8c4" font-family="Barlow">#A9</text>
+<text x="90" y="260" font-size="34" font-weight="700" letter-spacing="4" fill="#b8b8c4" font-family="Barlow">PRIZE POOL</text>
+<text x="90" y="380" font-size="110" font-weight="700" fill="#f5f5f5" font-family="Barlow">${prize} A9</text>
+<text x="90" y="480" font-size="52" font-weight="700" fill="#f5f5f5" font-family="Barlow">TO UNLOCK ${unlock}</text>
+<text x="90" y="555" font-size="44" font-weight="700" fill="#FF4D00" font-family="Barlow">${rankLabel}</text>
+</svg>`;
+}
+
 export async function ogImage(env: SocialEnv, rawCode: string, now: number): Promise<Response> {
   const code = rawCode.toUpperCase();
   const gate = await buildGate(env, now);
   const sharer = isInviteCode(code) ? await sharerRank(env, code, now) : { found: false, rank: null };
-  const pool = gate.poolUsdt === null ? '—' : formatUsd(gate.poolUsdt);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-<rect width="1200" height="630" fill="#0b0b0f"/>
-<rect x="40" y="40" width="1120" height="550" rx="28" fill="none" stroke="#ffcc33" stroke-width="4"/>
-<text x="90" y="150" font-size="44" font-weight="700" fill="#ffcc33" font-family="sans-serif">A9 · 十城攻防</text>
-<text x="90" y="210" font-size="30" fill="#b8b8c4" font-family="sans-serif">这一次，散户做庄</text>
-<text x="90" y="340" font-size="96" font-weight="800" fill="#f5f5f5" font-family="sans-serif">${escapeMarkup(formatA9(gate.rewardBudgetRaw))} A9</text>
-<text x="90" y="390" font-size="30" fill="#b8b8c4" font-family="sans-serif">本城奖池</text>
-<text x="90" y="480" font-size="44" font-weight="700" fill="#f5f5f5" font-family="sans-serif">还差 ${escapeMarkup(formatUsd(gate.remainingUsd))} 破城 · 当前池 ${escapeMarkup(pool)}</text>
-<text x="90" y="550" font-size="36" font-weight="700" fill="#ffcc33" font-family="sans-serif">${escapeMarkup(rankText(sharer.rank, sharer.found))}</text>
-</svg>`;
-  return new Response(svg, {
-    status: 200,
-    headers: { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=60' },
-  });
+  const svg = ogSvg(gate, sharer.rank, sharer.found);
+  const headers = { 'Cache-Control': 'public, max-age=60' };
+  try {
+    const png = await renderPng(svg);
+    return new Response(png, { status: 200, headers: { ...headers, 'Content-Type': 'image/png' } });
+  } catch (err) {
+    console.error('og png render failed, fallback to svg', err);
+    return new Response(svg, { status: 200, headers: { ...headers, 'Content-Type': 'image/svg+xml; charset=utf-8' } });
+  }
 }
 

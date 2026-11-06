@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SQUAD_CODE_ALPHABET, competitionRank, levelInfo, newSquadCode, squadCodeFromBytes } from './squad';
+import { parseTonAddress } from '../indexer/address';
+import { SQUAD_CODE_ALPHABET, competitionRank, countStakersBySquad, levelInfo, newSquadCode, squadCodeFromBytes } from './squad';
 
 test('还差 N 人升级：各档边界', () => {
   assert.deepEqual(levelInfo(0), { level: 0, nextAt: 5, remaining: 5 });
@@ -45,4 +46,22 @@ test('战队码：随机生成满足格式', () => {
   for (let i = 0; i < 20; i++) {
     assert.match(newSquadCode(), /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/);
   }
+});
+
+test('本城上车人数：按战队计数，同一地址只计一次，友好地址与 raw 地址视为同一人', () => {
+  const friendly = 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs';
+  const raw = parseTonAddress(friendly)?.raw ?? '';
+  assert.ok(raw.startsWith('0:'));
+  const other = '0:' + 'a'.repeat(64);
+  const counts = countStakersBySquad(
+    [raw, friendly, other, '0:' + 'b'.repeat(64)],
+    [
+      { wallet: friendly, squadCode: 'AAAAAA' },
+      { wallet: '0:' + 'a'.repeat(64), squadCode: 'BBBBBB' },
+    ],
+  );
+  assert.equal(counts.get('AAAAAA'), 1);
+  assert.equal(counts.get('BBBBBB'), 1);
+  // 没有归队的地址不计
+  assert.equal(counts.size, 2);
 });

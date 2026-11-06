@@ -35,12 +35,14 @@ export default function SquadPage() {
   const [shareOpen, setShareOpen] = useState(false);
 
   const squad = me.data?.squad ?? null;
-  const next = squad ? nextSquadLevel(squad.level, squad.memberCount) : null;
+  // 等级门槛与军饷加成取自本地等级表；「还差几人」只用后端 remainingToNext（按本城上车人数算）
+  const next = squad ? nextSquadLevel(squad.level, squad.stakersThisRound) : null;
+  const remainingToNext = squad ? squad.remainingToNext : null;
   const roundId = gate.data?.roundId ?? null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
   const recruitText = squad
-    ? buildSquadRecruitText({ squadName: squad.name, roundId, remaining: next ? next.remaining : null })
+    ? buildSquadRecruitText({ squadName: squad.name, roundId, remaining: remainingToNext })
     : '';
   const recruitUrl = squad ? buildShareUrl(origin, squad.code, 'x') : '';
 
@@ -115,12 +117,13 @@ export default function SquadPage() {
                 <span className="sx-lv">Lv{squad.level}</span>
               </div>
               <p className="sx-hint">
-                成员 <b>{squad.memberCount}</b> 人 · 当前全队军饷 +{squadBonusPct(squad.level)}%
+                成员 <b>{squad.memberCount}</b> 人 · 本城上车 <b>{squad.stakersThisRound}</b> 人 · 当前全队军饷 +
+                {squadBonusPct(squad.level)}%
               </p>
-              {next ? (
+              {next && remainingToNext !== null ? (
                 <>
                   <p className="sx-hint">
-                    还差 <b>{next.remaining}</b> 人升到 L{next.level}（全队军饷 +{next.bonusPct}%）
+                    还差 <b>{remainingToNext}</b> 人升到 L{next.level}（全队军饷 +{next.bonusPct}%）
                   </p>
                   <div
                     className="sx-bar"
@@ -128,9 +131,9 @@ export default function SquadPage() {
                     aria-label="战队升级进度"
                     aria-valuemin={0}
                     aria-valuemax={next.members}
-                    aria-valuenow={Math.min(squad.memberCount, next.members)}
+                    aria-valuenow={Math.min(squad.stakersThisRound, next.members)}
                   >
-                    <i style={{ width: `${Math.min(100, (squad.memberCount / next.members) * 100)}%` }} />
+                    <i style={{ width: `${Math.min(100, (squad.stakersThisRound / next.members) * 100)}%` }} />
                   </div>
                 </>
               ) : (

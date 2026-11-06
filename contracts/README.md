@@ -1,7 +1,7 @@
 # A9 Protocol — 合约 v11
 
 **版本**：v11（2026-11-06，玩法重构，取代 v10）
-**状态**：代码完成、本地 26 个测试全部通过；**尚未外部审计、尚未部署测试网**。
+**状态**：代码完成、本地 30 个测试全部通过（含军饷分发 4 个）；**尚未外部审计、尚未部署测试网**。
 **权威口径**：docs/35（v11 玩法规格，D-43 ~ D-50）> 本 README > 其余历史文档。
 
 ---
@@ -144,9 +144,22 @@ op:u32 = 0x5254000F | version:u8 = 2 | roundId:u8 | riskDisclosureVersion:u16 = 
 
 部署与无上限配置；keeper 权限与目标价；开城前质押退款；攻城令创建与三档时机战力；各类无效质押退款、TON 不足不退、masterchain 受益人；受益人拥有攻城令、只有主人能领；伪造 TicketRequest 被拒；K 线校验；到期关窗；破城 20% 即领、80% 在下一次破城解锁、团队晚一轮；失败销毁一半并滚存；0 人破城全额滚存并升档；0 人失败；观察超时终止（经攻城令退本金、滚存）；集结超时终止（滚存该城 7 亿）；销毁 bounce 后任何人重试；领取 TON 不足、守城期不可领、bounce 后清除 pending；一键续战（集结期被拒、按时机系数、20% 照付、不可重复）；第 10 城后 30 天线性解锁；10 轮全流程代币守恒（奖励 + 滚存 + 销毁 + 团队，最终 RC 余额为 0）；DEX 第三方 response_destination；RC 存储不随人数增长。
 
+## 7.1 军饷领取合约（JunxiangDistributor + ClaimRecord）
+
+| 合约 | 代码哈希 |
+| --- | --- |
+| JunxiangDistributor | `0x7FD6F461CF14393C3BB0FECB1208EB9B796A974D84B140EE9FCE9B10B14932AF` |
+| ClaimRecord | `0xA74D51786D46FE16A749D92D71D5479A6D10689C5542D3A46D6B7E42FD302C43` |
+
+- **累计默克尔**：每周根承诺每个钱包的**终身累计**应得额；ClaimRecord(钱包) 记录已领额，领取支付 `累计 − 已领`；只有最新根有效，重放与旧证明一律无效。
+- 叶子 = `sha256(wc:int8 ‖ addrHash:uint256 ‖ cumulative:uint128)`；父节点 = `sha256(min ‖ max)`；证明为自下而上的兄弟哈希，每 cell 3 个，下一 cell 放 ref 0。链下实现见 `worker/src/social/merkle.ts`，两边编码必须一致。
+- 消息：SetRoot `0x4a580001`（publisher，listId 严格递增）、ClaimJunxiang `0x4a580002`（领取人，≥ 0.15 TON）、RecordAdvance/RecordPay（合约之间，按地址推导校验）。
+- 信任：publisher 单热钱包决定分配；无 admin、无提现。**运维规则：先给分发合约钱包充足额的 A9，再发布新根**（余额不足时 jetton 转账会 bounce，该笔领取额度视为已领）。
+- 测试：4 个（publisher 权限与递增、累计只付增量且一次、错误金额/冒用/旧证明被拒、伪造 RecordPay 被拒）。
+
 ## 8. 上主网前
 
-- [ ] 外部审计 v11（RoundController + StakeTicket 都是新代码）。
+- [ ] 外部审计 v11（RoundController、StakeTicket、JunxiangDistributor、ClaimRecord 都是新代码）。
 - [ ] 后端索引器、前端、ops 按 v11 ABI 更新（进行中）。
 - [ ] 测试网完整跑 10 轮，并在 STON.fi 测试网验证一键上车（swap 后带受益人 payload 转入 RC）。
 - [ ] 更新风险披露：单 keeper、TON 不足不退、20/80 解锁、团队晚一轮。

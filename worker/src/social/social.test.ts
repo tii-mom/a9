@@ -13,7 +13,7 @@ import { escapeMarkup, inviteCodeOf, isInviteCode, isSquadCode, maskWallet, seas
 import { computeJunxiang, type JunxiangMember } from './junxiang';
 import { phaseOf, remainingUsd } from './gate';
 import { medalsOf, powerOf, rankOf, streakOf, timingBps } from './power';
-import { newSquadCode, squadLevel, squadSwitchVerdict } from './squad';
+import { newSquadCode, squadLevel, squadProgress, squadSwitchVerdict } from './squad';
 import { usdtReserveFromPool } from './pool';
 
 function eq(actual: unknown, expected: unknown, label = 'value'): void {
@@ -90,6 +90,19 @@ test('medalsOf 与 streakOf', () => {
 });
 
 /* ------------------------------ 战队 ------------------------------ */
+
+test('squadProgress：还差人数 = 下一档门槛 − 本城上车人数，满级为 null', () => {
+  eq(squadProgress(0), { stakersThisRound: 0, level: 0, nextLevel: 1, remainingToNext: 5 }, '0');
+  eq(squadProgress(4), { stakersThisRound: 4, level: 0, nextLevel: 1, remainingToNext: 1 }, '4');
+  eq(squadProgress(5), { stakersThisRound: 5, level: 1, nextLevel: 2, remainingToNext: 15 }, '5');
+  eq(squadProgress(19), { stakersThisRound: 19, level: 1, nextLevel: 2, remainingToNext: 1 }, '19');
+  eq(squadProgress(20), { stakersThisRound: 20, level: 2, nextLevel: 3, remainingToNext: 80 }, '20');
+  eq(squadProgress(499), { stakersThisRound: 499, level: 3, nextLevel: 4, remainingToNext: 1 }, '499');
+  eq(squadProgress(500), { stakersThisRound: 500, level: 4, nextLevel: null, remainingToNext: null }, '500');
+  eq(squadProgress(10_000), { stakersThisRound: 10_000, level: 4, nextLevel: null, remainingToNext: null }, 'huge');
+  eq(squadProgress(-3), { stakersThisRound: 0, level: 0, nextLevel: 1, remainingToNext: 5 }, 'negative');
+  eq(squadProgress(7.9), { stakersThisRound: 7, level: 1, nextLevel: 2, remainingToNext: 13 }, 'fraction');
+});
 
 test('squadLevel 边界：4 人未成团；5 / 20 / 100 / 500 分别 Lv1..Lv4', () => {
   eq(squadLevel(0), { level: 0, bonusBps: 0 }, '0');

@@ -8,13 +8,20 @@
  *   POST /api/social/squads/:code/join
  *   GET  /api/social/leaderboard?type=&scope=&round=
  *   GET  /api/social/gate
+ *   POST /api/social/guess            猜灯（一城一次，观察窗口前）
+ *   GET  /api/social/guess?wallet=&roundId=
+ *   GET  /api/social/payout/latest    最新累计军饷清单（root / 总额 / listId）
+ *   GET  /api/social/payout/proof?wallet=  最新清单中该钱包的累计金额与证明
+ *   管理端 POST /api/admin/payout/build 由 worker/src/index.ts 调用 handleAdminPayoutBuild（见下）
  *   GET  /s/:code            分享落地页（HTML）
- *   GET  /og/:code.png       分享图（当前仍为 SVG，待接入 PNG 渲染，见 pages.ts 的 TODO(og-png)）
+ *   GET  /og/:code.png       分享图：1200x630 PNG（resvg-wasm），渲染失败回退 SVG
  */
 import type { Env } from '../env';
 import { apiErrorResponse, finalizeResponse, notFound, preflightResponse } from '../http';
 import { landingPage, ogImage } from './pages';
 import { handleBind, handleCreateSquad, handleGate, handleJoinSquad, handleLeaderboard, handleMe } from './handlers';
+import { handleGetGuess, handlePostGuess } from './guess';
+import { handlePayoutLatest, handlePayoutProof } from './payout';
 import type { SocialEnv } from './common';
 
 type Route = 'api' | 'landing' | 'og';
@@ -54,6 +61,19 @@ async function dispatchApi(request: Request, env: SocialEnv, url: URL, now: numb
   if (parts.length === 3 && sub === 'gate') {
     if (method !== 'GET') throw notFound('接口不存在');
     return handleGate(env, now);
+  }
+  if (parts.length === 3 && sub === 'guess') {
+    if (method === 'POST') return handlePostGuess(request, env, now);
+    if (method === 'GET') return handleGetGuess(env, url);
+    throw notFound('接口不存在');
+  }
+  if (parts.length === 4 && sub === 'payout' && parts[3] === 'latest') {
+    if (method !== 'GET') throw notFound('接口不存在');
+    return handlePayoutLatest(env);
+  }
+  if (parts.length === 4 && sub === 'payout' && parts[3] === 'proof') {
+    if (method !== 'GET') throw notFound('接口不存在');
+    return handlePayoutProof(env, url);
   }
   throw notFound('接口不存在');
 }

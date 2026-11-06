@@ -56,15 +56,19 @@ export async function pushCandleUpdate(env: BotEnv, ev: CandleEvent): Promise<nu
 
 /**
  * 攻城期战队摘要（每 6h）。只在 STAKING_OPEN 阶段发送，其他阶段直接返回 0。
- * 排名按成员数（竞争排名，同分同名次）。
+ * 排名与等级都按本城上车人数（竞争排名，同分同名次）。
  */
 export async function pushSquadDigest(env: BotEnv, gate: GateStatus): Promise<number> {
   if (gate.phase !== 'STAKING_OPEN') return 0;
   const squads = await db.listSquadsWithMembers(env.DB);
-  const counts = squads.map((s) => s.members);
-  const messages = squads.map((s) => ({
-    chatId: s.tgChatId,
-    text: formatDigest(gate, s.name, competitionRank(s.members, counts), squads.length, s.members),
-  }));
+  const stakers = await db.stakersThisRoundByCode(env.DB);
+  const counts = squads.map((s) => stakers.get(s.code) ?? 0);
+  const messages = squads.map((s) => {
+    const mine = stakers.get(s.code) ?? 0;
+    return {
+      chatId: s.tgChatId,
+      text: formatDigest(gate, s.name, competitionRank(mine, counts), squads.length, s.members, mine),
+    };
+  });
   return broadcast(env, messages);
 }

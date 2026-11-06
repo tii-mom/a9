@@ -161,10 +161,10 @@ export function stakersBySquad(snap: Snapshot, roundId: number): Map<string, num
   return counts;
 }
 
-/** 某战队在某轮的等级（按当轮报名人数）。 */
-export function squadLevelIn(snap: Snapshot, code: string, roundId: number | null): number {
+/** 某战队在某轮的上车人数（distinct 报名地址）；无轮次为 0。等级与「还差」都按它算。 */
+export function squadStakersIn(snap: Snapshot, code: string, roundId: number | null): number {
   if (roundId === null) return 0;
-  return squadLevel(stakersBySquad(snap, roundId).get(code) ?? 0).level;
+  return stakersBySquad(snap, roundId).get(code) ?? 0;
 }
 
 /** 某轮的军饷输入（成员 = 本轮报名者 ∪ 有人报名的战队团长）。 */

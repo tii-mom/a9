@@ -35,8 +35,8 @@ import {
 } from './db';
 import { phaseOf, remainingUsd } from './gate';
 import { medalsOf, rankOf, streakOf } from './power';
-import { addressKey, currentSeason, loadSnapshot, powerOverRounds, powerTable, squadLevelIn, type Snapshot } from './snapshot';
-import { newSquadCode, squadSwitchVerdict } from './squad';
+import { addressKey, currentSeason, loadSnapshot, powerOverRounds, powerTable, squadStakersIn, type Snapshot } from './snapshot';
+import { newSquadCode, squadProgress, squadSwitchVerdict } from './squad';
 import { poolUsdt } from './pool';
 import { verifyTgInitData } from './initdata';
 
@@ -58,11 +58,15 @@ function parseDigitsId(value: string | null, key: string, allowNegative = false)
 }
 
 function squadBriefOf(snap: Snapshot, squad: SquadRow, roundId: number | null): SocialSquadBrief {
+  const progress = squadProgress(squadStakersIn(snap, squad.code, roundId));
   return {
     code: squad.code,
     name: squad.name,
-    level: squadLevelIn(snap, squad.code, roundId),
+    level: progress.level,
     memberCount: snap.memberCount.get(squad.code) ?? 0,
+    stakersThisRound: progress.stakersThisRound,
+    nextLevel: progress.nextLevel,
+    remainingToNext: progress.remainingToNext,
   };
 }
 

@@ -310,9 +310,16 @@ export type SocialLeaderboardScope = 'round' | 'season';
 export interface SocialSquadBrief {
   code: string;
   name: string;
-  /** 0 = 未成团，1..4 = Lv1..Lv4（按当前轮报名人数） */
+  /** 0 = 未成团，1..4 = Lv1..Lv4（按本城上车人数 stakersThisRound） */
   level: number;
+  /** 成员总数（users.squad_code 计数，与等级无关）；展示文案用「成员」 */
   memberCount: number;
+  /** 本城（当前轮）上车人数，distinct 报名地址；展示文案用「本城上车」，等级与 remainingToNext 都按它算 */
+  stakersThisRound: number;
+  /** 下一等级（1..4）；已满级为 null */
+  nextLevel: number | null;
+  /** 距下一等级还差几人 = 下一档门槛 − stakersThisRound；已满级为 null */
+  remainingToNext: number | null;
 }
 
 export interface SocialSquadDetail extends SocialSquadBrief {
@@ -420,3 +427,42 @@ export interface SocialGateResponse {
   /** 当前阶段结束时刻（unix 秒）；无法确定时为 null */
   phaseEndsAt: number | null;
 }
+
+/** POST /api/social/guess {wallet, roundId, lit}（lit = 0..24） */
+export interface SocialGuessRequest {
+  wallet: string;
+  roundId: number;
+  lit: number;
+}
+
+/** POST / GET /api/social/guess；未猜过时 lit 与 createdAt 为 null（GET） */
+export interface SocialGuessResponse {
+  roundId: number;
+  wallet: string;
+  lit: number | null;
+  createdAt: number | null;
+}
+
+/** GET /api/social/payout/latest：最新累计军饷清单（金额为终身累计，raw） */
+export interface SocialPayoutLatestResponse {
+  listId: number;
+  root: string;
+  fromRound: number;
+  toRound: number;
+  leafCount: number;
+  totalRaw: string;
+  createdAt: number;
+}
+
+/** GET /api/social/payout/proof?wallet= ：叶子下标与 leafCount 用于判断晋级层，见 merkle.ts 文件头 */
+export interface SocialPayoutProofResponse {
+  listId: number;
+  root: string;
+  cumulativeRaw: string;
+  proof: string[];
+  index: number;
+  leafCount: number;
+}
+
+/** POST /api/admin/payout/build（管理员）返回的清单摘要 */
+export type AdminPayoutBuildResponse = SocialPayoutLatestResponse;

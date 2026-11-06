@@ -11,6 +11,8 @@
  *   - code cell hash ∈ {v3r2, v4r2, v5r1} 白名单；
  *   - 从 data cell 指定 bit offset 解出 public_key，必须等于签名公钥。
  *   这样攻击者无法用自造密钥对抢注任意地址；D1 wallet_bindings 首次绑定也带 code_hash/verified_at。
+ * 会话：GET /api/auth/challenge 下发不绑定地址的一次性 payload；POST /api/auth/session 用同一套校验换取
+ *   7 天 HMAC 会话 token（SESSION_SECRET 签名）。写接口优先接受 Authorization: Bearer，失败则回落逐请求 proof。
  * 说明：
  *  - 演示模式（DATA_SOURCE=demo 且 DEMO_ALLOW_UNSIGNED_WRITES=true）允许无签名写接口；
  *    生产/chain 模式必须带签名，且 chain 模式的写接口本身返回 501（请直接与合约交互）。
@@ -18,11 +20,16 @@
 import type { Env } from './env';
 import type { TonProof } from '@shared/types';
 import * as store from './store';
-import { ApiError, badRequest, unauthorized } from './http';
+import { ApiError, badRequest, parseAddress, readJsonBody, unauthorized } from './http';
 
 const DEFAULT_PROOF_DOMAINS = 'a9.lat,www.a9.lat,localhost,127.0.0.1';
 const MAX_SKEW_SECONDS = 300;
 const NONCE_TTL_MS = 5 * 60 * 1000;
+/** 登录挑战（GET /api/auth/challenge）：不绑定地址，10 分钟内一次性有效。 */
+export const AUTH_CHALLENGE_TTL_MS = 10 * 60 * 1000;
+/** 会话 token 有效期：7 天。 */
+export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const SESSION_TOKEN_VERSION = 1;
 
 /* ----------------------------- 编解码 ----------------------------- */
 
@@ -344,6 +351,129 @@ export async function issueAuthNonce(env: Env, address: string, now = Date.now()
   return { address, nonce, expiresAt };
 }
 
+/* ------------------- 登录挑战 + 会话 token（无需逐请求签名） ------------------- */
+
+function randomNonce(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return bytesToHex(bytes);
+}
+
+/** GET /api/auth/challenge：不绑定地址的一次性挑战，作为 TON Connect 连接时 ton_proof 的 payload。 */
+export async function issueAuthChallenge(env: Env, now = Date.now()): Promise<{ payload: string; expiresAt: number }> {
+  const nonce = randomNonce();
+  const expiresAt = now + AUTH_CHALLENGE_TTL_MS;
+  await store.insertAuthNonce(env, { nonce, address: store.AUTH_NONCE_ANY_ADDRESS, createdAt: now, expiresAt });
+  return { payload: noncePayload(nonce), expiresAt };
+}
+
+/** 规范化为 TON raw 形式 '<wc>:<hex>'（token 内地址与 body 地址比对用）；无法解析返回 null。 */
+export function normalizeTonAddress(address: string): string | null {
+  const parsed = decodeTonAddress(address);
+  return parsed ? `${parsed.workchain}:${bytesToHex(parsed.hash)}` : null;
+}
+
+/** SESSION_SECRET 缺失或全空白视为未配置。 */
+function sessionSecret(env: Env): string | null {
+  const secret = env.SESSION_SECRET;
+  return typeof secret === 'string' && secret.trim() !== '' ? secret : null;
+}
+
+function importSessionKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * 签发会话 token：base64url(JSON{a, e, v}) + '.' + base64url(HMAC-SHA256(payloadPart))。
+ * a = 规范化 raw 地址，e = 过期 unix 秒，v = 版本。SESSION_SECRET 缺失时直接 500，绝不签发无签名 token。
+ */
+export async function signSessionToken(
+  env: Env,
+  address: string,
+  now = Date.now(),
+): Promise<{ token: string; expiresAt: number }> {
+  const secret = sessionSecret(env);
+  if (!secret) throw new ApiError('INTERNAL', '会话签名密钥未配置');
+  const subject = normalizeTonAddress(address);
+  if (!subject) throw badRequest('地址格式不合法');
+  const exp = Math.floor(now / 1000) + SESSION_TTL_SECONDS;
+  const payloadPart = bytesToBase64Url(
+    new TextEncoder().encode(JSON.stringify({ a: subject, e: exp, v: SESSION_TOKEN_VERSION })),
+  );
+  const key = await importSessionKey(secret);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payloadPart)));
+  return { token: payloadPart + '.' + bytesToBase64Url(mac), expiresAt: exp * 1000 };
+}
+
+/**
+ * 校验会话 token：HMAC（crypto.subtle.verify 内部常量时间比较）→ 版本 → 未过期 → 地址一致。
+ * 任何解析异常、缺密钥都返回 false，不抛错。
+ */
+export async function verifySessionToken(env: Env, token: string, address: string, now = Date.now()): Promise<boolean> {
+  try {
+    const secret = sessionSecret(env);
+    if (!secret) return false;
+    const parts = token.split('.');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+    const [payloadPart, macPart] = parts;
+    const key = await importSessionKey(secret);
+    const signatureOk = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      base64ToBytes(macPart),
+      new TextEncoder().encode(payloadPart),
+    );
+    if (!signatureOk) return false;
+    const claims = JSON.parse(new TextDecoder().decode(base64ToBytes(payloadPart))) as {
+      a?: unknown;
+      e?: unknown;
+      v?: unknown;
+    };
+    if (claims.v !== SESSION_TOKEN_VERSION) return false;
+    if (typeof claims.e !== 'number' || !Number.isFinite(claims.e)) return false;
+    if (Math.floor(now / 1000) >= claims.e) return false;
+    const subject = normalizeTonAddress(address);
+    return subject !== null && claims.a === subject;
+  } catch {
+    return false;
+  }
+}
+
+/** Authorization: Bearer <token> 且对 body 钱包地址有效。 */
+async function hasValidBearerSession(env: Env, request: Request, address: string, now: number): Promise<boolean> {
+  const match = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.get('authorization') ?? '');
+  if (!match) return false;
+  return verifySessionToken(env, match[1], address, now);
+}
+
+/**
+ * POST /api/auth/session：用与写接口完全相同的 ton_proof 校验（domain / 签名 / StateInit / nonce 消费 / 绑定）
+ * 换取 7 天会话 token。expiresAt 为毫秒时间戳。
+ */
+export async function createAuthSession(
+  request: Request,
+  env: Env,
+  now = Date.now(),
+): Promise<{ token: string; address: string; expiresAt: number }> {
+  if (!sessionSecret(env)) throw new ApiError('INTERNAL', '会话签名密钥未配置');
+  const body = await readJsonBody(request);
+  const address = parseAddress(body.address);
+  const proof = resolveProof(request, body);
+  if (!proof) throw unauthorized();
+  await verifyTonProof(env, proof, address, now);
+  const session = await signSessionToken(env, address, now);
+  return { token: session.token, address, expiresAt: session.expiresAt };
+}
+
 function allowedProofDomains(env: Env): string[] {
   return (env.TON_PROOF_DOMAINS ?? DEFAULT_PROOF_DOMAINS)
     .split(',')
@@ -373,13 +503,20 @@ export async function requireWriteAuth(
   now = Date.now(),
 ): Promise<{ signed: boolean; ip: string }> {
   const ip = clientIp(request);
+  // 会话 token 优先：Bearer 有效、未过期且地址与 body 钱包一致即放行；否则回落到逐请求 proof
+  if (await hasValidBearerSession(env, request, address, now)) return { signed: true, ip };
   const proof = resolveProof(request, body);
   const unsignedAllowed = env.DEMO_ALLOW_UNSIGNED_WRITES === 'true';
   if (!proof) {
     if (unsignedAllowed) return { signed: false, ip };
     throw unauthorized();
   }
+  await verifyTonProof(env, proof, address, now);
+  return { signed: true, ip };
+}
 
+/** 逐请求 ton_proof 校验：时间窗 / domain / 签名 / StateInit 公钥 / nonce 消费 / 地址绑定。失败抛 401。 */
+export async function verifyTonProof(env: Env, proof: TonProof, address: string, now = Date.now()): Promise<void> {
   if (typeof proof.timestamp !== 'number' || !Number.isFinite(proof.timestamp)) throw unauthorized();
   const nowSeconds = Math.floor(now / 1000);
   if (Math.abs(nowSeconds - proof.timestamp) > MAX_SKEW_SECONDS) throw unauthorized();
@@ -440,7 +577,7 @@ export async function requireWriteAuth(
   if (binding && binding.verified_at) {
     if (binding.public_key.toLowerCase() !== publicKeyHex) throw unauthorized();
     if (binding.code_hash && binding.code_hash.toLowerCase() !== stateInitProof.codeHash) throw unauthorized();
-    return { signed: true, ip };
+    return;
   }
   if (binding) {
     // 迁移前遗留的 TOFU 绑定：无 StateInit 证明，清掉后按本次已验证内容重建
@@ -456,7 +593,6 @@ export async function requireWriteAuth(
     // public_key UNIQUE 冲突：同一公钥已绑定其它地址 → 拒绝
     throw unauthorized();
   }
-  return { signed: true, ip };
 }
 
 /** 限流：/api/admin/*、/api/stake、/api/claim、/api/auth/nonce（可传单独配额）。超阈值抛 429。 */

@@ -146,3 +146,150 @@ export async function replaceJunxiang(env: Env, roundId: number, rows: JunxiangR
   }
   await env.DB.batch(statements);
 }
+
+/* ------------------------------------------------------------------ *
+ * 军饷扩展（migrations/0015）：明细带 meta、新人礼绑定时刻、猜灯、累计清单
+ * ------------------------------------------------------------------ */
+
+/** 覆盖写入某一轮的军饷明细（含 meta；与 replaceJunxiang 同样先删后写，整体一个 batch）。 */
+export async function replaceJunxiangRows(env: Env, roundId: number, rows: JunxiangRow[], now: number): Promise<void> {
+  const statements = [env.DB.prepare('DELETE FROM junxiang WHERE round_id = ?').bind(roundId)];
+  for (const row of rows) {
+    statements.push(
+      env.DB.prepare(
+        'INSERT INTO junxiang (round_id, wallet, kind, budget, amount_raw, meta, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).bind(row.roundId, row.wallet, row.kind, row.budget, row.amountRaw.toString(), row.meta ?? null, now),
+    );
+  }
+  await env.DB.batch(statements);
+}
+
+/** 全部已绑定邀请人的用户（新人礼用；wallet 为友好地址，调用方归一化）。 */
+export async function listReferralBinds(env: Env): Promise<Array<{ wallet: string; boundAt: number; createdAt: number }>> {
+  const res = await env.DB.prepare(
+    'SELECT wallet, referrer_bound_at AS bound_at, created_at FROM users WHERE referrer_wallet IS NOT NULL AND referrer_bound_at IS NOT NULL',
+  ).all<{ wallet: string; bound_at: number; created_at: number }>();
+  return (res.results ?? []).map((row) => ({ wallet: row.wallet, boundAt: row.bound_at, createdAt: row.created_at }));
+}
+
+/** 写入猜测；同一 (round, wallet) 已存在时返回 false。 */
+export async function insertGuess(
+  env: Env,
+  input: { roundId: number; wallet: string; lit: number; now: number },
+): Promise<boolean> {
+  try {
+    const res = await env.DB.prepare('INSERT INTO guesses (round_id, wallet, lit_guess, created_at) VALUES (?, ?, ?, ?)')
+      .bind(input.roundId, input.wallet, input.lit, input.now)
+      .run();
+    return (res.meta?.changes ?? 0) > 0;
+  } catch (err) {
+    if (isUniqueViolation(err)) return false;
+    throw err;
+  }
+}
+
+export async function getGuess(
+  env: Env,
+  roundId: number,
+  wallet: string,
+): Promise<{ lit_guess: number; created_at: number } | null> {
+  return (
+    (await env.DB.prepare('SELECT lit_guess, created_at FROM guesses WHERE round_id = ? AND wallet = ?')
+      .bind(roundId, wallet)
+      .first<{ lit_guess: number; created_at: number }>()) ?? null
+  );
+}
+
+export async function listGuesses(env: Env, roundId: number): Promise<Array<{ wallet: string; lit: number }>> {
+  const res = await env.DB.prepare('SELECT wallet, lit_guess FROM guesses WHERE round_id = ?')
+    .bind(roundId)
+    .all<{ wallet: string; lit_guess: number }>();
+  return (res.results ?? []).map((row) => ({ wallet: row.wallet, lit: row.lit_guess }));
+}
+
+/** 截至 toRound（含）的全部军饷明细：累计清单的输入。 */
+export async function listJunxiangUpTo(env: Env, toRound: number): Promise<Array<{ wallet: string; amountRaw: string }>> {
+  const res = await env.DB.prepare('SELECT wallet, amount_raw FROM junxiang WHERE round_id <= ?')
+    .bind(toRound)
+    .all<{ wallet: string; amount_raw: string }>();
+  return (res.results ?? []).map((row) => ({ wallet: row.wallet, amountRaw: row.amount_raw }));
+}
+
+export interface PayoutListRow {
+  id: number;
+  from_round: number;
+  to_round: number;
+  root: string;
+  leaf_count: number;
+  total_raw: string;
+  created_at: number;
+}
+
+export interface PayoutItemRow {
+  list_id: number;
+  wallet_key: string;
+  workchain: number;
+  wallet_hash: string;
+  cumulative_raw: string;
+  leaf_index: number;
+  leaf: string;
+  proof_json: string;
+}
+
+export async function insertPayoutList(
+  env: Env,
+  input: { fromRound: number; toRound: number; root: string; leafCount: number; totalRaw: string; createdAt: number },
+): Promise<number> {
+  const res = await env.DB.prepare(
+    'INSERT INTO payout_lists (from_round, to_round, root, leaf_count, total_raw, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  )
+    .bind(input.fromRound, input.toRound, input.root, input.leafCount, input.totalRaw, input.createdAt)
+    .run();
+  const id = res.meta?.last_row_id;
+  if (typeof id !== 'number') throw new Error('social: payout_lists 写入未返回 id');
+  return id;
+}
+
+/** 分批写入清单明细（每批 100 条语句，D1 batch 上限）。 */
+export async function insertPayoutItems(env: Env, items: PayoutItemRow[]): Promise<void> {
+  const CHUNK = 100;
+  for (let start = 0; start < items.length; start += CHUNK) {
+    const statements = items.slice(start, start + CHUNK).map((item) =>
+      env.DB.prepare(
+        'INSERT INTO payout_items (list_id, wallet_key, workchain, wallet_hash, cumulative_raw, leaf_index, leaf, proof_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).bind(
+        item.list_id,
+        item.wallet_key,
+        item.workchain,
+        item.wallet_hash,
+        item.cumulative_raw,
+        item.leaf_index,
+        item.leaf,
+        item.proof_json,
+      ),
+    );
+    await env.DB.batch(statements);
+  }
+}
+
+/** 清单写入失败时的回滚（items 先于本函数已可能部分写入，ON DELETE CASCADE 不依赖外键开关，显式删除）。 */
+export async function deletePayoutList(env: Env, id: number): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM payout_items WHERE list_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM payout_lists WHERE id = ?').bind(id),
+  ]);
+}
+
+export async function latestPayoutListRow(env: Env): Promise<PayoutListRow | null> {
+  return (
+    (await env.DB.prepare('SELECT * FROM payout_lists ORDER BY id DESC LIMIT 1').first<PayoutListRow>()) ?? null
+  );
+}
+
+export async function getPayoutItem(env: Env, listId: number, walletKey: string): Promise<PayoutItemRow | null> {
+  return (
+    (await env.DB.prepare('SELECT * FROM payout_items WHERE list_id = ? AND wallet_key = ?')
+      .bind(listId, walletKey)
+      .first<PayoutItemRow>()) ?? null
+  );
+}

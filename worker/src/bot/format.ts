@@ -107,34 +107,38 @@ export function formatFinalMessage(ev: CandleEvent, total: number = CANDLES_TOTA
   return `第 ${ev.roundId} 城 ${total} 盏已全部亮完，结算结果以链上为准。`;
 }
 
-/** 战队等级一行：Lv 与下一级还差几人。 */
-export function formatSquadLevel(members: number): string {
-  const info = levelInfo(members);
+/** 战队等级一行：Lv 与下一级还差几人。入参是本城上车人数（stakers this round），不是成员总数。 */
+export function formatSquadLevel(stakersThisRound: number): string {
+  const info = levelInfo(stakersThisRound);
   const levelText = info.level === 0 ? '未成团' : `Lv${info.level}`;
   if (info.nextAt === null) return `${levelText}（已满级）`;
   return `${levelText} · 还差 ${info.remaining} 人升级（Lv${info.level + 1}：${info.nextAt} 人）`;
 }
 
-/** /rank：本群战队排名。 */
-export function formatRank(name: string, rank: number, total: number, members: number): string {
-  return [`战队「${name}」 · 第 ${rank} 名 / 共 ${total} 支`, `成员 ${members} 人`, formatSquadLevel(members)].join('\n');
+/** /rank：本群战队排名。members = 成员总数，stakers = 本城上车人数（等级与排名按它）。 */
+export function formatRank(name: string, rank: number, total: number, members: number, stakers: number): string {
+  return [
+    `战队「${name}」 · 第 ${rank} 名 / 共 ${total} 支`,
+    `成员 ${members} 人 · 本城上车 ${stakers} 人`,
+    formatSquadLevel(stakers),
+  ].join('\n');
 }
 
 /** /me：个人所在战队。 */
-export function formatMe(name: string, rank: number, total: number, members: number, inviteLink: string): string {
+export function formatMe(name: string, rank: number, total: number, members: number, stakers: number, inviteLink: string): string {
   return [
     `你的战队：「${name}」 · 第 ${rank} 名 / 共 ${total} 支`,
-    `成员 ${members} 人 · ${formatSquadLevel(members)}`,
+    `成员 ${members} 人 · 本城上车 ${stakers} 人 · ${formatSquadLevel(stakers)}`,
     `邀请链接：${inviteLink}`,
   ].join('\n');
 }
 
 /** 每 6h 战队摘要（攻城期）。 */
-export function formatDigest(g: GateStatus, name: string, rank: number, total: number, members: number): string {
+export function formatDigest(g: GateStatus, name: string, rank: number, total: number, members: number, stakers: number): string {
   return [
     `【攻城战报】第 ${g.roundId} 城 · 攻城中`,
-    `战队「${name}」第 ${rank} 名 / 共 ${total} 支 · 成员 ${members} 人`,
-    formatSquadLevel(members),
+    `战队「${name}」第 ${rank} 名 / 共 ${total} 支 · 成员 ${members} 人 · 本城上车 ${stakers} 人`,
+    formatSquadLevel(stakers),
     `城门 ${formatUsd(g.gatePriceUsd)} ｜ 现价 ${formatUsd(g.priceUsd)} ｜ 已亮 ${g.litCandles}/${LIT_NEEDED} 盏`,
   ].join('\n');
 }

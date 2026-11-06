@@ -1,6 +1,8 @@
 /* 钱包组件样式（仅 features/wallet 作用域，令牌沿用 fuse.css） */
 .wl{position:relative;display:inline-flex}
 .wl-trigger{max-width:200px;overflow:hidden}
+.wl-signin{white-space:nowrap}
+.wl-link{background:none;border:0;padding:0;color:var(--ember);font:600 11.5px var(--f-mono);text-decoration:underline;cursor:pointer;min-height:44px}
 .wl-trigger>span:not(.wl-tag){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wl-dot{width:7px;height:7px;border-radius:50%;background:var(--pass);box-shadow:0 0 8px var(--pass);flex:none}
 .wl-tag{font:600 9px var(--f-mono);letter-spacing:.08em;color:var(--ember);border:1px solid #5a3f12;padding:1px 4px;background:rgba(255,182,61,.08)}

@@ -1220,17 +1220,24 @@ export async function insertAuthNonce(
   );
 }
 
-/** 原子消费一次性 nonce：仅当存在、未用、未过期且 address 匹配时成功。 */
+/** 不绑定地址的 nonce（登录挑战 GET /api/auth/challenge）存放的占位 address；用户地址不可能是 '*'。 */
+export const AUTH_NONCE_ANY_ADDRESS = '*';
+
+/**
+ * 原子消费一次性 nonce：仅当存在、未用、未过期且 address 匹配时成功。
+ * 地址绑定的 nonce 只能被同一地址消费；存为 AUTH_NONCE_ANY_ADDRESS 的 nonce 可被任意地址消费一次。
+ */
 export async function consumeAuthNonce(
   env: Env,
   input: { nonce: string; address: string; now: number },
 ): Promise<boolean> {
   const changes = await run(
     env,
-    'UPDATE auth_nonces SET used_at = ? WHERE nonce = ? AND address = ? AND used_at IS NULL AND expires_at > ?',
+    'UPDATE auth_nonces SET used_at = ? WHERE nonce = ? AND (address = ? OR address = ?) AND used_at IS NULL AND expires_at > ?',
     input.now,
     input.nonce,
     input.address,
+    AUTH_NONCE_ANY_ADDRESS,
     input.now,
   );
   return changes > 0;

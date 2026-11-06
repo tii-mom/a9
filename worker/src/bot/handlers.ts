@@ -141,10 +141,12 @@ export async function handleRank(env: BotEnv, msg: TgMessage): Promise<void> {
     return;
   }
   const all = await db.listSquadsWithMembers(env.DB);
+  const stakers = await db.stakersThisRoundByCode(env.DB);
   const mine = all.find((s) => s.code === squad.code);
   const members = mine?.members ?? 0;
-  const rank = competitionRank(members, all.map((s) => s.members));
-  await reply(env, msg.chat.id, formatRank(squad.name, rank, all.length, members));
+  const myStakers = stakers.get(squad.code) ?? 0;
+  const rank = competitionRank(myStakers, all.map((s) => stakers.get(s.code) ?? 0));
+  await reply(env, msg.chat.id, formatRank(squad.name, rank, all.length, members, myStakers));
 }
 
 export async function handleMe(env: BotEnv, msg: TgMessage): Promise<void> {
@@ -164,13 +166,15 @@ export async function handleMe(env: BotEnv, msg: TgMessage): Promise<void> {
     return;
   }
   const all = await db.listSquadsWithMembers(env.DB);
+  const stakers = await db.stakersThisRoundByCode(env.DB);
   const mine = all.find((s) => s.code === squad.code);
   const members = mine?.members ?? 0;
-  const rank = competitionRank(members, all.map((s) => s.members));
+  const myStakers = stakers.get(squad.code) ?? 0;
+  const rank = competitionRank(myStakers, all.map((s) => stakers.get(s.code) ?? 0));
   await reply(
     env,
     msg.chat.id,
-    formatMe(squad.name, rank, all.length, members, squadInviteLink(env.TG_BOT_USERNAME ?? '', squad.code)),
+    formatMe(squad.name, rank, all.length, members, myStakers, squadInviteLink(env.TG_BOT_USERNAME ?? '', squad.code)),
   );
 }
 

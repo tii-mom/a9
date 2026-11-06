@@ -15,6 +15,7 @@
  * 铁律：链上状态是唯一权威；本文件之外（sources/chain.ts）不得发网络请求。
  */
 import type { Env } from '../env';
+import { pushNewCandleLamps, type CandleLampInput } from '../bot/candle-hook';
 import * as rewards from '../rewards';
 import * as store from '../store';
 import type { BurnRow, CandleRow, RoundRow, StakeRow } from '../store';
@@ -236,6 +237,8 @@ interface TickContext {
   candles: number;
   stakes: number;
   claims: number;
+  /** 本 tick 新摄入的 K 线（tick 结束后交给机器人亮灯推送，见 bot/candle-hook.ts） */
+  lamps: CandleLampInput[];
 }
 
 /** 拉取/刷新链上配置（10 分钟缓存），并做 configVersion / configHash 一致性校验。 */
@@ -421,7 +424,10 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[]): Promise<void> {
         const round = roundById.get(inbound.roundId);
         const target = targets.get(inbound.roundId) ?? BigInt(round?.target_price_usd_e8 ?? '0');
         // 同一 (round, index) 只写一次；后续 rolling hash 复核会兜底
-        if (target > 0n) candleBatch.push(buildCandleRow(inbound, target, now));
+        if (target > 0n) {
+          candleBatch.push(buildCandleRow(inbound, target, now));
+          ctx.lamps.push({ roundId: inbound.roundId, candleIndex: inbound.candleIndex, twapUsdE8: inbound.twapPriceUsdE8, targetUsdE8: target });
+        }
       }
     }
     const txEvents = eventsOfTx(tx, rcRaw);
@@ -840,7 +846,7 @@ function pickRoundIds(rounds: RoundRow[], touched: Set<number>, pending: number[
 }
 
 /** tick 主体（租约内执行）。 */
-async function runTick(env: Env, now: number, config: ChainConfig): Promise<IndexerTickResult> {
+async function runTick(env: Env, now: number, config: ChainConfig, lamps: CandleLampInput[]): Promise<IndexerTickResult> {
   const kv = await store.getKeyValues(env);
   const nextPollAt = Number(kv.get(HEALTH_KEY.nextPollAt) ?? '0') || 0;
   if (nextPollAt > now) {
@@ -886,6 +892,7 @@ async function runTick(env: Env, now: number, config: ChainConfig): Promise<Inde
     candles: 0,
     stakes: 0,
     claims: 0,
+    lamps,
   };
 
   debugLog(env, 'tick start now=' + now);
@@ -967,8 +974,20 @@ async function runTick(env: Env, now: number, config: ChainConfig): Promise<Inde
   };
 }
 
-/** 单次 cron tick：租约 → 配置 → 引导 → 分页拉取 → 解码 → 写库 → getter 锚定 → 健康判定。永不抛出。 */
-export async function tick(env: Env, now = Date.now()): Promise<IndexerTickResult> {
+/**
+ * 单次 cron tick：租约 → 配置 → 引导 → 分页拉取 → 解码 → 写库 → getter 锚定 → 健康判定。永不抛出。
+ * 结束后（租约已释放）推送本批新 K 线亮灯：exec.waitUntil 可用则放后台，否则在 tick 末尾等待。推送永不抛出。
+ */
+export async function tick(env: Env, now = Date.now(), exec?: { waitUntil(promise: Promise<unknown>): void }): Promise<IndexerTickResult> {
+  const lamps: CandleLampInput[] = [];
+  const result = await tickOnce(env, now, lamps);
+  const push = pushNewCandleLamps(env, lamps).catch(() => 0);
+  if (exec?.waitUntil) exec.waitUntil(push);
+  else await push;
+  return result;
+}
+
+async function tickOnce(env: Env, now: number, lamps: CandleLampInput[]): Promise<IndexerTickResult> {
   if ((env.DATA_SOURCE ?? '').trim() !== 'chain') {
     return { ok: true, skipped: 'not_chain', pages: 0, writes: 0 };
   }
@@ -985,7 +1004,7 @@ export async function tick(env: Env, now = Date.now()): Promise<IndexerTickResul
     return { ok: true, skipped: 'lease', pages: 0, writes: 0 };
   }
   try {
-    return await runTick(env, now, config);
+    return await runTick(env, now, config, lamps);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const kind = (error as { kind?: string }).kind;

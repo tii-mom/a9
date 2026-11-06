@@ -1,5 +1,5 @@
 import type { MeResponse, RoundSummary } from '@shared/types';
-import { api } from '../../lib/api';
+import { api, setAuthBridge } from '../../lib/api';
 import { generateDemoAddress, rawToFriendly } from './address';
 import { DEMO_WALLET_ENABLED } from './flags';
 
@@ -36,6 +36,10 @@ export interface WalletStoreState {
   notice: string | null;
   /** TON Connect SDK 是否可用 */
   tonAvailable: boolean;
+  /** 当前 TON 钱包是否持有有效登录会话（写接口 Authorization: Bearer） */
+  hasSession: boolean;
+  /** 写请求在无会话时发出过；用于在钱包按钮上提示「签名登录」 */
+  signInRequested: boolean;
 }
 
 const INITIAL: WalletStoreState = {
@@ -51,6 +55,8 @@ const INITIAL: WalletStoreState = {
   fellBack: false,
   notice: null,
   tonAvailable: false,
+  hasSession: false,
+  signInRequested: false,
 };
 
 let state: WalletStoreState = INITIAL;
@@ -115,11 +121,38 @@ function remove(key: string): void {
 /* TON Connect 懒加载（动态 import，不进首屏 chunk，失败即降级）        */
 /* ------------------------------------------------------------------ */
 
+/** TON Connect 回传的 ton_proof 成功项（字段与 SDK 的 TonProofItemReplySuccess 一致）。 */
+interface TonProofReplyLike {
+  name?: string;
+  proof?: {
+    timestamp: number;
+    domain: { lengthBytes: number; value: string };
+    payload: string;
+    signature: string;
+  };
+  error?: unknown;
+}
+
 interface TonWalletLike {
-  account?: { address?: string; chain?: string } | null;
+  account?: { address?: string; chain?: string; publicKey?: string; walletStateInit?: string } | null;
   device?: { appName?: string } | null;
   name?: string | null;
+  /** 仅在带 ton_proof 请求的那次连接中出现；恢复会话时没有 */
+  connectItems?: { tonProof?: TonProofReplyLike } | null;
 }
+
+/** 发给 POST /api/auth/session 的 proof（服务端 TonProof 形状）。 */
+interface TonProofPayload {
+  timestamp: number;
+  domain: { lengthBytes: number; value: string };
+  payload: string;
+  signature: string;
+  publicKey: string;
+  stateInit: string;
+}
+
+/** TON Connect 连接请求参数（只用到 tonProof）。 */
+type ConnectRequestParams = { state: 'ready'; value: { tonProof: string } } | { state: 'loading' } | null | undefined;
 
 interface TonModalStateLike {
   status?: string;
@@ -164,6 +197,7 @@ interface TonConnectLike {
     from?: string;
     messages: TonConnectTxMessage[];
   }): Promise<TonConnectTxResult>;
+  setConnectRequestParameters(params: ConnectRequestParams): void;
 }
 
 let tonUI: TonConnectLike | null = null;
@@ -215,6 +249,8 @@ function handleTonWallet(wallet: TonWalletLike | null): void {
     const testnet = chain === '-3';
     const address = rawToFriendly(raw, testnet);
     const name = wallet.device?.appName || wallet.name || (testnet ? 'TON Wallet (testnet)' : 'TON Wallet');
+    const previous = state.address;
+    if (previous && previous !== address) dropSession(previous);
     patch({
       status: 'connected',
       mode: 'ton',
@@ -229,11 +265,17 @@ function handleTonWallet(wallet: TonWalletLike | null): void {
       fuseBalance: null,
     });
     write(MODE_KEY, 'ton');
+    // 恢复已保存的会话（同一地址、未过期）；本次连接若回传了 ton_proof，则换取新会话
+    activeSession = loadStoredSession(address);
+    refreshSessionFlag();
+    const proof = tonProofFrom(wallet);
+    if (proof) void establishSession(address, proof);
     void doRefreshBalances();
     return;
   }
   // 钱包侧断开：清空地址与余额，但保留演示地址以便下次一键降级
   if (state.mode === 'ton') {
+    dropSession(state.address);
     clearWallet();
     remove(MODE_KEY);
   }
@@ -308,6 +350,7 @@ function stopConnecting(reason: 'cancelled' | 'unavailable' | 'failed'): void {
 }
 
 function clearWallet(): void {
+  activeSession = null;
   patch({
     status: 'idle',
     mode: null,
@@ -320,8 +363,115 @@ function clearWallet(): void {
     error: null,
     fellBack: false,
     notice: null,
+    hasSession: false,
+    signInRequested: false,
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* 登录会话（TON Proof → 会话 token，写接口走 Authorization: Bearer）    */
+/* ------------------------------------------------------------------ */
+
+interface StoredSession {
+  address: string;
+  token: string;
+  /** 毫秒时间戳（服务端返回的 expiresAt） */
+  expiresAt: number;
+}
+
+/** 按地址持久化的会话 key（与演示钱包 key 分开）。 */
+const SESSION_KEY_PREFIX = 'fuse.wallet.session.';
+/** 当前 TON 钱包的会话；localStorage 不可用时仍在本页内有效。 */
+let activeSession: StoredSession | null = null;
+
+function sessionKey(address: string): string {
+  return SESSION_KEY_PREFIX + address;
+}
+
+function isLiveSession(session: StoredSession | null, address: string | null): boolean {
+  return !!session && !!address && session.address === address && session.expiresAt > Date.now();
+}
+
+function loadStoredSession(address: string): StoredSession | null {
+  const raw = read(sessionKey(address));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredSession>;
+    if (parsed && typeof parsed.token === 'string' && typeof parsed.expiresAt === 'number') {
+      const session: StoredSession = { address, token: parsed.token, expiresAt: parsed.expiresAt };
+      if (isLiveSession(session, address)) return session;
+    }
+  } catch {
+    /* 损坏的记录直接丢弃 */
+  }
+  remove(sessionKey(address));
+  return null;
+}
+
+function refreshSessionFlag(): void {
+  const hasSession = isLiveSession(activeSession, state.address);
+  if (state.hasSession !== hasSession) patch({ hasSession, signInRequested: hasSession ? false : state.signInRequested });
+}
+
+/** 清除某地址的会话（断开连接 / 切换地址时调用）。 */
+function dropSession(address: string | null): void {
+  if (!address) return;
+  remove(sessionKey(address));
+  if (activeSession?.address === address) activeSession = null;
+  refreshSessionFlag();
+}
+
+/** 从 TON Connect 连接结果取出 ton_proof；缺 publicKey / stateInit 时服务端无法验签，视为无 proof。 */
+function tonProofFrom(wallet: TonWalletLike): TonProofPayload | null {
+  const item = wallet.connectItems?.tonProof;
+  const proof = item && item.name === 'ton_proof' ? item.proof : undefined;
+  const publicKey = wallet.account?.publicKey;
+  const stateInit = wallet.account?.walletStateInit;
+  if (!proof || !publicKey || !stateInit) return null;
+  return { ...proof, publicKey, stateInit };
+}
+
+/** 用本次连接回传的 ton_proof 换取会话 token；失败时保持「需要签名登录」。 */
+async function establishSession(address: string, proof: TonProofPayload): Promise<void> {
+  try {
+    const session = await api.authSession({ address, proof });
+    if (state.address !== address || state.mode !== 'ton') return; // 钱包已切换，丢弃旧结果
+    activeSession = { address, token: session.token, expiresAt: session.expiresAt };
+    write(sessionKey(address), JSON.stringify(activeSession));
+    refreshSessionFlag();
+  } catch {
+    /* 签名未通过或服务不可用：仍是未登录会话，写操作时由钱包按钮提示签名登录 */
+  }
+}
+
+/** 每次连接前下发新的登录挑战；拿不到挑战时仍允许连接（之后可「签名登录」）。 */
+async function applyConnectChallenge(ui: TonConnectLike): Promise<void> {
+  let params: ConnectRequestParams = null;
+  try {
+    const challenge = await api.authChallenge();
+    params = { state: 'ready', value: { tonProof: challenge.payload } };
+  } catch {
+    params = null;
+  }
+  ui.setConnectRequestParameters(params);
+}
+
+/** api.ts 请求层使用：当前钱包的有效会话 token。 */
+function currentSessionToken(): string | null {
+  if (state.mode !== 'ton' || state.status !== 'connected') return null;
+  const session = activeSession;
+  if (session && isLiveSession(session, state.address)) return session.token;
+  if (session) dropSession(session.address);
+  return null;
+}
+
+/** api.ts 请求层使用：TON 钱包无会话时发出了写请求，记下来以便提示签名登录。 */
+function onWriteWithoutSession(): void {
+  if (state.mode !== 'ton' || state.status !== 'connected' || state.hasSession) return;
+  if (!state.signInRequested) patch({ signInRequested: true });
+}
+
+setAuthBridge({ token: currentSessionToken, missingSession: onWriteWithoutSession });
 
 /* ------------------------------------------------------------------ */
 /* 余额                                                               */
@@ -424,10 +574,32 @@ export function connect(): void {
       return;
     }
     try {
+      await applyConnectChallenge(ui);
       await ui.openModal();
     } catch {
       stopConnecting('failed');
     }
+  })();
+}
+
+/**
+ * 重新签名登录：TON Connect 已连接时不会再次返回 ton_proof，所以先断开，再用新挑战重新连接（会弹出钱包确认）。
+ */
+export function signIn(): void {
+  void (async () => {
+    const ui = tonUI;
+    if (ui && state.mode === 'ton' && state.status === 'connected') {
+      const previous = state.address;
+      try {
+        await ui.disconnect();
+      } catch {
+        /* ignore */
+      }
+      dropSession(previous);
+      clearWallet();
+      remove(MODE_KEY);
+    }
+    connect();
   })();
 }
 
@@ -450,6 +622,7 @@ export function resetDemoWallet(): void {
 /** 断开钱包：清空地址与余额（余额不保留上一个地址的数据）。 */
 export function disconnect(): void {
   void (async () => {
+    const address = state.address;
     const ui = tonUI;
     if (ui) {
       try {
@@ -458,6 +631,7 @@ export function disconnect(): void {
         /* ignore */
       }
     }
+    dropSession(address);
     clearWallet();
     remove(MODE_KEY);
   })();

@@ -13,6 +13,19 @@ export interface SquadLevel {
   bonusBps: number;
 }
 
+/**
+ * 战队进度（后端唯一来源，前端与机器人直接展示，不再自行重算）。
+ * stakersThisRound = 本城上车人数（distinct 报名地址）；等级与「还差」都按它算。
+ */
+export interface SquadProgress {
+  stakersThisRound: number;
+  level: number;
+  /** 下一等级（1..4）；已满级为 null */
+  nextLevel: number | null;
+  /** 距下一等级还差几人 = 下一档门槛 − stakersThisRound；已满级为 null */
+  remainingToNext: number | null;
+}
+
 export function squadLevel(distinctStakers: number): SquadLevel {
   const count = Number.isFinite(distinctStakers) ? Math.max(0, Math.floor(distinctStakers)) : 0;
   let level = 0;
@@ -20,6 +33,20 @@ export function squadLevel(distinctStakers: number): SquadLevel {
     if (count >= SQUAD_LEVEL_THRESHOLDS[i]) level = i + 1;
   }
   return { level, bonusBps: SQUAD_BONUS_BPS[level] };
+}
+
+export function squadProgress(distinctStakers: number): SquadProgress {
+  const count = Number.isFinite(distinctStakers) ? Math.max(0, Math.floor(distinctStakers)) : 0;
+  const { level } = squadLevel(count);
+  if (level >= SQUAD_LEVEL_THRESHOLDS.length) {
+    return { stakersThisRound: count, level, nextLevel: null, remainingToNext: null };
+  }
+  return {
+    stakersThisRound: count,
+    level,
+    nextLevel: level + 1,
+    remainingToNext: SQUAD_LEVEL_THRESHOLDS[level] - count,
+  };
 }
 
 export function newSquadCode(): string {
