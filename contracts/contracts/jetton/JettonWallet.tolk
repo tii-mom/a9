@@ -48,17 +48,20 @@ fun onBouncedMessage(in: InMessageBounced) {
     // the bounce. Notify the owner so RC/TeamVault can roll back their pending
     // claim/release instead of being stuck on ClaimPending forever.
     if (op == OP_JETTON_INTERNAL_TRANSFER) {
+        // A9-HIGH-03/F4: reserve 5-year storage + one notification fee, then carry
+        // the whole remaining bounced value to the owner. IGNORE_ERRORS keeps the
+        // jettonBalance rollback above intact even if the notice cannot be paid.
+        reserveToncoinsOnBalance(
+            calculateJettonWalletMinStorageFee() + (BOUNCE_NOTIFICATION_RESERVE as coins),
+            RESERVE_MODE_AT_MOST,
+        );
         val notice = createMessage({
             bounce: BounceMode.NoBounce,
-            value: ton("0.02"),
+            value: 0,
             dest: storage.ownerAddress,
             body: TransferBounced { queryId: bouncedQueryId },
         });
-        // C-4: IGNORE_ERRORS (2) is mandatory here. Without it a failed 0.02 TON
-        // notice would abort the whole action phase and roll back the jettonBalance
-        // restore above (permanent token loss). If the notice cannot be paid, we
-        // skip it and keep the balance rollback; worst case the owner stays pending.
-        notice.send(SEND_MODE_PAY_FEES_SEPARATELY | SEND_MODE_IGNORE_ERRORS);
+        notice.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_IGNORE_ERRORS);
     }
 }
 

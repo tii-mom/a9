@@ -194,3 +194,46 @@ get fun `test CRIT-01 forged burn confirmation after bounce is rejected`() {
     });
     expect(burnStatus(f.rc, 1).rewardBurnConfirmed).toBeFalse();
 }
+
+
+// A9-HIGH-03/F4: near-zero wallet still delivers the bounce notice.
+get fun `test F4 low balance wallet still delivers TransferBounced with reserve`() {
+    val deployer = testing.treasury("f4-deployer");
+    val admin = testing.treasury("f4-admin");
+    val ownerInit = ContractState {
+        code: build("MockBounceOwner"),
+        data: MockBounceOwnerStorage { count: 0, lastQueryId: 0 }.toCell(),
+    };
+    val ownerAddr = AutoDeployAddress { stateInit: ownerInit }.calculateAddress();
+    expect(net.send(deployer.address, createMessage({
+        bounce: false, value: ton("1"), dest: { stateInit: ownerInit }, body: TopUpTons {},
+    }))).toHaveSuccessfulDeploy({ to: ownerAddr });
+    val walletStorage = WalletStorage {
+        jettonBalance: 0,
+        ownerAddress: ownerAddr,
+        minterAddress: admin.address,
+    };
+    val walletInit = ContractState { code: build("JettonWallet"), data: walletStorage.toCell() };
+    val walletAddr = AutoDeployAddress { stateInit: walletInit }.calculateAddress();
+    expect(net.send(deployer.address, createMessage({
+        bounce: false, value: ton("0.05"), dest: { stateInit: walletInit }, body: TopUpTons {},
+    }))).toHaveSuccessfulDeploy({ to: walletAddr });
+
+    val bounced = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x178d4519, 32)
+        .storeUint(6161, 64)
+        .storeCoins(1000)
+        .storeUint(0, 1)
+        .storeUint(0, 1)
+        .storeCoins(0)
+        .storeUint(0, 1)
+        .endCell();
+    net.send(admin.address, createMessage({
+        bounce: false, value: ton("0.2"), dest: walletAddr, body: bounced,
+    }).bounced());
+    val st = net.runGetMethod<MockBounceOwnerState>(ownerAddr, "get_state");
+    expect(st.count).toEqual(1);
+    expect(st.lastQueryId).toEqual(6161 as uint64);
+    expect(testing.getAccountBalance(walletAddr) >= ton("0.015")).toBeTrue();
+}
