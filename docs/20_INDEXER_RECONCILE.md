@@ -257,3 +257,14 @@ chain 模式下 worker 不再依赖任何演示数据：K 线来自链上 `Submi
 2. **报告必须加一行解释**：RC/TV 钱包余额中含 `N_aborted × 7亿`（RC）与 `N_aborted × 1.2亿`（TV）的**不可用余额**，避免审计方误以为「凭空多出的余额」。
 3. 若出现技术终止轮次，`burned` 应只统计真实的三笔销毁，**不得把终止轮的奖励计入 burned**。
 4. 决策依据：`docs/00` **D-39**。
+### 附录 B-2 — round-0 退款账本对索引器不可见（v8.7 F2）
+
+v8.7 的 F2 修复引入 `stakes[roundId=0]` 作为**质押退款账本**：当用户质押的入站 TON 不足（< 0.12）或退款转账 bounce 时，A9 记入该账本，用户需主动 `ClaimPrincipal(roundId=0)` 领回。
+
+**索引器看不到这部分数据，且这是正确的**：
+1. 退款不进 `DepositAccepted` 事件（质押被拒）→ 索引器按事件同步的 `stakes` 表**不会**有 round 0 行；
+2. 因此 D1 的 `rounds.total_accepted_stake_raw` / `stakes` 统计**不受影响**（round 0 不属于任何轮次）；
+3. 守恒校验仍然成立：这些 A9 就躺在 RC 的 jetton wallet 里，本来就计入「所有持有者之和 == totalSupply」；
+4. **前端直接读链上 `get_user_stake(0, owner)`** 展示与领取（不改 worker / shared/types）。
+
+对账时若发现「RC 钱包余额 > 已分配−已发放−已销毁」的差额，首先要怀疑的就是 round-0 账本余额与技术终止轮余额（附录 B），而不是数据错误。

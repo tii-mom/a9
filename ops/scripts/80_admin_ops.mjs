@@ -338,6 +338,7 @@ if (result.status !== 0) {
   process.exit(finish({ 结果: 'FAILED', 动作: action }));
 }
 ok('操作已提交：' + action + '（等待链上确认后核对事件/状态）');
-registry.notes = registry.notes || [];
-registry.notes.push(new Date().toISOString() + ' admin op ' + action + ' round=' + roundId + ' tx=' + (str(args, 'tx') || 'unknown'));
+const note = new Date().toISOString() + ' admin op ' + action + ' round=' + roundId + ' tx=' + (str(args, 'tx') || 'unknown');
+registry.notes = Array.isArray(registry.notes) ? registry.notes : (registry.notes ? [String(registry.notes)] : []);
+registry.notes.push(note);
 process.exit(finish({ 结果: 'SUBMITTED', 动作: action }));
