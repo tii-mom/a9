@@ -1,20 +1,20 @@
 {
   "network": "testnet",
   "chainId": -3,
-  "status": "not_deployed",
+  "status": "deployed_unfunded",
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-06T12:07:50.893Z",
+  "updatedAt": "2026-11-06T12:09:52.944Z",
   "contracts": {
     "jettonMaster": {
-      "address": null,
-      "raw": null,
+      "address": "kQD19lukcdzoEoI5DM0FjAKS7gfo9rKnkBPz2paiPX-U0mSb",
+      "raw": "0:f5f65ba471dce81282390ccd058c0292ee07e8f6b2a79013f3da96a23d7f94d2",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T12:09:25.540Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "jettonMasterTreasuryWallet": {
       "address": null,
@@ -25,36 +25,36 @@
       "note": null
     },
     "teamVault": {
-      "address": null,
-      "raw": null,
+      "address": "kQD4zTCsSRBTD0DvYOtET9DiAKz_Mxkr3IlwMJZushxsTXEH",
+      "raw": "0:f8cd30ac4910530f40ef60eb444fd0e200acff33192bdc897030966eb21c6c4d",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T12:09:25.540Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "teamVaultJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQD44t4VnAGNk85rpUWfyq6usXjtkqn7y6kBHfYkjNMHpgwU",
+      "raw": "0:f8e2de159c018d93ce6ba5459fcaaeaeb178ed92a9fbcba9011df6248cd307a6",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T12:09:25.540Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "roundController": {
-      "address": null,
-      "raw": null,
+      "address": "kQBPbjtLB-P5WCTQRlkcMhqRAJ--KrQBcW_51wT_iyC2y5qF",
+      "raw": "0:4f6e3b4b07e3f95824d046591c321a91009fbe2ab401716ff9d704ff8b20b6cb",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T12:09:25.540Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "roundControllerJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQBPAe5jNTwpMTe95u_J4GRMo4cdkD7N5_4o52knBb1C0OLQ",
+      "raw": "0:4f01ee63353c293137bde6efc9e0644ca3871d903ecde7fe28e7692705bd42d0",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T12:09:25.540Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "teamWalletJettonWallet": {
       "address": null,
@@ -65,12 +65,12 @@
       "note": null
     },
     "oracleAdapter": {
-      "address": null,
-      "raw": null,
+      "address": "kQAPac4sRBuW4_nyIhOn_SbvNbUmNKi8Vqu1blniUUl-_6c-",
+      "raw": "0:0f69ce2c441b96e3f9f22213a7fd26ef35b52634a8bc56abb56e59e251497eff",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T12:09:25.540Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     }
   },
   "wallets": {
@@ -104,7 +104,9 @@
       "updatedAt": "2026-11-05T15:05:56.823Z"
     }
   },
-  "bindings": {},
+  "bindings": {
+    "teamVaultAcceptsOnly": "kQBPbjtLB-P5WCTQRlkcMhqRAJ--KrQBcW_51wT_iyC2y5qF"
+  },
   "funding": [],
   "verification": {
     "lastRunAt": null,
@@ -122,12 +124,46 @@
         "finishedAt": "2026-11-06T12:07:50.892Z"
       },
       "P1": {
+        "status": "PASS",
+        "result": "PASS",
+        "durationMs": 95020,
+        "finishedAt": "2026-11-06T12:09:25.913Z"
+      },
+      "P2": {
+        "status": "PASS",
+        "result": "PASS",
+        "durationMs": 8421,
+        "finishedAt": "2026-11-06T12:09:34.335Z"
+      },
+      "P3": {
+        "status": "PASS",
+        "result": "PASS",
+        "durationMs": 349,
+        "finishedAt": "2026-11-06T12:09:34.686Z"
+      },
+      "P4": {
+        "status": "PASS",
+        "result": "PASS",
+        "durationMs": 3104,
+        "finishedAt": "2026-11-06T12:09:37.791Z"
+      },
+      "P5": {
         "status": "RUNNING",
-        "startedAt": "2026-11-06T12:07:50.893Z"
+        "startedAt": "2026-11-06T12:09:52.943Z"
       }
     },
     "completed": [],
     "startedAt": "2026-11-06T12:07:50.766Z",
-    "finishedAt": null
+    "finishedAt": null,
+    "addresses": {
+      "jettonMaster": "kQD19lukcdzoEoI5DM0FjAKS7gfo9rKnkBPz2paiPX-U0mSb",
+      "jettonMasterTreasuryWallet": null,
+      "teamVault": "kQD4zTCsSRBTD0DvYOtET9DiAKz_Mxkr3IlwMJZushxsTXEH",
+      "teamVaultJettonWallet": "kQD44t4VnAGNk85rpUWfyq6usXjtkqn7y6kBHfYkjNMHpgwU",
+      "roundController": "kQBPbjtLB-P5WCTQRlkcMhqRAJ--KrQBcW_51wT_iyC2y5qF",
+      "roundControllerJettonWallet": "kQBPAe5jNTwpMTe95u_J4GRMo4cdkD7N5_4o52knBb1C0OLQ",
+      "teamWalletJettonWallet": null,
+      "oracleAdapter": "kQAPac4sRBuW4_nyIhOn_SbvNbUmNKi8Vqu1blniUUl-_6c-"
+    }
   }
 }

@@ -189,18 +189,39 @@ wrangler d1 execute DB --remote --env production --command "SELECT COUNT(*) AS s
 失败：任何业务表非空 → **停止**（可能灌入了 seed/demo 数据）；记录表名与行数，不得“先上线再清”。
 **可逆**：是（清库/重建）；但若已有数据，**先导出备份**。
 
-### 2.4 上线前备份
+### 2.4 备份 + 恢复（**两阶段**；上线前一次 + 首次开轮前一次）
+
+> **默认单文件 `wrangler d1 export` 不能直接恢复**：它按字母序输出，INSERT 会先于 CREATE TABLE 执行，FK 报 **`no such table: main.rounds`**。必须**结构（schema）+ 数据（data）分开导出**，恢复时分两阶段、且数据阶段关 FK。
+>
+> **恢复目标必须是新建库（`a9-mainnet-restore`）；绝不在生产库上直接灌。**
+>
+> 彩排实测（49KB 库）：export **7s** / schema 恢复 **5s** / data 恢复 **5s**。主网开轮后库会长大，按实际体积估算耗时与磁盘。
+
+**备份时机（两次，必须都做）**：① 上线前；② **首次开轮前**（最容易忘——那时大家都在盯接口）。
 
 ~~~bash
-wrangler d1 export DB --remote --env production --output "$OPS_RECORDS_DIR/d1-mainnet-preload.sql"
-shasum -a 256 "$OPS_RECORDS_DIR/d1-mainnet-preload.sql"
+# === 备份（结构 + 数据分开） ===
+wrangler d1 export a9-mainnet --remote --env production \
+  --output=backup-$(date +%Y%m%d-%H%M)-schema.sql --no-data --skip-confirmation
+wrangler d1 export a9-mainnet --remote --env production \
+  --output=backup-$(date +%Y%m%d-%H%M)-data.sql --no-schema --skip-confirmation
+ls -lh backup-*.sql && wc -l backup-*.sql
+shasum -a 256 backup-*.sql >> "$OPS_RECORDS_DIR/backup.sha256"
+
+# === 恢复演练（必须两阶段；数据阶段关 FK；目标=新建库） ===
+{ echo 'PRAGMA foreign_keys=OFF;'; cat backup-*-data.sql; } > backup-data-fkoff.sql
+wrangler d1 create a9-mainnet-restore
+wrangler d1 execute a9-mainnet-restore --remote --env production --file=backup-*-schema.sql
+wrangler d1 execute a9-mainnet-restore --remote --env production --file=backup-data-fkoff.sql
+# 验证：关键表行数 / total_supply / 最新 round；确认 restore 库数据完整后再删除
+wrangler d1 execute a9-mainnet-restore --remote --env production --command "SELECT COUNT(*) AS rounds FROM rounds;"
 ~~~
 
-期望：导出成功 + 记录 sha256。
+期望：两个备份文件都非空（行数 >0）；schema 含 `CREATE TABLE`、data 含 `INSERT`；恢复库表结构与关键行数一致。
+失败：默认单文件 export 直接恢复报 FK 错 → 改用上面的两阶段；data 阶段未关 FK → 先 `PRAGMA foreign_keys=OFF;`；恢复库行数不符 → 停止，不得切生产。
+**可逆**：备份/恢复库本身可删；**生产数据删除不可逆**。
 
-> ⚠️ **彩排未演练 export**：主网切换前**必须单独验证** export 权限与产物大小（确认能导出完整主网库，且文件大小/耗时可接受）。未验证前不得把 §2.4 当作已通过。
-
-失败：导出失败 → 停止，先解决权限/配额。**可逆**：备份本身可删。
+> 命令里的 `a9-mainnet` 是 Cloudflare 数据库名；若 `wrangler.toml` 的 `database_name` 不同，换成配置里的名字（或统一用 `DB --env production` 绑定）。
 
 ---
 
@@ -529,6 +550,7 @@ time curl -sS --max-time 180 -X POST https://a9.lat/api/admin/indexer/tick \
 > 返回是**嵌套结构**：`data.{ok,pages,writes,events,candles,stakes,healthy,nextPollMs}`（不是顶层字段）。
 > 本次彩排（公共 toncenter、无 key）耗时 **76.7s**；主网**必须配 `TONCENTER_API_KEY`**，并预留 **≥180s**，否则会超时被误判失败。
 > **`/api/admin/indexer/health` 不存在（实测 404）**；不要引用该路由。缺键只看 `/api/health.data.oracle.reason` + D1 `config` 表。
+> **`SubmitCandle` 不依赖发送方**：索引器按 `account=RC` 拉交易、只按 opcode 解码，**没有 sender 判断**；主网接入 OracleAdapter 后不会漏 K 线（backend-dev 已确认）。
 
 失败：401 → `ADMIN_TOKEN` 错；超时 → 配 key 后**重试一次**并加大 `--max-time`；`healthy=false` → 看 `admin_events` 的 `INDEXER_TICK_WARN/ERROR`。**可逆**：是（只读链上）。
 
@@ -649,7 +671,7 @@ curl -s https://a9.lat/api/health | jq '.data.oracle'
 
 ## 11. 彩排发现的差异（2026-11-06）
 
-> 来源：`ops/records/mainnet-rehearsal-diffs.md`（testnet-ops 彩排）。共 **10 条不一致 + 1 条合约分配修正**，其中 **4 条会让主网当天直接失败**（①~④）。本节是主网前的审计痕迹，**不得删除**。
+> 来源：`ops/records/mainnet-rehearsal-diffs.md`（testnet-ops 彩排）+ 备份恢复演练。共 **12 条**（10 条文档不一致 + 1 条合约分配修正 + 1 条备份恢复缺陷），其中 **4 条会让主网当天直接失败**（①~④）。本节是主网前的审计痕迹，**不得删除**。
 
 | # | 彩排发现（实际 vs 文档） | 处理 | 状态 |
 | --- | --- | --- | --- |
@@ -664,8 +686,9 @@ curl -s https://a9.lat/api/health | jq '.data.oracle'
 | ⑨ | `/api/config` 实际 **28 个顶层字段**；`contracts` 多个旧键为 null | §7.3 写明 28 字段 + 历史遗留键（stakingVault/rewardVault/oracleAdapter/codeHash/adminOwner/teamWallet/auditReportUrl 为 null，不阻塞；前端已可选处理） | 已修正到文档 |
 | ⑩ | `d1 export` 未演练 | §2.4 标注“主网前必须单独验证 export 权限与产物大小” | **流程调整（主网前单独演练）** |
 | ⑪ | §5.2 五笔分配错误：部署脚本已无条件注资 RC 70 亿 + TV 12 亿并精确断言 | §5.2 改为**三笔**（内盘 8 亿/流动 5 亿/营销 5 亿）+ 提示“重复注资必失败”；docs/33 step8 同步 | 已修正到文档 |
+| ⑫ | **D1 备份未演练**：默认单文件 export 按字母序输出，恢复时 INSERT 先于 CREATE TABLE → FK 报 `no such table: main.rounds`，**有备份但恢复不了** | §2.4 改为**schema/data 分开导出 + 两阶段恢复（新建库、data 关 FK）**；docs/33 加 step 12.5「首次开轮前备份」；实测 export 7s / schema 5s / data 5s | **已修正到文档 + 流程调整（上线前+开轮前各备份一次）** |
 
-> **签字**：以上 11 条已逐条处理；①~④ 为主网阻断项，必须在主网前一天复查。
+> **签字**：以上 12 条已逐条处理；①~④ 为主网阻断项，必须在主网前一天复查。
 
 ---
 

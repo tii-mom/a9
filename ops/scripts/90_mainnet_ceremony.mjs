@@ -251,7 +251,9 @@ async function P5() {
     ['liquidity', 'liquidityWallet', 500000000000000000n],
     ['marketing', 'marketingWallet', 500000000000000000n],
   ];
-  const adminWallet = registry.contracts.jettonMasterTreasuryWallet.address;
+  const adminOwner = registry.wallets.adminOwner && registry.wallets.adminOwner.address;
+  must(adminOwner, 'registry 缺少 wallets.adminOwner，无法推导 admin JettonWallet');
+  const adminWallet = (await walletBalance(adminOwner)).address;
   const adminBal = stackItemToBigInt((await runGetMethod(params, adminWallet, 'get_wallet_data')).stack[0]);
   const required = plan.reduce((sum, [, , amount]) => sum + amount, 0n);
   must(adminBal >= required, 'P5 前置失败：admin A9=' + adminBal.toString() + ' < 待分配 ' + required.toString() + '；先确认实例未跑过轮次/未部分分发');

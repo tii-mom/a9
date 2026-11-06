@@ -90,6 +90,12 @@ export PROD_ROUND_CONTROLLER_ADDRESS=<RC-raw> PROD_TEAM_VAULT_ADDRESS=<TV-raw> P
     失败：超时/缺键/仍 503 → 看 `admin_events` 的 INDEXER_TICK_WARN/ERROR；**先修索引器再公告**；**不要引用不存在的 `/api/admin/indexer/health`**
     可逆：是（只读链上重建）
 
+[ ] 12.5 首次开轮前备份 D1（**最容易忘**；schema + data 分开导）
+    命令：`wrangler d1 export a9-mainnet --remote --env production --output=backup-$(date +%Y%m%d-%H%M)-schema.sql --no-data --skip-confirmation; wrangler d1 export a9-mainnet --remote --env production --output=backup-$(date +%Y%m%d-%H%M)-data.sql --no-schema --skip-confirmation; ls -lh backup-*.sql; wc -l backup-*.sql`
+    期望：两个文件都非空且行数 > 0；schema 含 CREATE TABLE、data 含 INSERT（默认单文件不能直接恢复）
+    失败：空文件/报错 → **停止开轮**；恢复必须新建库 + 两阶段 + data 关 FK（docs/29 §2.4）
+    可逆：—（备份可重做）
+
 [ ] 13. 开 R1（无 PREVIEW；twap 双人复核）
     命令：`OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<admin> node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>`
     期望：`get_round(1).targetPriceUsdE8 == max(2*twap,232000)`；`stakeCloseAt == stakeOpenAt + 129600`；`TargetPriceSet` 事件
