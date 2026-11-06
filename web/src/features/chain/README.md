@@ -1,7 +1,7 @@
 # web/src/features/chain — TON 测试网真实交易（质押 / 领取 / V8 奖励三态 / 邀请）
 
 把前端从「演示数据」升级为可对 TON 测试网合约发起真实交易。所有链上 UI / 交易逻辑都在本目录内；
-对外通过 `index.ts` 暴露，页面侧挂 `<ChainMePanel />`（质押/领取）与 `<RewardReferralPanel />`（V8 奖励三态/邀请）。
+对外通过 `index.ts` 暴露，页面侧挂 `<ChainMePanel />`（质押/领取）、`<RefundClaimPanel />`（v8.7 退款账本）与 `<RewardReferralPanel />`（V8 奖励三态/邀请）。
 
 ```
 chain/
@@ -13,13 +13,14 @@ chain/
 ├─ decode.ts             # transfer_notification / Claim / V8 用户操作消息解码（回执校验）
 ├─ config.ts             # /api/config → ChainConfig（合约/网络/限额/V8 权重参数/浏览器/RPC）
 ├─ transactions.ts       # 前置校验 + TON Connect 消息构造（含 V8 四个新 opcode）
-├─ rpc.ts                # Jetton Wallet 解析、toncenter 交易查询、回执轮询
+├─ rpc.ts                # Jetton Wallet 解析、toncenter 交易查询、回执轮询、退款账本 getter
 ├─ useChainTx.ts         # 交易状态机 hook（含 V8 submitRewardAction / submitSetReferrer / submitClaimUnlocked）
 ├─ rewards.ts            # V8 奖励三态 / 解锁 / 邀请 / streak 数据适配与兜底
 ├─ storage.ts            # 最近一笔交易本地记录
 ├─ i18n.ts               # 中英双语文案（含 V8）
 ├─ TxStatus.tsx          # 交易状态行
 ├─ ChainMePanel.tsx      # 质押 + 旧领取面板
+├─ RefundClaimPanel.tsx   # v8.7 退款账本（ClaimPrincipal{roundId:0}）领取入口
 ├─ RewardReferralPanel.tsx # V8 奖励三态 + 解锁 + 邀请面板
 └─ chain.css             # 样式（沿用 fuse.css 变量与 .panel/.btn 体系）
 ```
@@ -63,7 +64,7 @@ ClaimPayload（104 bit）
 | 0x52540019 | SetReferrer | referrer:MsgAddress | 299 | 首次质押前绑定邀请人，一次性不可改 |
 | 0x5254001A | ClaimUnlocked | queryId:u64 | 96 | R10 终态后按 12×30 天线性领取解锁池 |
 
-消息附带 0.10 TON；三者均发送到 RoundController。构造函数：`buildClaimRewardEarly / buildRollReward / buildSetReferrer / buildClaimUnlocked`（在 payload.ts）。
+消息附带 0.20 TON（v8.7 合约对 ClaimPrincipal / ClaimAll / ClaimUnlocked / SetReferrer 断言 valueCoins ≥ 0.15 TON，低于阈值抛 BadConfig(250)；旧 0.1 TON 会失败）；均发送到 RoundController。构造函数：`buildClaimRewardEarly / buildRollReward / buildSetReferrer / buildClaimUnlocked`（在 payload.ts）。
 
 ### 1.4 事件与 get methods（常量已登记，当前 UI 数据仍走 worker API）
 
@@ -71,6 +72,12 @@ ClaimPayload（104 bit）
 - RC get methods：get_protocol_config / get_current_round / get_success_count / get_round / get_round_status / get_round_target_price / get_round_candle / get_user_stake / get_round_total_stake / get_user_reward_estimate / get_claimable_all / get_round_burn_status；V8 新增 get_reward_state / get_unlock_info / get_referral / get_streak / get_user_weight / get_total_weight。
 - 目标价在 PREVIEW/UNOPENED 期间 getter 返回 0，UI 显示「待开窗锁定」。
 
+### 1.5 v8.7（audit-fixed）增量
+
+- **新 opcode `RESET_ROUND_CANDLES = 0x52540028`**：body `roundId:u8`（40 bit），接收方 **OracleAdapter**，发送者 OA admin 或 RC。**前端不调用**，仅在 `OPCODES` 常量表 + ABI 文档登记（无 payload builder，避免死代码）。
+- **`ClaimPrincipal{roundId:0}` = 退款账本**（A9-CRIT-02）：质押因附带 TON < 0.12 或退款转账 bounce 时，A9 记入合约 `stakes[0]` 账本；用户必须自己发 ClaimPrincipal(0) 领回（合约内部 claim kind REFUND=5，独立 pending 回滚）。前端常量 `REFUND_ROUND_ID = 0`，专用构造 `prepareClaimRefundTransaction()` 显式 roundId=0（不复用默认值）。
+- **读取口径**：退款账本是 storage map、不产生事件，因此后端 `/api/me` 拿不到；前端直接读链上 `RC.get_user_stake(0, owner)`（`rpc.fetchRefundLedger`，toncenter runGetMethod）。读取失败必须抛错，UI 区分「读不到」与「真的是 0」。**TODO**：若 worker 后续暴露 refund 字段，应迁移到后端统一口径。
+- **新事件 opcode**：0x52540109 ClaimRolledBack、0x5254010A PrincipalClaimed、0x5254010B StakingClosed、0x5254010C CandleSubmitted、0x5254010D OraclePauseChanged（前端无事件解析，仅 `EVENT_OPCODES` 登记，供索引器核对）。
 ## 2. 交易构造与发送
 
 - **Jetton Wallet 解析**：本地缓存 → tonapi `/v2/accounts/{owner}/jettons` → toncenter `runGetMethod get_wallet_address`（raw / friendly / address-cell BOC 三种编码兜底）。
@@ -82,7 +89,7 @@ ClaimPayload（104 bit）
 
 `idle → preparing → awaiting-signature → sent → confirming → confirmed`；异常分支 rejected / failed。
 
-支持交易种类：stake、claimPrincipal、claimReward、claimAll、claimRewardEarly、rollReward、setReferrer、claimUnlocked。
+支持交易种类：stake、claimPrincipal、claimReward、claimAll、claimRewardEarly、rollReward、setReferrer、claimUnlocked、**claimRefund**（v8.7 退款账本）。
 
 **P0 FIX-5（回执误判成功）**：回执判定拆成两步——① `matchesUserAction` 只做身份匹配（inSource + op + roundId + **本次 queryId** + referrer）；② `isSuccessfulTx` 做执行成功判定（aborted=false、bounced=false、exitCode=0/null）。身份命中但执行失败（例如 ClaimPending=270）的 tx 返回 `stage='failed'`，由 `exitCodeError()` 映射为 `CONTRACT_REJECTED`（detail 形如 `exit_code=270 (ClaimPending)`），不再置 confirmed、不再持久化成功回执。质押沿用 depositNonce 身份匹配，但同样经过 `isSuccessfulTx` 成功门。早于本次 `sinceSec` 的旧失败 tx 不会上报（避免把上一笔失败当成本次失败）。
 
@@ -113,6 +120,13 @@ contracts 可选扩展：explorerBaseUrl、toncenterBaseUrl、toncenterApiKey、
 
 数据字段全部来自 shared/types.ts（backend-dev 定稿）：RoundReward / UnlockInfo / ReferralInfo / MeResponse.rewards|stake|referral|unlock；字段缺失（后端灰度/旧演示数据）时由 `rewards.ts` 兜底（rewards 缺失时从 claimable.rewardRaw 推导 PENDING；unlock/referral 缺失时零值安全展示）。
 
+### 5.3 v8.7 退款账本（RefundClaimPanel）
+
+- 位置：/me 页 ChainMePanel 下方独立面板；**金额 > 0 时才显示**（默认隐藏），不混入「可领取」列表。
+- 文案（用户可懂口径）：「你有一笔质押没有成功，A9 还在协议里。点下面的按钮把它取回。」按钮「取回 A9」。
+- 数据：链上 `get_user_stake(0, owner)`；读取失败显示「暂时无法查询退款账本，请稍后重试」+ 重试，**不显示 0**；金额为 0 或已领取（principalClaimed=true）时隐藏。
+- 回执：复用 FIX-5（`matchesUserAction` 带本次 queryId + `isSuccessfulTx` 的 aborted/bounced/exit_code 成功门）；失败显示 CONTRACT_REJECTED + exit_code（如 BadConfig=250）。
+- 演示模式（无合约地址/演示钱包）：显示确定性模拟金额并本地模拟取回，明确标注「演示模式：模拟操作，不会发送链上交易」。
 ## 6. 测试网联调步骤（合约部署 + /api/config 下发后）
 
 1. 部署 Jetton Master / RoundController / TeamVault，把地址写入 D1 kv，确认 GET /api/config 返回 network=testnet 且两个地址非空、V8 参数已下发。
@@ -122,6 +136,7 @@ contracts 可选扩展：explorerBaseUrl、toncenterBaseUrl、toncenterApiKey、
 5. 邀请：先用被邀请钱包打开 `/me?ref=<邀请码>`，绑定邀请人（SetReferrer 0x52540019）后再首次质押；已绑定不可改。
 6. R10 终态后：解锁进度出现，点「领取解锁」发 ClaimUnlocked（0x5254001A），确认 claimableRaw 递减。
 7. 失败路径：钱包拒绝、gas 不足、R10 前 ClaimUnlocked 被拒（合约侧失败）、重复操作（互斥）均应有明确提示。
+8. v8.7 退款账本：用附带 TON <0.12 的质押制造退款入账后，/me 出现「质押退款」面板 → 点「取回 A9」发 ClaimPrincipal{roundId:0}，确认回执匹配（source + opcode 0x52540006 + roundId 0 + 本次 queryId + exit_code=0）。
 
 ## 7. 已知限制 / 待决策
 
@@ -140,3 +155,8 @@ contracts 可选扩展：explorerBaseUrl、toncenterBaseUrl、toncenterApiKey、
   - ClaimUnlocked 0x5254001A：96 bit，hash 一致，BOC 字节一致，示例 hex b5ee9c7201010101000e0000185254001a1122334455667788
 - 历史（task-7）质押 Jetton transfer 的 BOC 与 ton-core 也做过逐字节一致校验。
 - UI（Playwright + mock /api）：/me 中英 × 1440/390 四张截图；三态行、三个按钮、解锁进度、邀请码/链接/待绑定/已绑定/连续轮次/权重/邀请加成全部渲染；旧字段缺失（legacy fallback）不报错；演示模式下滚存/早领/绑定/领取解锁四个动作均走本地模拟分支且无 pageerror。
+- **v8.7 增量自测（2026-11-06）**：
+  - constants.tolk 逐项核对：OP_RESET_ROUND_CANDLES=0x52540028、5 个新事件 0x52540109–0x5254010D 与 TS 常量完全相等；REFUND_ROUND_ID=0、CLAIM_KIND_REFUND=5。
+  - ClaimPrincipal{roundId:0} BOC 与 @ton/core 字节一致（104 bit，hex b5ee9c7201010101000f00001a52540006010203040506070800）；专门构造器显式 roundId=0、消息 value 0.2 TON。
+  - 退款账本 getter：flat / tuple stack 解析、exit_code≠0 / HTTP 错误 / 不可解析 stack 均抛错（不显示 0）。
+  - 退款回执：aborted + exit_code=250 的 tx 返回 stage='failed'（不置 confirmed），exitCodeError → BadConfig；上一笔 queryId 不同不被当本次回执。

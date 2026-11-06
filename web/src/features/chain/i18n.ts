@@ -72,6 +72,17 @@ export interface ChainDict {
   refreshStatus: string;
   phases: Record<ChainTxPhase, string>;
   errors: Record<ChainErrorCode, string>;
+  // ---- v8.7 退款账本 ----
+  refundTitle: string;
+  refundDesc: string;
+  refundAmountLabel: string;
+  refundAction: string;
+  refundError: string;
+  refundRetry: string;
+  refundDemoNote: string;
+  refundWalletNote: string;
+  refundDemoDone: string;
+  refundRecovered: string;
   // ---- V8 奖励三态 ----
   rewardTitle: string;
   rewardDesc: string;
@@ -197,6 +208,16 @@ const ZH: ChainDict = {
   txRetry: '重新发送',
   txDismiss: '关闭提示',
   refreshStatus: '刷新状态',
+  refundTitle: '质押退款',
+  refundDesc: '你有一笔质押没有成功，A9 还在协议里。点下面的按钮把它取回。',
+  refundAmountLabel: '待取回',
+  refundAction: '取回 A9',
+  refundError: '暂时无法查询退款账本，请稍后重试。',
+  refundRetry: '重新查询',
+  refundDemoNote: '演示模式：模拟操作，不会发送链上交易。',
+  refundWalletNote: '连接真实 TON 钱包后可取回。',
+  refundDemoDone: '演示模式：已模拟取回，未上链。',
+  refundRecovered: '已取回',
   rewardTitle: '奖励处理',
   rewardDesc: '每轮奖励三态：滚存 / 早领 50% / 不动；三态互斥、不可回退',
   rollWarning: '滚存 = 把赢来的再押一次，可能归零。想落袋就选早领（拿 50%）。',
@@ -348,6 +369,16 @@ const EN: ChainDict = {
   txRetry: 'Send again',
   txDismiss: 'Dismiss',
   refreshStatus: 'Refresh status',
+  refundTitle: 'Stake refund',
+  refundDesc: 'One of your stakes did not go through and your A9 is still in the contract. Tap the button below to get it back.',
+  refundAmountLabel: 'To get back',
+  refundAction: 'Get A9 back',
+  refundError: "Couldn't load your refundable balance right now. Please retry shortly.",
+  refundRetry: 'Check again',
+  refundDemoNote: 'Demo mode: simulated action, no on-chain transaction.',
+  refundWalletNote: 'Connect a real TON wallet to get it back.',
+  refundDemoDone: 'Demo mode: simulated recovery (not on-chain).',
+  refundRecovered: 'Recovered',
   rewardTitle: 'Reward handling',
   rewardDesc: 'Per-round reward: roll over, early claim 50%, or hold. Mutually exclusive and irreversible.',
   rollWarning: 'Roll = stake your winnings again; it can go to zero. If you want to lock it in, choose early claim (50%).',

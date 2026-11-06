@@ -16,6 +16,7 @@ import {
   MIN_CLAIM_TON_BALANCE,
   MIN_STAKE_TON_BALANCE,
   OPCODES,
+  REFUND_ROUND_ID,
   TX_VALID_FOR_SECONDS,
   nextDepositNonce,
   nextQueryId,
@@ -51,9 +52,11 @@ export type ChainTxKind =
   | 'claimRewardEarly'
   | 'rollReward'
   | 'setReferrer'
-  | 'claimUnlocked';
+  | 'claimUnlocked'
+  | 'claimRefund';
 
-export type ClaimKind = 'claimPrincipal' | 'claimReward' | 'claimAll';
+/** claimRefund：ClaimPrincipal{roundId: REFUND_ROUND_ID(0)}，领取 v8.7 退款账本。 */
+export type ClaimKind = 'claimPrincipal' | 'claimReward' | 'claimAll' | 'claimRefund';
 
 /** V8 单轮奖励操作。 */
 export type RewardActionKind = 'claimRewardEarly' | 'rollReward';
@@ -62,6 +65,8 @@ const CLAIM_OPCODE: Record<ClaimKind, number> = {
   claimPrincipal: OPCODES.CLAIM_PRINCIPAL,
   claimReward: OPCODES.CLAIM_REWARD,
   claimAll: OPCODES.CLAIM_ALL,
+  // 退款账本复用 ClaimPrincipal opcode，仅 roundId 固定为 0
+  claimRefund: OPCODES.CLAIM_PRINCIPAL,
 };
 
 const REWARD_ACTION_OPCODE: Record<RewardActionKind, number> = {
@@ -228,8 +233,10 @@ export function prepareClaimTransaction(params: {
 }): PreparedTx {
   const { chain, wallet, kind } = params;
   if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
-  const roundId = kind === 'claimAll' ? 0 : Number(params.roundId ?? 0);
-  if (kind !== 'claimAll' && (roundId <= 0 || roundId > 255)) throw chainError('BAD_CONFIG', 'roundId 非法: ' + roundId);
+  const roundId = kind === 'claimAll' || kind === 'claimRefund' ? 0 : Number(params.roundId ?? 0);
+  if (kind !== 'claimAll' && kind !== 'claimRefund' && (roundId <= 0 || roundId > 255)) {
+    throw chainError('BAD_CONFIG', 'roundId 非法: ' + roundId);
+  }
   const queryId = params.queryId ?? nextQueryId();
   const payload = buildClaimPayloadCell({ op: CLAIM_OPCODE[kind], queryId, roundId });
   const request: TonConnectTxRequest = {
@@ -249,7 +256,47 @@ export function prepareClaimTransaction(params: {
     meta: {
       kind,
       opcode: CLAIM_OPCODE[kind],
-      roundId: kind === 'claimAll' ? 0 : roundId,
+      roundId: kind === 'claimAll' || kind === 'claimRefund' ? 0 : roundId,
+      amountRaw: null,
+      depositNonce: null,
+      queryId: queryId.toString(),
+      contract: chain.roundController,
+      requiresJettonWallet: false,
+      referrer: null,
+    },
+  };
+}
+
+/**
+ * v8.7：构造退款账本领取交易（ClaimPrincipal{roundId: REFUND_ROUND_ID} → RoundController）。
+ * 显式使用 REFUND_ROUND_ID=0，不复用任何默认 roundId；回执由 FIX-5 matcher（queryId + aborted/exit_code）校验。
+ */
+export function prepareClaimRefundTransaction(params: {
+  chain: ChainConfig;
+  wallet: WalletContext;
+  queryId?: bigint;
+}): PreparedTx {
+  const { chain, wallet } = params;
+  if (!chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
+  const queryId = params.queryId ?? nextQueryId();
+  const payload = buildClaimPayloadCell({ op: OPCODES.CLAIM_PRINCIPAL, queryId, roundId: REFUND_ROUND_ID });
+  return {
+    request: {
+      validUntil: validUntilSeconds(),
+      network: chain.chainId ?? undefined,
+      from: toRawAddress(requireTonAddress(wallet.address, 'wallet')),
+      messages: [
+        {
+          address: chain.roundController,
+          amount: DEFAULT_CLAIM_MESSAGE_TON_NANO.toString(),
+          payload: toBocBase64(payload),
+        },
+      ],
+    },
+    meta: {
+      kind: 'claimRefund',
+      opcode: OPCODES.CLAIM_PRINCIPAL,
+      roundId: REFUND_ROUND_ID,
       amountRaw: null,
       depositNonce: null,
       queryId: queryId.toString(),

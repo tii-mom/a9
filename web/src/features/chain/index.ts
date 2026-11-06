@@ -13,6 +13,8 @@ export { ChainMePanel } from './ChainMePanel';
 export type { ChainMePanelProps } from './ChainMePanel';
 export { RewardReferralPanel } from './RewardReferralPanel';
 export type { RewardReferralPanelProps } from './RewardReferralPanel';
+export { RefundClaimPanel } from './RefundClaimPanel';
+export type { RefundClaimPanelProps } from './RefundClaimPanel';
 export { TxStatusView } from './TxStatus';
 export type { TxStatusProps } from './TxStatus';
 
@@ -56,6 +58,8 @@ export {
   REFERRAL_BONUS_BPS,
   UNLOCK_MONTHS,
   UNLOCK_PERIOD_SECONDS,
+  REFUND_ROUND_ID,
+  CLAIM_KIND_REFUND,
 } from './protocol';
 
 export {
@@ -88,6 +92,7 @@ export {
   prepareRewardActionTransaction,
   prepareSetReferrerTransaction,
   prepareClaimUnlockedTransaction,
+  prepareClaimRefundTransaction,
   validateStake,
   validateClaim,
   validateRewardAction,
@@ -102,8 +107,8 @@ export type {
   WalletContext,
 } from './transactions';
 
-export { resolveJettonWalletAddress, fetchRecentTransactions, waitForTransaction } from './rpc';
-export type { OnchainTx, ResolvedJettonWallet, WaitForTxOptions, WaitForTxResult } from './rpc';
+export { resolveJettonWalletAddress, fetchRecentTransactions, waitForTransaction, fetchRefundLedger, parseRefundLedgerStack } from './rpc';
+export type { OnchainTx, RefundLedgerView, ResolvedJettonWallet, WaitForTxOptions, WaitForTxResult } from './rpc';
 export {
   decodeStakePayload,
   decodeJettonNotification,

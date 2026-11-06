@@ -7,7 +7,7 @@ import { useDict, useLang } from '../../lib/lang';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, useWallet } from '../wallet';
-import { ChainMePanel, RewardReferralPanel, captureInviteFromLocation } from '../chain';
+import { ChainMePanel, RefundClaimPanel, RewardReferralPanel, captureInviteFromLocation } from '../chain';
 import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
 import {
   apiErrorText,
@@ -347,6 +347,7 @@ function MeDashboard({
         <div className="note-box ap-note">{d.readonlyNotice}</div>
       )}
       {chainMode ? <ChainMePanel address={address} demo={demo} /> : null}
+      <RefundClaimPanel address={address} demo={demo} />
       <RewardReferralPanel address={address} demo={demo} />
 
       {meQuery.error && !meQuery.data ? <ErrorState error={meQuery.error} onRetry={meQuery.refresh} /> : null}

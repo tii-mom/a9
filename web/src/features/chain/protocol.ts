@@ -21,7 +21,22 @@ export const OPCODES = {
   SET_REFERRER: 0x52540019,
   /** V8：R10 终态后按 12 个月线性领取解锁池，用户 → RoundController */
   CLAIM_UNLOCKED: 0x5254001a,
+  /**
+   * v8.7：重置 OracleAdapter 的 K 线游标（OA admin 或 RC 发送 → OracleAdapter，body roundId:u8）。
+   * 前端不调用，仅 ABI 登记；来源 contracts/contracts/constants.tolk OP_RESET_ROUND_CANDLES。
+   */
+  RESET_ROUND_CANDLES: 0x52540028,
 } as const;
+
+/**
+ * v8.7：ClaimPrincipal 的 refund 账本 roundId。
+ * ClaimPrincipal{roundId:0} = 领取 A9-CRIT-02 退款账本（低 gas/退款 bounce 记入的 A9），
+ * round 0 不是真实轮次；必须显式传该常量，禁止复用其它默认值。
+ */
+export const REFUND_ROUND_ID = 0;
+
+/** v8.7：合约内部 claim kind = REFUND:5（仅用于文档/对账，不进入 payload）。 */
+export const CLAIM_KIND_REFUND = 5;
 
 /** V8 奖励三态（合约 StakePosition.rewardState，0/1/2）。 */
 export const REWARD_STATE = {
@@ -57,8 +72,12 @@ export const DEFAULT_FORWARD_TON_NANO = 50_000_000n;
 /** 质押消息本身携带的 TON（覆盖 Jetton 转账 + forward + 合约处理 gas）。 */
 export const DEFAULT_STAKE_MESSAGE_TON_NANO = 200_000_000n;
 
-/** 领取消息携带的 TON（合约建议 0.1 TON，最低 0.05）。 */
-export const DEFAULT_CLAIM_MESSAGE_TON_NANO = 100_000_000n;
+/**
+ * 领取/退款/绑定类消息携带的 TON。
+ * v8.7 合约对 ClaimPrincipal / ClaimAll / ClaimUnlocked / SetReferrer 断言 valueCoins >= 0.15 TON
+ * （RoundController.tolk:1141/1199/1497/1705），低于阈值会抛 BadConfig(250)，因此固定 0.2 TON。
+ */
+export const DEFAULT_CLAIM_MESSAGE_TON_NANO = 200_000_000n;
 
 /** 交易 validUntil：当前时间 + 5 分钟。 */
 export const TX_VALID_FOR_SECONDS = 300;
@@ -67,9 +86,9 @@ export const TX_VALID_FOR_SECONDS = 300;
 export const RECEIPT_POLL_INTERVAL_MS = 4_000;
 export const RECEIPT_TIMEOUT_MS = 150_000;
 
-/** 本地预检：钱包 TON 余额建议值（低于此值提示余额不足）。 */
-export const MIN_STAKE_TON_BALANCE = 0.25;
-export const MIN_CLAIM_TON_BALANCE = 0.15;
+/** 本地预检：钱包 TON 余额建议值（低于此值提示余额不足；需覆盖消息 value + gas）。 */
+export const MIN_STAKE_TON_BALANCE = 0.35;
+export const MIN_CLAIM_TON_BALANCE = 0.3;
 
 /** 业务默认值（后端配置未下发时的兜底，与 docs/04 §18 一致）。 */
 export const DEFAULT_TOKEN_DECIMALS = 9;
@@ -100,6 +119,12 @@ export const EVENT_OPCODES = {
   REWARD_EARLY: 0x52540106,
   REFERRER_SET: 0x52540107,
   UNLOCK_CLAIMED: 0x52540108,
+  // v8.7（audit fixes；前端无事件解析，仅 ABI 登记，供索引器/日志核对）
+  CLAIM_ROLLED_BACK: 0x52540109,
+  PRINCIPAL_CLAIMED: 0x5254010a,
+  STAKING_CLOSED: 0x5254010b,
+  CANDLE_SUBMITTED: 0x5254010c,
+  ORACLE_PAUSE_CHANGED: 0x5254010d,
 } as const;
 
 /**

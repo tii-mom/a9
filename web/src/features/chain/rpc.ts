@@ -15,6 +15,7 @@ import { beginCell, CellSlice, parseBocBase64, toBocBase64 } from './cell';
 import type { ChainConfig } from './config';
 import { decodeUserAction } from './decode';
 import { chainError, ChainError } from './errors';
+import { GET_METHODS, REFUND_ROUND_ID } from './protocol';
 
 export interface ResolvedJettonWallet {
   raw: string;
@@ -373,6 +374,146 @@ export async function fetchRecentTransactions(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/* ------------------------------------------------------------------ */
+/* v8.7 退款账本（round 0 = A9-CRIT-02 refund ledger）                  */
+/* ------------------------------------------------------------------ */
+
+export interface RefundLedgerView {
+  /** 可领回金额（raw units，十进制字符串，>= 0） */
+  amountRaw: string;
+  /** 合约 StakePosition.principalClaimed */
+  principalClaimed: boolean;
+}
+
+/** 解析 toncenter stack 的 num（支持 hex / 十进制 / 负数）→ bigint；失败 null。 */
+function stackNum(item: unknown): bigint | null {
+  if (!item || typeof item !== 'object') return null;
+  const record = item as { type?: unknown; value?: unknown };
+  if (record.type !== undefined && record.type !== 'num' && record.type !== 'int') return null;
+  const raw = record.value;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return BigInt(Math.trunc(raw));
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim();
+  if (!text) return null;
+  try {
+    if (/^-?0x[0-9a-fA-F]+$/.test(text)) return BigInt(text);
+    if (/^-?\d+$/.test(text)) return BigInt(text);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function stackBool(item: unknown): boolean | null {
+  if (typeof item === 'boolean') return item;
+  if (item && typeof item === 'object' && typeof (item as { value?: unknown }).value === 'boolean') {
+    return Boolean((item as { value?: unknown }).value);
+  }
+  const num = stackNum(item);
+  return num === null ? null : num !== 0n;
+}
+
+/** 兼容 tuple 返回：value 数组或 { elements: [...] }。 */
+function stackItems(item: unknown): unknown[] | null {
+  if (!item || typeof item !== 'object') return null;
+  const value = (item as { value?: unknown }).value;
+  if (Array.isArray(value)) return value;
+  const elements = value !== null && typeof value === 'object' ? (value as { elements?: unknown }).elements : undefined;
+  if (Array.isArray(elements)) return elements;
+  const outer = (item as { elements?: unknown }).elements;
+  return Array.isArray(outer) ? outer : null;
+}
+
+/**
+ * 解析 RC.get_user_stake(0, owner) 的 stack：
+ * StakePosition{amountRaw, lastDepositNonce, principalClaimed, rewardClaimed, weight, rewardState}
+ * toncenter 可能返回 tuple（stack[0].value/elements 为字段数组）或扁平 6 项。
+ */
+export function parseRefundLedgerStack(stack: unknown): RefundLedgerView | null {
+  if (!Array.isArray(stack) || stack.length === 0) return null;
+  const tupleItems = stackItems(stack[0]);
+  const items = tupleItems ?? stack;
+  const amount = stackNum(items[0]);
+  if (amount === null || amount < 0n) return null;
+  const claimed = stackBool(items[2]);
+  return { amountRaw: amount.toString(), principalClaimed: claimed === true };
+}
+
+const refundLedgerCache = new Map<string, { at: number; view: RefundLedgerView }>();
+const REFUND_LEDGER_CACHE_MS = 15_000;
+
+/**
+ * v8.7：读取退款账本可领金额（ClaimPrincipal{roundId:0}）。
+ *
+ * 走 toncenter runGetMethod: RC.get_user_stake(0, owner)。
+ * **读取失败必须抛错**——「读不到」和「真的是 0」必须区分，UI 不得把 RPC 失败显示成 0。
+ * TODO: 若后续 worker /api/me 暴露 refund 字段，应迁移到后端统一口径（本函数可退役）。
+ */
+export async function fetchRefundLedger(params: {
+  chain: ChainConfig;
+  owner: string;
+  signal?: AbortSignal;
+  cacheTtlMs?: number;
+}): Promise<RefundLedgerView> {
+  const { chain, owner } = params;
+  if (!chain.configured || !chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
+  const cacheTtl = params.cacheTtlMs ?? REFUND_LEDGER_CACHE_MS;
+  const key = chain.network + '|' + chain.roundController + '|' + owner;
+  const cached = refundLedgerCache.get(key);
+  if (cached && Date.now() - cached.at < cacheTtl) return cached.view;
+
+  let ownerAddress;
+  try {
+    ownerAddress = parseTonAddress(owner);
+  } catch {
+    throw chainError('BAD_CONFIG', '钱包地址不合法', owner);
+  }
+  const ownerRaw = toRawAddress(ownerAddress);
+  const ownerFriendly = toFriendlyAddress(ownerAddress, chain.network === 'testnet', true);
+  const ownerBoc = toBocBase64(beginCell().writeAddress(ownerAddress).end());
+  const method = GET_METHODS.roundController.userStake;
+  const stackVariants: { type: 'slice' | 'cell'; value: string }[][] = [
+    [{ type: 'slice', value: ownerRaw }],
+    [{ type: 'slice', value: ownerFriendly }],
+    [{ type: 'slice', value: ownerBoc }],
+    [{ type: 'cell', value: ownerBoc }],
+  ];
+
+  let lastError: ChainError | null = null;
+  for (const ownerArg of stackVariants) {
+    try {
+      const response = (await fetchJson(chain.toncenterBaseUrl + '/api/v2/runGetMethod', {
+        method: 'POST',
+        headers: apiKeyHeaders(chain),
+        signal: params.signal,
+        body: {
+          address: chain.roundController,
+          method,
+          stack: [{ type: 'num', value: '0x' + REFUND_ROUND_ID.toString(16) }, ...ownerArg],
+        },
+      })) as ToncenterRunResult;
+      if (!response?.ok) {
+        lastError = chainError('NETWORK_ERROR', 'toncenter runGetMethod 失败', method);
+        continue;
+      }
+      const exitCode = response.result?.exit_code ?? -1;
+      if (exitCode !== 0) {
+        lastError = chainError('NETWORK_ERROR', 'get_user_stake(0) exit_code=' + exitCode, method);
+        continue;
+      }
+      const parsed = parseRefundLedgerStack(response.result?.stack);
+      if (parsed) {
+        refundLedgerCache.set(key, { at: Date.now(), view: parsed });
+        return parsed;
+      }
+      lastError = chainError('NETWORK_ERROR', 'get_user_stake(0) 返回无法解析', method);
+    } catch (error) {
+      lastError = error instanceof ChainError ? error : chainError('NETWORK_ERROR', error instanceof Error ? error.message : String(error), method);
+    }
+  }
+  throw lastError ?? chainError('NETWORK_ERROR', '无法读取退款账本', method);
 }
 
 export interface WaitForTxOptions {

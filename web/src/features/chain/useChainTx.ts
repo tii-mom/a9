@@ -11,10 +11,11 @@ import type { ChainConfig } from './config';
 import { explorerTxUrl } from './config';
 import { decodeJettonNotification } from './decode';
 import { ChainError, chainError, exitCodeError, toChainError } from './errors';
-import { RECEIPT_POLL_INTERVAL_MS, RECEIPT_TIMEOUT_MS } from './protocol';
+import { RECEIPT_POLL_INTERVAL_MS, RECEIPT_TIMEOUT_MS, REFUND_ROUND_ID } from './protocol';
 import { matchesUserAction, resolveJettonWalletAddress, waitForTransaction } from './rpc';
 import { saveChainTx, type StoredChainTx } from './storage';
 import {
+  prepareClaimRefundTransaction,
   prepareClaimTransaction,
   prepareClaimUnlockedTransaction,
   prepareRewardActionTransaction,
@@ -38,7 +39,8 @@ export type ChainTxKind =
   | 'claimRewardEarly'
   | 'rollReward'
   | 'setReferrer'
-  | 'claimUnlocked';
+  | 'claimUnlocked'
+  | 'claimRefund';
 
 export type ChainTxPhase =
   | 'idle'
@@ -134,6 +136,8 @@ export interface UseChainTx {
   submitSetReferrer: (params: SubmitReferrerParams) => Promise<ChainTxResult | null>;
   /** V8：R10 终态后领取解锁池 */
   submitClaimUnlocked: () => Promise<ChainTxResult | null>;
+  /** v8.7：领取退款账本（ClaimPrincipal{roundId:0}） */
+  submitClaimRefund: () => Promise<ChainTxResult | null>;
   reset: () => void;
 }
 
@@ -146,6 +150,7 @@ const KIND_LABEL: Record<ChainTxKind, string> = {
   rollReward: '滚存奖励',
   setReferrer: '绑定邀请人',
   claimUnlocked: '领取解锁',
+  claimRefund: '取回 A9',
 };
 
 export function useChainTx(options: ChainTxOptions): UseChainTx {
@@ -399,6 +404,24 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     [begin],
   );
 
+  const submitClaimRefund = useCallback(async () => {
+    const { chain, wallet } = optionsRef.current;
+    return begin('claimRefund', { roundId: REFUND_ROUND_ID }, async () => {
+      validateClaim({ chain, wallet });
+      const prepared = prepareClaimRefundTransaction({ chain, wallet });
+      const userRaw = toRawAddress(parseTonAddress(wallet.address));
+      // FIX-5：身份匹配必须带本次 queryId；成功判定由 waitForTransaction 的 aborted/exit_code 门负责
+      const match = (tx: import('./rpc').OnchainTx): boolean =>
+        matchesUserAction(tx, {
+          sourceRaw: userRaw,
+          op: prepared.meta.opcode,
+          roundId: REFUND_ROUND_ID,
+          queryId: queryIdOf(prepared),
+        });
+      return { kind: 'claimRefund', prepared, match } satisfies RunContext;
+    });
+  }, [begin]);
+
   const submitClaimUnlocked = useCallback(async () => {
     const { chain, wallet } = optionsRef.current;
     return begin('claimUnlocked', {}, async () => {
@@ -431,6 +454,7 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     submitRewardAction,
     submitSetReferrer,
     submitClaimUnlocked,
+    submitClaimRefund,
     reset,
   };
 }
