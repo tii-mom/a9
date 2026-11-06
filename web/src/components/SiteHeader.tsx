@@ -75,10 +75,11 @@ export function SiteHeader({ tape }: { tape?: ReactNode; isLanding?: boolean }) 
         </div>
         <div className="nav-r">
           <span className="badge environment-desktop">{sourceLabel}</span>
-          <button className="chroma chroma-color" type="button" onClick={onChroma} aria-label={zh ? '切换涨跌颜色' : 'Toggle up/down colors'}>
+          {/* Accessible names start with the visible label (WCAG 2.5.3, label-in-name). */}
+          <button className="chroma chroma-color" type="button" onClick={onChroma} aria-label={`${zh ? (chromaCn ? '红涨绿跌' : '绿涨红跌') : (chromaCn ? 'CN colors' : 'US colors')} · ${zh ? '切换涨跌颜色' : 'Toggle up/down colors'}`}>
             {zh ? (chromaCn ? '红涨绿跌' : '绿涨红跌') : (chromaCn ? 'CN colors' : 'US colors')}
           </button>
-          <button className="chroma chroma-lang" type="button" onClick={toggle} aria-label={zh ? 'Switch to English' : '切换到中文'}>{zh ? 'EN' : '中文'}</button>
+          <button className="chroma chroma-lang" type="button" onClick={toggle} aria-label={`${zh ? 'EN' : '中文'} · ${zh ? 'Switch to English' : '切换到中文'}`}>{zh ? 'EN' : '中文'}</button>
           <WalletButton />
           <Link className="btn fire sm header-join" to="/?action=stake#cmd">{zh ? '参与本轮' : 'Join round'}</Link>
           <button ref={menuButton} className="menu-toggle" type="button" aria-label={zh ? (menuOpen ? '关闭导航' : '打开导航') : (menuOpen ? 'Close navigation' : 'Open navigation')} aria-expanded={menuOpen} aria-controls="site-navigation" onClick={() => setMenuOpen(!menuOpen)}>

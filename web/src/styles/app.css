@@ -108,3 +108,19 @@ button:disabled{cursor:not-allowed}
   .top .nav-r .wl-trigger{max-width:134px;padding:8px}
   .environment-mobile{font-size:10px}
 }
+
+/* ---------- layout reservations (docs/31 §5, CLS) ----------
+   The battlefield, its command panel and the order flow change height when data arrives
+   (placeholder -> live board; lock message -> stake form). These minimums match the measured
+   final heights per breakpoint, so loading does not push the content below. */
+.term > .board{min-height:1172px}
+@media (min-width:768px){.term > .board{min-height:1170px}}
+@media (min-width:1100px){.term > .board{min-height:1060px}}
+@media (max-width:1099px){.term > .cmd{min-height:710px}}
+@media (max-width:767px){#floor{min-height:1080px}}
+@media (min-width:1100px){#floor{min-height:663px}}
+/* Static thesis above the live board (renders on first paint). */
+.home-strap{font:900 clamp(20px,3.2vw,30px)/1.25 var(--f-body);margin:0;padding-block:18px 8px;letter-spacing:-.005em;text-wrap:balance}
+.home-strap em{font-style:normal;color:var(--brand)}
+/* The live status line keeps the height of its loaded state, so data arriving does not shift the board (docs/31 §5, CLS). */
+.data-health{min-height:73px}

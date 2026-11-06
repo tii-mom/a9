@@ -316,7 +316,7 @@ section.sec{padding-block:56px 8px}
 footer{margin-top:64px;border-top:1px solid var(--line);padding-block:30px 120px;color:var(--muted);font-size:12.5px}
 .foot{display:grid;gap:18px}
 @media(min-width:900px){.foot{grid-template-columns:1.4fr 1fr 1fr}}
-.foot h5{margin:0 0 8px;font:500 11px var(--f-mono);letter-spacing:.1em;color:var(--text-2)}
+.foot h2{margin:0 0 8px;font:500 11px var(--f-mono);letter-spacing:.1em;color:var(--text-2)}
 .foot p{margin:0 0 4px}
 .pending{color:var(--muted);border-bottom:1px dashed var(--line-2)}
 
