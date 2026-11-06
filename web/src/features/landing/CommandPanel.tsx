@@ -18,6 +18,7 @@ interface Props {
   dataReady: boolean;
   board: BoardView;
   clockTargetMs: number | null;
+  nextStakeTargetMs: number | null;
   me: MeResponse | null;
   wallet: LandingWallet;
   copy: LandingCopy;
@@ -27,7 +28,7 @@ interface Props {
   onRefresh: () => void;
 }
 
-export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet, copy, tab, setTab, toast, onRefresh }: Props) {
+export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTargetMs, me, wallet, copy, tab, setTab, toast, onRefresh }: Props) {
   const { lang } = useLang();
   const decimals = cfg?.token.decimals ?? 9;
   const price = usdNum(board.priceUsdE8);
@@ -263,6 +264,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet,
         </div>
       ) : (
         <div id="paneStake" role="tabpanel" aria-labelledby="tab-stake" tabIndex={0}>
+          <div className="stake-status">
           {!stakeOpen ? (
             <div className="lock">
               {board.phase === 'done' ? (
@@ -300,6 +302,15 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet,
                       })}
                     </p>
                   ) : null}
+                  {nextStakeTargetMs !== null ? (
+                    <dl className="kv">
+                      <div>
+                        <dt>{lang === 'zh' ? '下一轮报名开放' : 'Next staking opens'}</dt>
+                        <dd><LiveCountdown targetMs={nextStakeTargetMs} format={clockText} /></dd>
+                      </div>
+                    </dl>
+                  ) : null}
+                  <Link className="btn ghost" to="/rules">{lang === 'zh' ? '查看规则与风险' : 'Rules and risk'}</Link>
                   {BUY_ENTRY_OPEN ? (
                     <button className="btn" type="button" onClick={() => setTab('buy')}>
                       {copy.cmd.goBuy}
@@ -309,7 +320,6 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet,
               )}
             </div>
           ) : (
-            <>
               <dl className="kv">
                 <div>
                   <dt>{copy.cmd.stakeRound + ' R' + pad2(roundId ?? 0)}</dt>
@@ -330,6 +340,9 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet,
                   <dd>{intFmt(board.stakerCount)}</dd>
                 </div>
               </dl>
+          )}
+          </div>
+          <fieldset className="stake-form" disabled={!stakeOpen}>
               <label className="f" htmlFor="stkAmt">
                 <span className="lbl">{copy.cmd.stakeAmount}</span>
                 <div className="inp">
@@ -384,8 +397,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet,
               <button className="btn fire full" type="button" disabled={stakeDisabled} onClick={onStake}>
                 {stakeLabel}
               </button>
-            </>
-          )}
+          </fieldset>
         </div>
       )}
     </aside>

@@ -83,6 +83,7 @@ export default function LandingPage() {
             board={board}
             dataReady={!data.loading && !data.error && !data.stale}
             clockTargetMs={clockTargetMs}
+            nextStakeTargetMs={nextStakeTargetMs}
             me={me}
             wallet={wallet}
             copy={copy}

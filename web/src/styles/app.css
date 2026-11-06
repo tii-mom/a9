@@ -116,7 +116,15 @@ button:disabled{cursor:not-allowed}
 .term > .board{min-height:1172px}
 @media (min-width:768px){.term > .board{min-height:1170px}}
 @media (min-width:1100px){.term > .board{min-height:1060px}}
-@media (max-width:1099px){.term > .cmd{min-height:710px}}
+/* Command panel on narrow screens: tighter form rhythm (copy is unchanged). Height reservation below. */
+@media (max-width:1099px){
+  .term > .cmd .kv{gap:3px;margin-bottom:8px}
+  .term > .cmd .f{margin-bottom:8px}
+  .term > .cmd .chips{margin-bottom:8px}
+  .term > .cmd .risk{padding:8px 10px;margin-bottom:8px;line-height:1.45}
+  .term > .cmd .note{margin-top:6px}
+  .term > .cmd .lock{gap:8px}
+}
 @media (max-width:767px){#floor{min-height:1080px}}
 @media (min-width:1100px){#floor{min-height:663px}}
 /* Static thesis above the live board (renders on first paint). */
@@ -124,3 +132,9 @@ button:disabled{cursor:not-allowed}
 .home-strap em{font-style:normal;color:var(--brand)}
 /* The live status line keeps the height of its loaded state, so data arriving does not shift the board (docs/31 §5, CLS). */
 .data-health{min-height:73px}
+/* The stake form stays visible when staking is closed, disabled, so both states share one layout. */
+.stake-form{border:0;margin:0;padding:0;min-width:0}
+.stake-form:disabled{opacity:.6}
+/* Narrow screens: the status box is the only part that differs between staking and not staking.
+   A shared minimum height keeps the form from moving when data arrives (CLS). */
+@media (max-width:1099px){.term > .cmd .stake-status{min-height:244px}}
