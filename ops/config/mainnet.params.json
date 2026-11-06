@@ -31,7 +31,7 @@
       "walletNameDefault": "a9-deployer",
       "mnemonicEnv": "TON_DEPLOYER_MNEMONIC",
       "treasuryAddressEnv": "TON_TREASURY_ADDRESS",
-      "minTonBalance": 30,
+      "minTonBalance": 7,
       "keyPolicy": "主网部署者钱包必须全新生成，助记词离线备份 >=2 份、异地存放，绝不进入仓库或命令历史；严禁复用测试网密钥。"
     },
     "net": "mainnet"
