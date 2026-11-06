@@ -1,0 +1,116 @@
+{
+  "network": "testnet",
+  "chainId": -3,
+  "status": "not_deployed",
+  "configVersion": 1,
+  "paramsDigest": null,
+  "codeHashes": {},
+  "createdAt": "2026-11-05T14:13:41.427Z",
+  "updatedAt": "2026-11-05T14:13:41.432Z",
+  "contracts": {
+    "jettonMaster": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "jettonMasterTreasuryWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVault": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVaultJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "roundController": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "roundControllerJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamWalletJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "oracleAdapter": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    }
+  },
+  "wallets": {
+    "adminOwner": {
+      "address": "kQB7Acqo4NW8GVhfHeXG_GEbPR-AmfuAFFGk-cI_Qld97q5l",
+      "note": "v88 clean admin (a9-admin)"
+    },
+    "treasury": {
+      "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamWallet": {
+      "address": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "marketingWallet": {
+      "address": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "liquidityWallet": {
+      "address": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamInternalWallet": {
+      "address": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    }
+  },
+  "bindings": {},
+  "funding": [],
+  "verification": {
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
+  },
+  "notes": "v8.8 clean M4 regression: fast timing 10/120/10/24/16/240"
+}

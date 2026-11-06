@@ -1,0 +1,116 @@
+{
+  "network": "testnet",
+  "chainId": -3,
+  "status": "deployed_funded",
+  "configVersion": 1,
+  "paramsDigest": null,
+  "codeHashes": {},
+  "createdAt": "2026-11-05T14:13:41.427Z",
+  "updatedAt": "2026-11-05T14:13:41.432Z",
+  "contracts": {
+    "jettonMaster": {
+      "address": "kQAwyGvhZ2IxD6nktU-d2jyvZ9rJkwbFfoS6h5OcA_xijh-u",
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": "0xb8faf413176c6329a98b2474fedf765a796a14eda96c031ee1fe5b27e59ee272",
+      "deployedAt": "2026-11-06T08:49:09.387Z",
+      "note": "v8.8 partial deploy recovered: wiring done, manual A9 funding"
+    },
+    "jettonMasterTreasuryWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVault": {
+      "address": "kQBwpAyxSG23IAnfem0-OFqf-b-kH7_fv4rt6UsjpJSrO_7A",
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": "0xde6be49154e3024c9b6945ea81e7181f3e1d04fecc85dbc629c08ede6a673fb6",
+      "deployedAt": "2026-11-06T08:49:09.391Z",
+      "note": "v8.8 partial deploy recovered: wiring done, manual A9 funding"
+    },
+    "teamVaultJettonWallet": {
+      "address": "kQBwbJhvDPzrRfbB46YY3PT0lmryzjv_LbWQVVrjVJJbqe5R",
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": "0x394e4e8d40b5d3d97d12aa950b99ea9a53387ddac331baaac8923f0e6e6849a4",
+      "deployedAt": "2026-11-06T08:49:09.391Z",
+      "note": "v8.8 partial deploy recovered: wiring done, manual A9 funding"
+    },
+    "roundController": {
+      "address": "kQAIVoxXHrWkiH88k9yq_DPKiJR8-IfIf2BdeoocUsgGJs6F",
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": "0x4ee42c5c0eb13cdb6689823bea883d30e852eea066d3c108a6531a69d4093ef8",
+      "deployedAt": "2026-11-06T08:49:09.391Z",
+      "note": "v8.8 partial deploy recovered: wiring done, manual A9 funding"
+    },
+    "roundControllerJettonWallet": {
+      "address": "kQAIFbfFLQlLSuyuZN6bhIRoQRNIunPu3p9CgmOxsnXDEXa3",
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": "0x394e4e8d40b5d3d97d12aa950b99ea9a53387ddac331baaac8923f0e6e6849a4",
+      "deployedAt": "2026-11-06T08:49:09.391Z",
+      "note": "v8.8 partial deploy recovered: wiring done, manual A9 funding"
+    },
+    "teamWalletJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "oracleAdapter": {
+      "address": "kQChDkZp0tprzVcXsyPne4WsIowQa65c36vb3-eOflrlX8Rx",
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": "0x0c91e5338e00f18b5ffc7c5c26b510424775d8089588f4147e5b667703676768",
+      "deployedAt": "2026-11-06T08:49:09.391Z",
+      "note": "v8.8 partial deploy recovered: wiring done, manual A9 funding"
+    }
+  },
+  "wallets": {
+    "adminOwner": {
+      "address": "kQB2_JOvF0Aqp6AHmQIy9HdORKL8-kUmbjsBIuTsp7meN-Qb",
+      "note": "v88 regress admin (a9-fast-admin)"
+    },
+    "treasury": {
+      "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamWallet": {
+      "address": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "marketingWallet": {
+      "address": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "liquidityWallet": {
+      "address": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamInternalWallet": {
+      "address": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    }
+  },
+  "bindings": {},
+  "funding": [],
+  "verification": {
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
+  },
+  "notes": "v8.8 M4 regression: fast timing 10/120/10/24/16/240"
+}
