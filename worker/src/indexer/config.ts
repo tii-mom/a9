@@ -8,7 +8,11 @@ import { sha256Hex } from './boc';
 
 export type ChainNetwork = 'testnet' | 'mainnet';
 
-/** get_protocol_config() 的 22 个槽位（顺序 = 合约声明顺序，不可改，否则 config hash 失真）。 */
+/**
+ * get_protocol_config() 的 22 个槽位（顺序 = 合约声明顺序，不可改，否则 config hash 失真）。
+ * v10 沿用 v8.9 的槽位名（canonical hash 依赖这些名字）：admin = oracle = keeper，teamVault = 团队钱包，
+ * techAbortPauseSeconds = techAbortObsTimeoutSeconds = 统一的 7 天技术终止超时。
+ */
 export interface ProtocolConfigFields {
   admin: string;
   oracle: string;
@@ -88,8 +92,11 @@ export interface ChainConfig {
   allowPublic: boolean;
   addresses: {
     roundController: TonAddress;
-    teamVault: TonAddress;
     jettonMaster: TonAddress;
+    /** 团队收款钱包（成功轮 RC 直接转 1.2 亿；对应 get_protocol_config 的 teamVault 槽） */
+    teamWallet: TonAddress;
+    /** 唯一 keeper（对应 get_protocol_config 的 admin/oracle 槽） */
+    keeper: TonAddress;
   };
   expectedConfigVersion: number | null;
   expectedConfigHash: string | null;
@@ -122,8 +129,10 @@ export function resolveChainConfig(env: Env): ChainConfigResult {
 
   const rc = parseTonAddress(trimmed(env.ROUND_CONTROLLER_ADDRESS));
   if (!rc) return { ok: false, error: 'ROUND_CONTROLLER_ADDRESS 缺失或非法：' + trimmed(env.ROUND_CONTROLLER_ADDRESS) };
-  const tv = parseTonAddress(trimmed(env.TEAM_VAULT_ADDRESS));
-  if (!tv) return { ok: false, error: 'TEAM_VAULT_ADDRESS 缺失或非法：' + trimmed(env.TEAM_VAULT_ADDRESS) };
+  const tw = parseTonAddress(trimmed(env.TEAM_WALLET_ADDRESS));
+  if (!tw) return { ok: false, error: 'TEAM_WALLET_ADDRESS 缺失或非法：' + trimmed(env.TEAM_WALLET_ADDRESS) };
+  const keeper = parseTonAddress(trimmed(env.KEEPER_ADDRESS));
+  if (!keeper) return { ok: false, error: 'KEEPER_ADDRESS 缺失或非法：' + trimmed(env.KEEPER_ADDRESS) };
   const jm = parseTonAddress(trimmed(env.JETTON_MASTER_ADDRESS));
   if (!jm) return { ok: false, error: 'JETTON_MASTER_ADDRESS 缺失或非法：' + trimmed(env.JETTON_MASTER_ADDRESS) };
 
@@ -147,7 +156,7 @@ export function resolveChainConfig(env: Env): ChainConfigResult {
       v3FallbackUrl: null,
       apiKey,
       allowPublic,
-      addresses: { roundController: rc, teamVault: tv, jettonMaster: jm },
+      addresses: { roundController: rc, jettonMaster: jm, teamWallet: tw, keeper },
       expectedConfigVersion,
       expectedConfigHash,
       leaseSeconds,

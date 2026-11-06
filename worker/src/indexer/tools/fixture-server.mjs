@@ -4,7 +4,7 @@
  * 按 toncenter v2/v3 的路径与语义回放给 worker（用于本地 D1 端到端验收，零网络、可重复）。
  *
  * 用法：
- *   node worker/src/indexer/tools/fixture-server.mjs --fixtures worker/src/indexer/tools/fixtures/fasttest-v86.json --port 8799 [--mode ok|rate|error]
+ *   node worker/src/indexer/tools/fixture-server.mjs --fixtures worker/src/indexer/tools/fixtures/v10-synthetic.json --port 8799 [--mode ok|rate|error]
  *
  * 模式（用于断线/限流演练）：
  *   ok    ：正常回放；
@@ -26,7 +26,7 @@ function parseArgs(argv) {
   return out;
 }
 const args = parseArgs(process.argv.slice(2));
-const fixturesPath = args.fixtures || 'worker/src/indexer/tools/fixtures/fasttest-v86.json';
+const fixturesPath = args.fixtures || 'worker/src/indexer/tools/fixtures/v10-synthetic.json';
 const port = Number(args.port || 8799);
 const mode = String(args.mode || 'ok');
 const fixtures = JSON.parse(readFileSync(fixturesPath, 'utf8'));

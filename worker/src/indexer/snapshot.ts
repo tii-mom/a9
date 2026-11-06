@@ -16,25 +16,19 @@ import type { ProtocolConfigFields } from './config';
 
 const ZERO_HASH = '0x' + '0'.repeat(64);
 
-/** 链上 RoundData.status（0..10）→ D1 RoundStateName；PREVIEW 映射为 UNOPENED。 */
+/**
+ * 链上 RoundData.status → D1 RoundStateName；PREVIEW 映射为 UNOPENED。
+ * v10 只会出现 0/1/2/4/8/9/10；3/5/6/7（STAKING_CLOSED / ORACLE_PAUSED / SETTLING_*）已删除，返回 null（索引器告警）。
+ */
 export function chainStatusToRoundState(status: number): RoundStateName | null {
   switch (status) {
     case 0:
-      return 'UNOPENED';
     case 1:
       return 'UNOPENED';
     case 2:
       return 'STAKING_OPEN';
-    case 3:
-      return 'STAKING_CLOSED';
     case 4:
       return 'OBSERVING';
-    case 5:
-      return 'ORACLE_PAUSED';
-    case 6:
-      return 'SETTLING_SUCCESS';
-    case 7:
-      return 'SETTLING_FAILURE';
     case 8:
       return 'SUCCEEDED';
     case 9:
@@ -51,7 +45,7 @@ export function isTerminalChainStatus(status: number): boolean {
 }
 
 export function isActiveChainStatus(status: number): boolean {
-  return status >= 2 && status <= 7;
+  return status === 2 || status === 4;
 }
 
 function isZeroHash(hash: string): boolean {
@@ -77,7 +71,7 @@ export interface RoundSnapshotInput {
   previous: RoundRow | null;
   /** 该轮已落库 K 线（用于统计实际达标根数与最近一根 TWAP） */
   candles: CandleRow[];
-  /** 三笔销毁确认后汇总的 burnedRaw；未确认传 null（保持原值，绝不提前显示已销毁） */
+  /** burn 确认后的 burnedRaw；未确认传 null（保持原值，绝不提前显示已销毁） */
   burnedRaw: string | null;
   now: number;
 }
@@ -130,7 +124,7 @@ export function buildRoundPatch(input: RoundSnapshotInput): RoundChainPatch {
   const candleHash = isZeroHash(view.candleHash) ? (previous?.candle_hash ?? null) : view.candleHash;
   if ((previous?.candle_hash ?? null) !== candleHash) put('candle_hash', candleHash);
 
-  // chain 模式 v8.syncV8Rounds 会整体跳过，total_weight 必须由链上 get_round 写入（否则前端显示 0）
+  // chain 模式 rewards.syncRoundLedgers 会整体跳过，total_weight（v10 = 总质押）由链上 get_round 写入
   const totalWeight = view.totalWeight.toString();
   if ((previous?.total_weight_raw ?? '0') !== totalWeight) put('total_weight_raw', totalWeight);
 

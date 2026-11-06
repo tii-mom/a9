@@ -6,18 +6,17 @@
  *  2. 租约：D1 metrics 原子租约，避免 cron 与 admin tick 重叠
  *  3. 引导：首次运行为 R1..R10 插入 UNOPENED 行（INSERT OR IGNORE，绝不 REPLACE）
  *  4. 增量拉取：v3 /transactions 按 lt 游标分页（只消费 finality=finalized），一次 tick 最多 N 页
- *  5. 解码：入站消息（SubmitCandle 等）+ external-out 事件（DepositAccepted 等）
- *  6. 写库：K 线 / 质押 / 推荐关系 / 销毁三态 / 轮次快照（全部幂等键控）
+ *  5. 解码：入站消息（SubmitCandle 等）+ external-out 事件（DepositAccepted / RoundSettled / Claimed / DepositRefunded …）
+ *  6. 写库：K 线 / 质押 / 领取 / 退款账本 / 销毁与团队释放 / 轮次快照（全部幂等键控）
  *  7. getter 锚定：关键节点用 get_round / get_jetton_data 复核，不一致只告警不覆盖
+ *  v10（docs/34 §2）：只索引 RoundController（TeamVault / OracleAdapter 已删除），团队释放读 RoundSettled。
  *  8. 健康：成功/失败写 metrics，失败按类型退避，永不抛出、永不回退 demo
  *
  * 铁律：链上状态是唯一权威；本文件之外（sources/chain.ts）不得发网络请求。
  */
 import type { Env } from '../env';
-import { ownWeightFor } from '../protocol';
-import type { Params } from '../protocol';
-import { REFERRAL_BONUS_BPS } from '../protocol';
-import * as v8 from '../v8';
+import { rewardFor } from '../protocol';
+import * as rewards from '../rewards';
 import * as store from '../store';
 import type { CandleRow, RoundRow, StakeRow } from '../store';
 import { resolveChainConfig } from './config';
@@ -27,22 +26,30 @@ import type { ChainClient, ChainMessage, ChainTx } from './chain-client';
 import {
   digestProtocolConfig,
   getJettonData,
+  getJettonWalletAddress,
   getProtocolConfig,
   getRound,
-  getTeamVaultState,
+  getWalletBalance,
   type ChainRoundView,
 } from './getters';
-import { decodeEvent, EVENT_OP, type ChainEvent } from './events';
+import {
+  decodeEvent,
+  EVENT_OP,
+  REFUND_LEDGER_BIT,
+  SETTLE_ACTION,
+  roundsInMask,
+  type ChainEvent,
+  type ClaimedEvent,
+  type RoundSettledEvent,
+} from './events';
 import { decodeInboundMessage, TX_OP, type DecodedInboundMessage } from './messages';
-import { buildCandleRow, buildRoundPatch, chainStatusToRoundState, isActiveChainStatus, isTerminalChainStatus } from './snapshot';
+import { buildCandleRow, buildRoundPatch, chainStatusToRoundState, isActiveChainStatus } from './snapshot';
 import {
   BURN_KINDS,
   burnRef,
-  computeFailureBurnId,
   confirmedBurnedTotal,
-  deriveBurnObservations,
-  expectedBurnAmount,
-  type BurnKind,
+  expectedRcWalletBalance,
+  settlementAmounts,
 } from './ledger';
 import { HEALTH_KEY, markFailure, markHealthy, readChainHealth } from './health';
 import { parseTonAddress } from './address';
@@ -82,7 +89,6 @@ function intEnv(env: Env, key: string, fallback: number, min: number, max: numbe
   return Math.max(min, Math.min(max, raw));
 }
 const CURSOR_RC = 'chain:cursor:rc';
-const CURSOR_TV = 'chain:cursor:tv';
 const CONFIG_CACHE = 'chain:config';
 const CONFIG_FETCH_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_PAGES_PER_TICK = 5;
@@ -179,17 +185,6 @@ function inboundOfTx(tx: ChainTx, targetRaw: string): DecodedInboundMessage[] {
   return inbound;
 }
 
-/** 计算地址在本轮入账时的 streak（与合约 streakForRound 同口径：同轮保持 / 上轮 +1 / 否则 1，封顶 10）。 */
-function streakFor(stakesByAddress: Map<string, StakeRow[]>, address: string, roundId: number): number {
-  const rows = stakesByAddress.get(address) ?? [];
-  if (!rows.length) return 1;
-  const lastRound = rows.reduce((max, row) => Math.max(max, row.round_id), 0);
-  const lastStreak = rows.filter((row) => row.round_id === lastRound).reduce((max, row) => Math.max(max, row.streak ?? 1), 0);
-  if (lastRound === roundId) return Math.min(lastStreak, 10);
-  if (lastRound + 1 === roundId) return Math.min(lastStreak + 1, 10);
-  return 1;
-}
-
 function groupStakes(rows: StakeRow[]): Map<string, StakeRow[]> {
   const map = new Map<string, StakeRow[]>();
   for (const row of rows) {
@@ -215,9 +210,8 @@ function groupCandles(rows: CandleRow[]): Map<number, CandleRow[]> {
 function nextPollIntervalMs(rounds: RoundRow[], now: number, lastOkAt: number): number {
   const active = rounds.filter((round) => isActiveChainStatus(round.chain_status ?? 0));
   const states = new Set(rounds.map((round) => round.state));
-  if (states.has('SETTLING_SUCCESS') || states.has('SETTLING_FAILURE')) return 15_000;
   if (states.has('STAKING_OPEN')) return 60_000;
-  if (states.has('OBSERVING') || states.has('STAKING_CLOSED') || states.has('ORACLE_PAUSED')) return 5 * 60_000;
+  if (states.has('OBSERVING')) return 5 * 60_000;
   if (active.length) return 60_000;
   // 无活跃轮次：预告期/未开轮，低频心跳即可
   if (lastOkAt > 0 && now - lastOkAt < STALE_MS) return 5 * 60_000;
@@ -269,14 +263,17 @@ async function ensureConfig(ctx: TickContext): Promise<{ changed: boolean }> {
   const versionMismatch =
     config.expectedConfigVersion !== null && Number.parseInt(fields.configVersion, 10) !== config.expectedConfigVersion;
   const hashMismatch = config.expectedConfigHash !== null && digest.toLowerCase() !== config.expectedConfigHash.toLowerCase();
+  // v10：teamVault 槽 = 团队钱包，admin/oracle 槽 = keeper
   const addressMismatch =
     parseTonAddress(fields.jettonMaster)?.raw !== config.addresses.jettonMaster.raw ||
-    parseTonAddress(fields.teamVault)?.raw !== config.addresses.teamVault.raw;
+    parseTonAddress(fields.teamVault)?.raw !== config.addresses.teamWallet.raw ||
+    parseTonAddress(fields.admin)?.raw !== config.addresses.keeper.raw ||
+    parseTonAddress(fields.oracle)?.raw !== config.addresses.keeper.raw;
   if (versionMismatch || hashMismatch || addressMismatch) {
     const reasons: string[] = [];
     if (versionMismatch) reasons.push('configVersion 链上=' + fields.configVersion + ' 期望=' + config.expectedConfigVersion);
     if (hashMismatch) reasons.push('configHash 链上=' + digest + ' 期望=' + config.expectedConfigHash);
-    if (addressMismatch) reasons.push('地址不一致（jettonMaster/teamVault）');
+    if (addressMismatch) reasons.push('地址不一致（jettonMaster/teamWallet/keeper）');
     throw Object.assign(new Error('ORACLE_CONFIG_MISMATCH: ' + reasons.join('; ')), { kind: 'config' as const, digest, fields });
   }
 
@@ -297,7 +294,10 @@ async function ensureConfig(ctx: TickContext): Promise<{ changed: boolean }> {
     risk_disclosure_version: fields.riskDisclosureVersion,
     contract_round_controller: config.addresses.roundController.raw,
     contract_jetton_master: config.addresses.jettonMaster.raw,
-    contract_team_vault: config.addresses.teamVault.raw,
+    contract_team_wallet: config.addresses.teamWallet.raw,
+    contract_keeper: config.addresses.keeper.raw,
+    // v10：RC 自己的 Jetton 钱包（质押、奖励、团队额度都在这里）
+    contract_staking_vault: parseTonAddress(fields.stakingJettonWallet)?.raw ?? fields.stakingJettonWallet,
     contract_oracle_config_hash: digest,
   };
   for (const [key, value] of Object.entries(entries)) {
@@ -312,7 +312,8 @@ async function ensureConfig(ctx: TickContext): Promise<{ changed: boolean }> {
       env,
       {
         contract_round_controller_friendly: config.addresses.roundController.input,
-        contract_team_vault_friendly: config.addresses.teamVault.input,
+        contract_team_wallet_friendly: config.addresses.teamWallet.input,
+        contract_keeper_friendly: config.addresses.keeper.input,
         contract_jetton_master_friendly: config.addresses.jettonMaster.input,
       },
       now,
@@ -363,19 +364,16 @@ async function ensureBootstrap(ctx: TickContext): Promise<void> {
   ctx.rounds = await store.listRounds(env);
 }
 
-/** 处理一条批次的链上数据 → D1（K 线 / 质押 / 推荐 / 领取）。 */
-async function applyBatch(ctx: TickContext, rcTxs: ChainTx[], tvTxs: ChainTx[]): Promise<void> {
+/** 处理一条批次的链上数据 → D1（K 线 / 质押 / 结算 / 领取 / 退款账本）。 */
+async function applyBatch(ctx: TickContext, rcTxs: ChainTx[]): Promise<void> {
   const { env, now, rounds, configFields } = ctx;
   const rcRaw = ctx.config.addresses.roundController.raw;
   const roundById = new Map(rounds.map((round) => [round.round_id, round]));
   const allStakes = await store.listAllStakes(env);
   const stakesByAddress = groupStakes(allStakes);
-  const referrals = new Map<string, string>();
-  for (const row of await store.listReferrals(env)) referrals.set(row.address, row.referrer);
   const candleRows = groupCandles(await store.listCandlesAll(env));
 
   const candleBatch: CandleRow[] = [];
-  const referralBatch: { address: string; referrer: string; created_at: number }[] = [];
 
   // 第一遍：先应用开轮目标价事件（TargetPriceSet），否则同批次后面的 SubmitCandle 拿不到 target 会被跳过。
   // 链上顺序保证 OpenRound（TargetPriceSet）先于该轮任何 SubmitCandle，但两遍扫描才不依赖「同一页内」的偶然顺序。
@@ -397,7 +395,7 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[], tvTxs: ChainTx[]):
         ctx.writes++;
         previous.target_price_usd_e8 = patch.target_price_usd_e8;
         previous.target_tier = patch.target_tier;
-        (previous as RoundRow & { target_twap24h_usd_e8?: string | null }).target_twap24h_usd_e8 = patch.target_twap24h_usd_e8;
+        previous.target_twap24h_usd_e8 = patch.target_twap24h_usd_e8;
       }
     }
   }
@@ -415,84 +413,21 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[], tvTxs: ChainTx[]):
     }
     for (const event of eventsOfTx(tx, rcRaw)) {
       ctx.events++;
-      if (event.opcode === EVENT_OP.depositAccepted) {
-        const exists = (stakesByAddress.get(event.owner.raw) ?? []).some(
-          (row) => row.round_id === event.roundId && row.nonce === tx.lt,
-        );
-        if (exists) continue;
-        const streak = streakFor(stakesByAddress, event.owner.raw, event.roundId);
-        const inserted = await store.insertStake(env, {
-          roundId: event.roundId,
-          address: event.owner.raw,
-          amountRaw: event.amountRaw,
-          weightRaw: ownWeightFor(event.amountRaw, streak),
-          nonce: tx.lt,
-          riskDisclosureVersion: Number.parseInt(configFields.riskDisclosureVersion, 10),
-          acceptFullPrincipalBurn: true,
-          acceptedAt: tx.now * 1000,
-          streak,
-          referredBy: referrals.get(event.owner.raw) ?? null,
-        });
-        if (inserted) {
-          ctx.stakes++;
-          ctx.writes++;
-          const list = stakesByAddress.get(event.owner.raw) ?? [];
-          list.push({
-            id: 0,
-            round_id: event.roundId,
-            address: event.owner.raw,
-            amount_raw: event.amountRaw.toString(),
-            weight_raw: '0',
-            nonce: tx.lt,
-            risk_disclosure_version: 0,
-            accept_full_principal_burn: 1,
-            streak,
-            reward_state: 0,
-            referred_by: referrals.get(event.owner.raw) ?? null,
-            principal_claimed: 0,
-            reward_claimed: 0,
-            accepted_at: tx.now * 1000,
-          });
-          stakesByAddress.set(event.owner.raw, list);
-        }
-      } else if (event.opcode === EVENT_OP.referrerSet) {
-        if (referrals.get(event.owner.raw) !== undefined) continue; // 一次性绑定，不可改
-        referrals.set(event.owner.raw, event.referrer.raw);
-        referralBatch.push({ address: event.owner.raw, referrer: event.referrer.raw, created_at: tx.now * 1000 });
-        ctx.writes++;
-      } else if (event.opcode === EVENT_OP.rewardEarly) {
-        await store.insertClaimsBulk(env, [
-          { round_id: event.roundId, address: event.owner.raw, kind: 'reward', amount_raw: event.paidRaw.toString(), claimed_at: tx.now * 1000 },
-        ]);
-        await store.updateRoundReward(env, {
-          roundId: event.roundId,
-          address: event.owner.raw,
-          state: 2,
-          paidRaw: event.paidRaw.toString(),
-          lockedRaw: event.lockedRaw.toString(),
-          now,
-        });
-        ctx.claims++;
-        ctx.writes += 2;
-      } else if (event.opcode === EVENT_OP.rewardRolled) {
-        // V8 滚存：合约把奖励直接计进下一轮质押（**不会**发 DepositAccepted），必须在这里补一条 stake 行，
-        // 否则轮次总质押/权重/奖励都会偏低（fast-test 实测 R4 差 2,000 万 A9）。
-        const exists = (stakesByAddress.get(event.owner.raw) ?? []).some(
-          (row) => row.round_id === event.nextRoundId && row.nonce === 'roll:' + tx.lt,
-        );
-        if (!exists) {
-          const streak = streakFor(stakesByAddress, event.owner.raw, event.nextRoundId);
+      switch (event.opcode) {
+        case EVENT_OP.depositAccepted: {
+          const exists = (stakesByAddress.get(event.owner.raw) ?? []).some(
+            (row) => row.round_id === event.roundId && row.nonce === tx.lt,
+          );
+          if (exists) break;
           const inserted = await store.insertStake(env, {
-            roundId: event.nextRoundId,
+            roundId: event.roundId,
             address: event.owner.raw,
             amountRaw: event.amountRaw,
-            weightRaw: ownWeightFor(event.amountRaw, streak),
-            nonce: 'roll:' + tx.lt,
+            weightRaw: event.amountRaw,
+            nonce: tx.lt,
             riskDisclosureVersion: Number.parseInt(configFields.riskDisclosureVersion, 10),
             acceptFullPrincipalBurn: true,
             acceptedAt: tx.now * 1000,
-            streak,
-            referredBy: referrals.get(event.owner.raw) ?? null,
           });
           if (inserted) {
             ctx.stakes++;
@@ -500,31 +435,62 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[], tvTxs: ChainTx[]):
             const list = stakesByAddress.get(event.owner.raw) ?? [];
             list.push({
               id: 0,
-              round_id: event.nextRoundId,
+              round_id: event.roundId,
               address: event.owner.raw,
               amount_raw: event.amountRaw.toString(),
-              weight_raw: '0',
-              nonce: 'roll:' + tx.lt,
+              weight_raw: event.amountRaw.toString(),
+              nonce: tx.lt,
               risk_disclosure_version: 0,
               accept_full_principal_burn: 1,
-              streak,
-              reward_state: 0,
-              referred_by: referrals.get(event.owner.raw) ?? null,
               principal_claimed: 0,
               reward_claimed: 0,
               accepted_at: tx.now * 1000,
             });
             stakesByAddress.set(event.owner.raw, list);
           }
+          break;
         }
-        await store.updateRoundReward(env, {
-          roundId: event.roundId,
-          address: event.owner.raw,
-          state: 1,
-          rolledRaw: event.amountRaw.toString(),
-          now,
-        });
-        ctx.writes++;
+        case EVENT_OP.roundSettled:
+          await applyRoundSettled(ctx, event, tx);
+          break;
+        case EVENT_OP.claimed:
+          await applyClaimed(ctx, event, tx, stakesByAddress, roundById);
+          break;
+        case EVENT_OP.depositRefunded: {
+          const kind = !event.recorded ? 'dust' : event.instant ? 'instant' : 'credit';
+          const inserted = await store.insertRefundEntry(env, {
+            tx_lt: tx.lt,
+            address: event.owner.raw,
+            kind,
+            amount_raw: event.amountRaw.toString(),
+            created_at: tx.now * 1000,
+          });
+          if (inserted) ctx.writes++;
+          break;
+        }
+        case EVENT_OP.settlementBounced:
+          // 合约已把该动作标进 retryMask；任何人可发 RetrySettlement（≥0.3 TON）。get_round 的确认标志会在重试成功后恢复。
+          await store.logEvent(
+            env,
+            'warn',
+            'indexer',
+            'INDEXER_SETTLEMENT_BOUNCED',
+            'R' + event.roundId + ' action=' + (event.action === SETTLE_ACTION.teamTransfer ? 'team_transfer' : event.action === SETTLE_ACTION.burn ? 'burn' : String(event.action)) + ' tx=' + tx.lt + '（需要 RetrySettlement）',
+          );
+          ctx.writes++;
+          break;
+        case EVENT_OP.unexpectedBounce:
+          await store.logEvent(
+            env,
+            'error',
+            'indexer',
+            'INDEXER_UNEXPECTED_BOUNCE',
+            'op=0x' + event.op.toString(16) + ' queryId=' + event.queryId.toString() + ' tx=' + tx.lt + '（代币仍在 RC 钱包，需人工核查）',
+          );
+          ctx.writes++;
+          break;
+        default:
+          break;
       }
     }
   }
@@ -548,27 +514,141 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[], tvTxs: ChainTx[]):
       candleRows.set(row.round_id, list);
     }
   }
-  if (referralBatch.length) await store.insertReferralsBulk(env, referralBatch);
+}
 
-  for (const tx of tvTxs) {
-    if (tx.aborted || tx.description?.aborted) continue;
-    for (const event of eventsOfTx(tx, ctx.config.addresses.teamVault.raw)) {
-      ctx.events++;
-      if (event.opcode === EVENT_OP.teamReleased || event.opcode === EVENT_OP.teamBurned) {
-        await store.logEvent(
-          env,
-          'info',
-          'indexer',
-          event.opcode === EVENT_OP.teamReleased ? 'TEAM_RELEASED' : 'TEAM_BURNED',
-          'R' + event.roundId + ' amount=' + event.amountRaw.toString() + ' tx=' + tx.lt,
-        );
-        ctx.writes++;
+/**
+ * RoundSettled：记录本轮结算动作（一笔 burn 的拆分 + 团队释放额）。
+ * 账本先写成 dispatched（confirmed=0）；确认与否以 get_round 的标志为准（refreshRounds）。
+ * 事件金额与配置推导值不一致只告警（以事件为准写账）。
+ */
+async function applyRoundSettled(ctx: TickContext, event: RoundSettledEvent, tx: ChainTx): Promise<void> {
+  const { env, now, configFields } = ctx;
+  const expected = settlementAmounts(event.status, configFields, event.totalAcceptedStakeRaw);
+  const actual = {
+    reward: event.rewardBurnRaw,
+    team: event.teamBurnRaw,
+    principal: event.principalBurnRaw,
+    teamReleased: event.teamReleasedRaw,
+  };
+  if (
+    expected.reward !== actual.reward ||
+    expected.team !== actual.team ||
+    expected.principal !== actual.principal ||
+    expected.teamReleased !== actual.teamReleased
+  ) {
+    await store.logEvent(
+      env,
+      'error',
+      'indexer',
+      'INDEXER_SETTLEMENT_MISMATCH',
+      'R' + event.roundId + ' 事件 burn=' + actual.reward + '/' + actual.team + '/' + actual.principal + ' team=' + actual.teamReleased +
+        ' 推导 burn=' + expected.reward + '/' + expected.team + '/' + expected.principal + ' team=' + expected.teamReleased,
+    );
+  }
+  for (const kind of BURN_KINDS) {
+    const amount = actual[kind];
+    if (amount === 0n) continue;
+    const changed = await store.upsertBurnLedger(env, {
+      roundId: event.roundId,
+      kind,
+      amountRaw: amount.toString(),
+      burnRef: burnRef(event.roundId, kind),
+      confirmed: false,
+      txHash: tx.hash,
+      now,
+    });
+    if (changed) ctx.writes++;
+  }
+  await store.logEvent(
+    env,
+    event.status === 9 ? 'warn' : 'info',
+    'indexer',
+    'ROUND_SETTLED',
+    'R' + event.roundId + ' status=' + event.status + ' qualified=' + event.qualifiedCandles + '/' + event.candlesSeen +
+      ' stake=' + event.totalAcceptedStakeRaw + ' burn=' + (actual.reward + actual.team + actual.principal) + ' teamReleased=' + actual.teamReleased + ' tx=' + tx.lt,
+  );
+  ctx.writes++;
+}
+
+/**
+ * Claimed：把 roundsMask 里的每一轮标记为已领取，并按 D1 质押 / 奖励账本拆出每轮金额；
+ * bit 15 = 退款账本，领取额 = 事件本金 − 各轮本金之和。拆分合计与事件不一致只告警（事件为准）。
+ */
+async function applyClaimed(
+  ctx: TickContext,
+  event: ClaimedEvent,
+  tx: ChainTx,
+  stakesByAddress: Map<string, StakeRow[]>,
+  roundById: Map<number, RoundRow>,
+): Promise<void> {
+  const { env } = ctx;
+  const owner = event.owner.raw;
+  const claimedAt = tx.now * 1000;
+  const ownStakes = stakesByAddress.get(owner) ?? [];
+  const roundIds = roundsInMask(event.roundsMask);
+  const refundClaimed = (event.roundsMask & REFUND_LEDGER_BIT) !== 0;
+
+  const split: { roundId: number; principal: bigint; reward: bigint }[] = [];
+  for (const roundId of roundIds) {
+    const round = roundById.get(roundId);
+    const principal = ownStakes.filter((row) => row.round_id === roundId).reduce((sum, row) => sum + BigInt(row.amount_raw), 0n);
+    let reward = 0n;
+    if (round && round.state !== 'TECHNICAL_ABORTED' && round.state !== 'FAILED_PERMANENT') {
+      const roundStakes = [...stakesByAddress.values()].flat().filter((row) => row.round_id === roundId);
+      const totals = rewards.roundStakeTotals(roundStakes);
+      reward = rewardFor(BigInt(round.reward_budget_raw), principal, totals.totalStake);
+    }
+    split.push({ roundId, principal, reward });
+  }
+  // 单轮领取：直接用事件金额（最准确）
+  if (split.length === 1 && !refundClaimed) {
+    split[0].principal = event.principalRaw;
+    split[0].reward = event.rewardRaw;
+  }
+  const roundsPrincipal = split.reduce((sum, item) => sum + item.principal, 0n);
+  const roundsReward = split.reduce((sum, item) => sum + item.reward, 0n);
+  const refundPart = refundClaimed ? event.principalRaw - roundsPrincipal : 0n;
+  if (roundsReward !== event.rewardRaw || refundPart < 0n || (!refundClaimed && roundsPrincipal !== event.principalRaw)) {
+    await store.logEvent(
+      env,
+      'warn',
+      'indexer',
+      'INDEXER_CLAIM_SPLIT_DIVERGE',
+      owner.slice(0, 12) + ' mask=0x' + event.roundsMask.toString(16) + ' 事件 principal=' + event.principalRaw + ' reward=' + event.rewardRaw +
+        ' 本地拆分 principal=' + roundsPrincipal + ' reward=' + roundsReward + ' tx=' + tx.lt,
+    );
+    ctx.writes++;
+  }
+  for (const item of split) {
+    const recorded = await store.recordRoundClaim(env, {
+      roundId: item.roundId,
+      address: owner,
+      principalRaw: item.principal,
+      rewardRaw: item.reward,
+      claimedAt,
+    });
+    if (recorded) ctx.writes++;
+    for (const row of ownStakes) {
+      if (row.round_id === item.roundId) {
+        row.principal_claimed = 1;
+        row.reward_claimed = 1;
       }
     }
   }
+  if (refundClaimed) {
+    const inserted = await store.insertRefundEntry(env, {
+      tx_lt: tx.lt,
+      address: owner,
+      kind: 'claim',
+      amount_raw: (refundPart > 0n ? refundPart : 0n).toString(),
+      created_at: claimedAt,
+    });
+    if (inserted) ctx.writes++;
+  }
+  ctx.claims++;
 }
 
-/** 用 get_round 锚定刷新轮次快照 + 三笔销毁确认状态。 */
+/** 用 get_round 锚定刷新轮次快照 + 结算动作确认状态。 */
 async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void> {
   const { env, now, client, configFields } = ctx;
   const rounds = await store.listRounds(env);
@@ -577,7 +657,7 @@ async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void
   const rcRaw = ctx.config.addresses.roundController.raw;
 
   const getterCap = intEnv(env, 'INDEXER_MAX_GETTER_ROUNDS', MAX_GETTER_ROUNDS_PER_TICK, 1, 10);
-    for (const roundId of roundIds.slice(0, getterCap)) {
+  for (const roundId of roundIds.slice(0, getterCap)) {
     let view: ChainRoundView;
     try {
       view = await getRound(client, rcRaw, roundId);
@@ -588,60 +668,49 @@ async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void
     const previous = roundById.get(roundId) ?? null;
     const candles = candlesAll.get(roundId) ?? [];
     debugLog(env, 'round ' + roundId + ' status=' + view.status + ' seen=' + view.candlesSeen + ' candlesRows=' + candles.length);
-
-    // ORACLE 恢复：链上重置了观察窗口 → 清掉旧 K 线，避免混合两个窗口
-    if (
-      previous &&
-      previous.state === 'ORACLE_PAUSED' &&
-      chainStatusToRoundState(view.status) === 'OBSERVING' &&
-      view.observationStart > 0 &&
-      previous.observation_start !== view.observationStart * 1000
-    ) {
-      await store.resetRoundWindow(env, roundId, view.observationStart * 1000, view.observationEnd * 1000, now);
-      await store.patchRoundChain(env, roundId, { last_candle_twap_usd_e8: null, last_candle_at: null }, now);
-      candlesAll.set(roundId, []);
-      ctx.writes++;
-      await store.logEvent(env, 'warn', 'indexer', 'INDEXER_WINDOW_RESET', 'R' + roundId + ' 链上观察窗口重置，已清空旧 K 线');
+    if (chainStatusToRoundState(view.status) === null) {
+      await store.logEvent(env, 'error', 'indexer', 'INDEXER_UNKNOWN_STATUS', 'R' + roundId + ' 链上 status=' + view.status + '（v10 只应出现 0/1/2/4/8/9/10）');
     }
 
-    // 销毁三态：status 7/9 视为已 dispatched；flags 为 confirmed
-    const burnRound = view.status === 7 || view.status === 9 || (view.status === 8 && view.rewardBurnConfirmed);
-    if (burnRound) {
-      // 链上 failureBurnId 复算校验（只告警，不阻塞）
-      if (view.status === 9 && view.failureBurnId !== '0x' + '0'.repeat(64)) {
-        const expectedBurnId = await computeFailureBurnId(roundId, Number.parseInt(configFields.configVersion, 10));
-        if (view.failureBurnId !== expectedBurnId) {
-          await store.logEvent(env, 'error', 'indexer', 'INDEXER_BURN_ID_MISMATCH', 'R' + roundId + ' burnId 链上=' + view.failureBurnId + ' 计算=' + expectedBurnId);
-        }
-      }
-      const confirmed = deriveBurnObservations(view, configFields);
-      const confirmedKinds = new Set(confirmed.map((item) => item.kind));
+    // 结算动作（v10：成功轮团队转账 + 可能的奖励 burn；失败轮一笔 burn = 奖励 + 团队 + 本金）
+    let burnedRaw: string | null = null;
+    let teamReleasedRaw: string | null | undefined;
+    if (view.status === 8 || view.status === 9) {
+      const amounts = settlementAmounts(view.status, configFields, view.totalAcceptedStakeRaw);
+      const burnConfirmed = view.rewardBurnConfirmed; // 一笔 burn：三个标志同真同假
       for (const kind of BURN_KINDS) {
-        const amount = expectedBurnAmount(kind, configFields, view.totalAcceptedStakeRaw);
-        if (kind === 'principal' && amount === 0n) continue;
-        const isConfirmed = confirmedKinds.has(kind);
+        const amount = amounts[kind];
+        if (amount === 0n) continue;
         const changed = await store.upsertBurnLedger(env, {
           roundId,
           kind,
           amountRaw: amount.toString(),
           burnRef: burnRef(roundId, kind),
-          confirmed: isConfirmed,
+          confirmed: burnConfirmed,
           txHash: null,
           now,
         });
         if (changed) ctx.writes++;
       }
+      const total = confirmedBurnedTotal(view, configFields);
+      if (total !== null) burnedRaw = total.toString();
+      if (view.status === 8) {
+        // 团队释放：链上确认（已发出且未被退回）才显示；被退回待 RetrySettlement 时清空
+        teamReleasedRaw = view.teamReleaseConfirmed ? amounts.teamReleased.toString() : null;
+      }
     }
 
-    const burned = view.status === 9 ? confirmedBurnedTotal(view, configFields) : null;
     const patch = buildRoundPatch({
       view,
       config: configFields,
       previous,
       candles,
-      burnedRaw: burned === null ? null : burned.toString(),
+      burnedRaw,
       now,
     });
+    if (teamReleasedRaw !== undefined && (previous?.team_released_raw ?? null) !== teamReleasedRaw) {
+      patch.team_released_raw = teamReleasedRaw;
+    }
     if (Object.keys(patch).length) {
       const changed = await store.patchRoundChain(env, roundId, patch, now);
       if (changed) ctx.writes++;
@@ -651,8 +720,8 @@ async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void
 }
 
 /**
- * chain 模式下 v8.syncV8Rounds 整体跳过（backend-dev B3/H-7），所以成功轮的奖励三态账本由索引器负责：
- * 用链上 get_round.totalWeight 作为分母、D1 stakes 作为权重来源，复算每地址 reward 并整轮落库（保留已领三态）。
+ * chain 模式下 rewards.syncRoundLedgers 整体跳过（单一写者），成功轮的奖励账本由索引器负责：
+ * 以链上 get_round.totalAcceptedStakeRaw 为分母、D1 stakes 为分子，复算每地址全额奖励并整轮落库。
  */
 async function syncRoundRewards(ctx: TickContext, roundId: number, view: ChainRoundView): Promise<void> {
   if (chainStatusToRoundState(view.status) !== 'SUCCEEDED') return;
@@ -660,30 +729,19 @@ async function syncRoundRewards(ctx: TickContext, roundId: number, view: ChainRo
   if (!stakes.length) return;
   const round = await store.getRound(ctx.env, roundId);
   if (!round) return;
-  const params = {
-    minStakeRaw: BigInt(ctx.configFields.minStakeRaw || '0'),
-    referralBonusBps: REFERRAL_BONUS_BPS,
-  } as unknown as Params;
-  const weights = v8.computeRoundWeights(params, stakes);
-  if (view.totalWeight > 0n && weights.totalWeight !== view.totalWeight) {
+  const totals = rewards.roundStakeTotals(stakes);
+  if (view.totalAcceptedStakeRaw > 0n && totals.totalStake !== view.totalAcceptedStakeRaw) {
     await store.logEvent(
       ctx.env,
       'warn',
       'indexer',
-      'INDEXER_WEIGHT_DIVERGE',
-      'R' + roundId + ' 本地权重合计=' + weights.totalWeight.toString() + ' 链上=' + view.totalWeight.toString() + '（以链上为分母）',
+      'INDEXER_STAKE_DIVERGE',
+      'R' + roundId + ' 本地质押合计=' + totals.totalStake.toString() + ' 链上=' + view.totalAcceptedStakeRaw.toString() + '（以链上为分母）',
     );
-    weights.totalWeight = view.totalWeight;
   }
   const existing = await store.listRoundRewards(ctx.env, roundId);
-  const rows = v8.buildRewardRows(params, round, weights, ctx.now, existing);
-  const drifted =
-    rows.length !== existing.length ||
-    rows.some((row) => {
-      const prev = existing.find((item) => item.address === row.address);
-      return !prev || prev.reward_raw !== row.reward_raw || prev.weight_raw !== row.weight_raw;
-    });
-  if (!drifted) return;
+  const rows = rewards.buildRewardRows(round, totals, ctx.now, existing, view.totalAcceptedStakeRaw);
+  if (!rewards.rewardRowsDrifted(rows, existing)) return;
   await store.replaceRoundRewards(ctx.env, roundId, rows);
   ctx.writes++;
 }
@@ -827,10 +885,6 @@ async function runTick(env: Env, now: number, config: ChainConfig): Promise<Inde
   );
   ctx.pages += rcPull.pages;
   debugLog(env, 'rc pull txs=' + rcPull.txs.length + ' pages=' + rcPull.pages);
-  const tvCursor = readCursor(kv, CURSOR_TV);
-  const tvPull = await pullTransactions(client, config.addresses.teamVault.raw, tvCursor, 2);
-  ctx.pages += tvPull.pages;
-  debugLog(env, 'tv pull txs=' + tvPull.txs.length + ' pages=' + tvPull.pages);
 
   const touched = new Set<number>();
   const collectRounds = (txs: ChainTx[], emitter: string, target: string): void => {
@@ -844,19 +898,14 @@ async function runTick(env: Env, now: number, config: ChainConfig): Promise<Inde
     }
   };
   collectRounds(rcPull.txs, config.addresses.roundController.raw, config.addresses.roundController.raw);
-  collectRounds(tvPull.txs, config.addresses.teamVault.raw, config.addresses.teamVault.raw);
   touched.delete(0);
 
-  await applyBatch(ctx, rcPull.txs, tvPull.txs);
+  await applyBatch(ctx, rcPull.txs);
   debugLog(env, 'apply done writes=' + ctx.writes + ' candles=' + ctx.candles + ' stakes=' + ctx.stakes);
 
   // 游标只在数据落库后推进（幂等写入，崩溃重放安全）
   if (rcPull.next) {
     await store.setMetrics(env, { [CURSOR_RC]: JSON.stringify(rcPull.next) }, now);
-    ctx.writes++;
-  }
-  if (tvPull.next) {
-    await store.setMetrics(env, { [CURSOR_TV]: JSON.stringify(tvPull.next) }, now);
     ctx.writes++;
   }
 
@@ -1002,8 +1051,8 @@ export async function reconcile(env: Env, now = Date.now()): Promise<{ ok: boole
     if (candles.length !== round.candles_seen && candles.length > 0) {
       add(round.round_id, 'candlesRows', String(view.candlesSeen), String(candles.length));
     }
-    // 进行中轮次（2..7）还在产 K 线：getter 与 D1 不是同一瞬间的快照，只对终态轮次做不可变哈希比对
-    const inFlight = view.status >= 2 && view.status <= 7;
+    // 进行中轮次（2/4）还在产 K 线：getter 与 D1 不是同一瞬间的快照，只对终态轮次做不可变哈希比对
+    const inFlight = isActiveChainStatus(view.status);
     if (!inFlight && candles.length > 0 && view.candleHash !== '0x' + '0'.repeat(64)) {
       const { verifyCandleHash } = await import('./snapshot');
       const okHash = await verifyCandleHash(candles, view.candleHash);
@@ -1013,23 +1062,32 @@ export async function reconcile(env: Env, now = Date.now()): Promise<{ ok: boole
     if (stakeTotal !== view.totalAcceptedStakeRaw && (candles.length > 0 || stakeTotal > 0n)) {
       add(round.round_id, 'totalStake', view.totalAcceptedStakeRaw.toString(), stakeTotal.toString());
     }
-    if (view.status === 9) {
-      if (round.burned_raw !== null) {
-        const total = confirmedBurnedTotal(view, fields);
-        if (total === null) add(round.round_id, 'burnedRaw', '三笔未全部确认', round.burned_raw);
-        else if (total.toString() !== round.burned_raw) add(round.round_id, 'burnedRaw', total.toString(), round.burned_raw);
+    if (view.status === 8 || view.status === 9) {
+      const total = confirmedBurnedTotal(view, fields);
+      if (total !== null && round.burned_raw !== null && total.toString() !== round.burned_raw) {
+        add(round.round_id, 'burnedRaw', total.toString(), round.burned_raw);
       }
     }
   }
 
-  // TeamVault 绑定关系
+  // v10 RC 钱包余额（docs/34 §2）：82 亿 + 质押 + 退款账本记入 + 留存零头 − 团队释放 − 已销毁 − 已领取（本金+奖励+退款）
   try {
-    const tv = await getTeamVaultState(client, config.addresses.teamVault.raw);
-    if (tv.controller && tv.controller.raw !== config.addresses.roundController.raw) {
-      add(null, 'teamVault.controller', tv.controller.raw, config.addresses.roundController.raw);
-    }
+    const wallet = await getJettonWalletAddress(client, config.addresses.roundController.raw);
+    const balance = await getWalletBalance(client, wallet);
+    const refreshed = await store.listRounds(env);
+    const claims = await store.listAllClaims(env);
+    const refunds = store.refundBalance(await store.listRefundEntries(env));
+    const expected = expectedRcWalletBalance({
+      config: fields,
+      stakes,
+      rounds: refreshed,
+      burns: await store.listBurns(env),
+      claims,
+      refunds,
+    });
+    if (expected !== balance) add(null, 'rcWalletBalance', balance.toString(), expected.toString() + '（公式推导）');
   } catch (error) {
-    diffs.push('TeamVault getter 失败：' + String(error).slice(0, 120));
+    diffs.push('RC 钱包余额核对失败：' + String(error).slice(0, 120));
   }
 
   return { ok: diffs.length === 0, diffs };

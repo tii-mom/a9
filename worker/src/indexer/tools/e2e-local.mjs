@@ -11,6 +11,7 @@
  *   Phase 3（服务停机）：用 wrangler d1 execute 复核行数/游标/销毁账本。
  *
  * 用法（仓库根目录）：node worker/src/indexer/tools/e2e-local.mjs [--fixtures <file>]
+ * 默认 fixture：v10-synthetic.json（make-v10-fixture.ts 按 v10 ABI 合成；v10 尚无测试网实例可录制）。
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
@@ -21,7 +22,7 @@ const WORKER_DIR = ROOT + '/worker';
 const WRANGLER = WORKER_DIR + '/node_modules/.bin/wrangler';
 const FIXTURES = process.argv.includes('--fixtures')
   ? process.argv[process.argv.indexOf('--fixtures') + 1]
-  : 'worker/src/indexer/tools/fixtures/fasttest-v86.json';
+  : 'worker/src/indexer/tools/fixtures/v10-synthetic.json';
 const PORT = 8800 + (process.pid % 150);
 const FIXTURE_PORT = PORT + 1;
 
@@ -85,10 +86,9 @@ for (const key of CONFIG_KEYS) ordered[key] = String(cfg[key]);
 const CONFIG_HASH = 'sha256:' + createHash('sha256').update(JSON.stringify({ v: 1, network: META.network, fields: ordered }), 'utf8').digest('hex');
 const THRESHOLD = Number(cfg.minQualifiedCandles);
 const CANDLE_SECONDS = Number(cfg.candleSeconds);
+// v10 只会出现 0/1/2/4/8/9/10
 const STATUS_TO_STATE = {
-  0: 'UNOPENED', 1: 'UNOPENED', 2: 'STAKING_OPEN', 3: 'STAKING_CLOSED', 4: 'OBSERVING',
-  5: 'ORACLE_PAUSED', 6: 'SETTLING_SUCCESS', 7: 'SETTLING_FAILURE', 8: 'SUCCEEDED',
-  9: 'FAILED_PERMANENT', 10: 'TECHNICAL_ABORTED',
+  0: 'UNOPENED', 1: 'UNOPENED', 2: 'STAKING_OPEN', 4: 'OBSERVING', 8: 'SUCCEEDED', 9: 'FAILED_PERMANENT', 10: 'TECHNICAL_ABORTED',
 };
 function fixtureRound(roundId) {
   const key = 'get_round|' + META.rc + '|' + JSON.stringify([['num', '0x' + roundId.toString(16)]]);
@@ -197,13 +197,13 @@ function adminToken() {
     const line = envFile.split('\n').find((item) => item.startsWith('ADMIN_TOKEN='));
     if (line) return line.slice('ADMIN_TOKEN='.length).trim();
   } catch { /* ignore */ }
-  return 'e2e-admin-token-0123456789';
+  return 'e2e-admin-token-0123456789-abcdef-chain'; // chain 模式要求 ≥ 32 字符
 }
 async function adminTick(token, path = '/api/admin/indexer/tick') {
   const response = await fetch('http://127.0.0.1:' + PORT + path, {
-    method: path.endsWith('/reconcile') ? 'GET' : 'POST',
+    method: 'POST',
     headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-    body: path.endsWith('/reconcile') ? undefined : '{}',
+    body: '{}',
     signal: AbortSignal.timeout(120000),
   });
   const json = await response.json();
@@ -241,7 +241,8 @@ async function main() {
     '--var', 'TONCENTER_V3_URL:http://127.0.0.1:' + FIXTURE_PORT + '/v3',
     '--var', 'CHAIN_NETWORK:' + META.network,
     '--var', 'ROUND_CONTROLLER_ADDRESS:' + META.rc,
-    '--var', 'TEAM_VAULT_ADDRESS:' + META.tv,
+    '--var', 'TEAM_WALLET_ADDRESS:' + META.tw,
+    '--var', 'KEEPER_ADDRESS:' + META.keeper,
     '--var', 'JETTON_MASTER_ADDRESS:' + META.jm,
     '--var', 'ORACLE_CONFIG_VERSION:' + cfg.configVersion,
     '--var', 'ORACLE_CONFIG_HASH:' + CONFIG_HASH,
@@ -269,7 +270,7 @@ async function main() {
   for (let attempt = 0; attempt < 8; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 1300));
     const tick = await adminTick(token);
-    lastTick = tick.body && tick.body.data;
+    lastTick = (tick.body && tick.body.data) || { status: tick.status, body: tick.body };
     if (tick.status !== 200 || !lastTick || lastTick.ok !== true) break;
     // 索引器按 getter 预算分 tick 刷新轮次；用 API 状态是否全部追上链上快照来判断 pending 已排空
     const probe = await api('/api/rounds');
@@ -331,6 +332,11 @@ async function main() {
     check('api.stats.burned', stats && BigInt(stats.burnedRaw) > 0n, 'burnedRaw=' + (stats && stats.burnedRaw));
   }
 
+  // v10：indexer 内置对账（get_round / supply / RC 钱包余额公式 vs D1）
+  const reconcileResult = await adminTick(token, '/api/admin/indexer/reconcile');
+  const reconcileData = reconcileResult.body && reconcileResult.body.data;
+  check('indexer.reconcile', reconcileData && reconcileData.ok === true, String(JSON.stringify(reconcileData ? reconcileData.diffs : reconcileResult.body)).slice(0, 600));
+
   console.log('[5/8] 幂等：再跑一次 tick，断言不重复写库…');
   await new Promise((resolve) => setTimeout(resolve, 1300));
   const idem = await adminTick(token);
@@ -345,7 +351,7 @@ async function main() {
   try {
     const cliOutput = execFileSync(process.execPath, [
       'worker/src/indexer/tools/chain-reconcile.mjs',
-      '--network', META.network, '--rc', META.rc, '--tv', META.tv, '--jm', META.jm,
+      '--network', META.network, '--rc', META.rc, '--jm', META.jm, '--tw', META.tw, '--keeper', META.keeper,
       '--v2-url', 'http://127.0.0.1:' + FIXTURE_PORT + '/v2',
       '--v3-url', 'http://127.0.0.1:' + FIXTURE_PORT + '/v3',
       '--api', 'http://127.0.0.1:' + PORT, '--allow-public',

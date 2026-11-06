@@ -262,7 +262,8 @@ jobs:
         env:
           ALLOW_DEMO_DEPLOY: ${{ inputs.allow_demo_deploy }}
           PROD_ROUND_CONTROLLER_ADDRESS: ${{ vars.PROD_ROUND_CONTROLLER_ADDRESS }}
-          PROD_TEAM_VAULT_ADDRESS: ${{ vars.PROD_TEAM_VAULT_ADDRESS }}
+          PROD_TEAM_WALLET_ADDRESS: ${{ vars.PROD_TEAM_WALLET_ADDRESS }}
+          PROD_KEEPER_ADDRESS: ${{ vars.PROD_KEEPER_ADDRESS }}
           PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
           PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
           PROD_D1_DATABASE_ID: ${{ vars.PROD_D1_DATABASE_ID }}
@@ -278,7 +279,8 @@ jobs:
 
           overrides = {
               'ROUND_CONTROLLER_ADDRESS': os.environ.get('PROD_ROUND_CONTROLLER_ADDRESS', ''),
-              'TEAM_VAULT_ADDRESS': os.environ.get('PROD_TEAM_VAULT_ADDRESS', ''),
+              'TEAM_WALLET_ADDRESS': os.environ.get('PROD_TEAM_WALLET_ADDRESS', ''),
+              'KEEPER_ADDRESS': os.environ.get('PROD_KEEPER_ADDRESS', ''),
               'JETTON_MASTER_ADDRESS': os.environ.get('PROD_JETTON_MASTER_ADDRESS', ''),
               'ORACLE_CONFIG_HASH': os.environ.get('PROD_ORACLE_CONFIG_HASH', ''),
           }
@@ -298,7 +300,7 @@ jobs:
                   errors.append(f'{key}={got!r}，要求 {want!r}')
 
           required = [
-              'ROUND_CONTROLLER_ADDRESS', 'TEAM_VAULT_ADDRESS', 'JETTON_MASTER_ADDRESS',
+              'ROUND_CONTROLLER_ADDRESS', 'TEAM_WALLET_ADDRESS', 'KEEPER_ADDRESS', 'JETTON_MASTER_ADDRESS',
               'ORACLE_CONFIG_HASH', 'TONCENTER_V2_URL', 'TONCENTER_V3_URL',
           ]
           for key in required:
@@ -349,13 +351,15 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROD_ROUND_CONTROLLER_ADDRESS: ${{ vars.PROD_ROUND_CONTROLLER_ADDRESS }}
-          PROD_TEAM_VAULT_ADDRESS: ${{ vars.PROD_TEAM_VAULT_ADDRESS }}
+          PROD_TEAM_WALLET_ADDRESS: ${{ vars.PROD_TEAM_WALLET_ADDRESS }}
+          PROD_KEEPER_ADDRESS: ${{ vars.PROD_KEEPER_ADDRESS }}
           PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
           PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
         run: |
           args=(--env production)
           [ -n "$PROD_ROUND_CONTROLLER_ADDRESS" ] && args+=(--var "ROUND_CONTROLLER_ADDRESS:$PROD_ROUND_CONTROLLER_ADDRESS")
-          [ -n "$PROD_TEAM_VAULT_ADDRESS" ] && args+=(--var "TEAM_VAULT_ADDRESS:$PROD_TEAM_VAULT_ADDRESS")
+          [ -n "$PROD_TEAM_WALLET_ADDRESS" ] && args+=(--var "TEAM_WALLET_ADDRESS:$PROD_TEAM_WALLET_ADDRESS")
+          [ -n "$PROD_KEEPER_ADDRESS" ] && args+=(--var "KEEPER_ADDRESS:$PROD_KEEPER_ADDRESS")
           [ -n "$PROD_JETTON_MASTER_ADDRESS" ] && args+=(--var "JETTON_MASTER_ADDRESS:$PROD_JETTON_MASTER_ADDRESS")
           [ -n "$PROD_ORACLE_CONFIG_HASH" ] && args+=(--var "ORACLE_CONFIG_HASH:$PROD_ORACLE_CONFIG_HASH")
           ./node_modules/.bin/wrangler deploy "${args[@]}"

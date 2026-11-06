@@ -13,7 +13,6 @@ import type {
   OrderBookLevel,
   ProtocolConfig,
   ProtocolStats,
-  ReferralResponse,
   RoundDetail,
   RoundSummary,
   RoundState,
@@ -22,11 +21,11 @@ import type {
 } from '@shared/types';
 import type { Env } from './env';
 import { DEFAULT_VERSION, SCHEMA_VERSION, uptimeSeconds } from './env';
-import { isActive, isTerminal, priceMultiplierFor, projectedTierForRound, tierForRound } from './protocol';
+import { isActive, isTerminal, priceMultiplierFor, projectedTierForRound, rewardFor, tierForRound } from './protocol';
 import * as store from './store';
 import type { CandleRow, RoundRow, TradeRow } from './store';
 import { getSource } from './sources';
-import * as v8 from './v8';
+import * as rewards from './rewards';
 import type { ReconcileResult } from './state';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 
@@ -66,11 +65,11 @@ export function buildRoundSummary(row: RoundRow, state: ReconcileResult): RoundS
     candlesSeen: row.candles_seen,
     qualifiedCandles: row.qualified_candles,
     totalAcceptedStakeRaw: aggregate.totalAcceptedStakeRaw,
-    totalWeightRaw: row.total_weight_raw ?? '0',
     candleHash: row.candle_hash ?? null,
     stakerCount: aggregate.stakerCount,
     result: row.result,
     burnedRaw: row.burned_raw,
+    teamReleasedRaw: row.team_released_raw ?? null,
     updatedAt: row.updated_at,
     // 额外字段（shared/types 暂未声明）：chain 未锁定目标时前端应显示「待链上开轮」
     targetLocked,
@@ -127,13 +126,8 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
     stakeDurationSeconds: params.stakeDurationSeconds,
     observationSeconds: params.observationSeconds,
     previewSeconds: params.previewProtocolSeconds,
-    streakBonusBps: params.streakBonusBps,
-    streakMaxRounds: params.streakMaxRounds,
-    referralBonusBps: params.referralBonusBps,
-    referralCapMultiple: params.referralCapMultiple,
-    earlyClaimPenaltyBps: params.earlyClaimPenaltyBps,
-    rolloverCapPerAddressRaw: params.rolloverCapPerAddressRaw.toString(),
-    unlockDurationSeconds: params.unlockDurationSeconds,
+    minStakeRaw: params.minStakeRaw.toString(),
+    teamRoundRaw: params.teamRoundRaw.toString(),
     network: params.network,
     dataSource: params.dataSource,
     demo:
@@ -150,11 +144,9 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
       roundController: contract('contract_round_controller'),
       stakingVault: contract('contract_staking_vault'),
       rewardVault: contract('contract_reward_vault'),
-      oracleAdapter: contract('contract_oracle_adapter'),
       codeHash: contract('contract_code_hash'),
       oracleConfigHash: contract('contract_oracle_config_hash'),
-      adminOwner: contract('contract_admin_owner'),
-      teamVault: contract('contract_team_vault'),
+      keeper: contract('contract_keeper'),
       teamWallet: contract('contract_team_wallet'),
       auditReportUrl: contract('contract_audit_report_url'),
     },
@@ -165,11 +157,11 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
       { key: 'ROUND_REWARD_RAW', label: '每轮奖励预算', status: 'frozen', value: '700,000,000 A9 × 10 轮 = 7,000,000,000' },
       { key: 'PRICE_LADDER', label: '目标价档位 P0×2^tier（D-28）', status: 'frozen', value: 'tier = 1 + 已成功轮数；失败不升档（同档重试），成功才升档；10 轮 ≠ 10 档位' },
       { key: 'MIN_QUALIFIED_CANDLES', label: '达标 K 线阈值', status: 'frozen', value: params.minQualifiedCandles + ' / ' + params.candleCount + '（不足即永久关闭并销毁本金）' },
-      { key: 'BURN_SEMANTICS', label: '失败销毁语义', status: 'frozen', value: '本轮奖励 7 亿 + 团队额度 1.2 亿 + 本轮全部已接受质押本金（三笔 burn）' },
+      { key: 'BURN_SEMANTICS', label: '失败销毁语义', status: 'frozen', value: '本轮奖励 7 亿 + 团队额度 1.2 亿 + 本轮全部已接受质押本金（一笔 burn）' },
       { key: 'TOKEN_DECIMALS', label: 'Jetton 精度（D-02）', status: 'frozen', value: params.tokenDecimals + ' 位（已确认）' },
       { key: 'ORACLE_CONFIG', label: '预言机与数据源（D-04~D-09）', status: 'pending', value: '待选定（演示数据源不具链上效力）' },
       { key: 'REWARD_FORMULA', label: '奖励分配公式（D-14）', status: 'frozen', value: '纯质押比例：floor(本轮奖励 × 我的质押 / 总质押)，一次性发放' },
-      { key: 'CUSTODY', label: '托管与权限（D-21/D-23）', status: 'frozen', value: '不设多签：营销/流动性个人钱包；管理员为 RoundController 单密钥 owner（权限最小化）' },
+      { key: 'CUSTODY', label: '托管与权限（D-42）', status: 'frozen', value: '合约没有 admin；单一 keeper 只能开轮与提交 K 线；奖励与团队额度都在 RoundController 钱包' },
       { key: 'AUDIT', label: '合约审计（D-24 前置）', status: 'pending', value: '待审计 / 待发布报告' },
     ],
   };
@@ -228,15 +220,10 @@ export async function buildStats(env: Env, state: ReconcileResult): Promise<Prot
   // H-5：demo 用 −3.8% 演示估算；chain 模式取真实 24h 前 K 线 TWAP（metrics 或 candles），拿不到就 null
   const price24hAgo = resolvePrice24hAgo(state, focus, price);
 
-  const roundsById = new Map(rounds.map((row) => [row.round_id, row]));
-  const unlockStats = await v8.buildUnlockStats(env, params, state.rewardRows, roundsById, now);
-
   return {
     supplyRaw: supply.toString(),
     burnedRaw: burned.toString(),
     lockedStakeRaw: locked.toString(),
-    lockedRewardRaw: unlockStats.lockedRewardRaw,
-    unlock: unlockStats.unlock,
     stakerCount: stakers,
     volume24hUsdE8: volume.toString(),
     // H-5：chain 模式未知值返回 null（shared/types 已放宽为 string | null，前端展示「数据不可用」）
@@ -332,191 +319,114 @@ export function buildRoundDetail(state: ReconcileResult, row: RoundRow): RoundDe
   };
 }
 
-/** 排行榜与 /api/me 共用同一份聚合：amount/占比/预计奖励公式完全一致。 */
+/** 排行榜与 /api/me 共用同一份聚合：amount/占比/预计奖励公式完全一致（v10：按质押比例）。 */
 export function buildLeaderboard(state: ReconcileResult, roundId: number): LeaderboardRow[] {
   const aggregate = state.stakeAgg.get(roundId);
   if (!aggregate || aggregate.totalRaw === 0n) return [];
   const round = state.rounds.find((item) => item.round_id === roundId);
-  const rewarded = round ? round.result !== 'FAILURE' : true;
+  const rewarded = round ? round.result !== 'FAILURE' && round.result !== 'TECHNICAL_ABORT' : true;
   const rewardBudget = rewarded && round ? toBigInt(round.reward_budget_raw) : 0n;
-  // B4：chain 模式 rewardEstimateRaw 是本地 V8 权重估算（非链上可领取额），带 estimate:true 供前端标注
-  const estimate = state.params.dataSource === 'chain';
-  // P1-C：预计奖励按 V8 权重（own weight + 邀请加成）/ 总权重，而不是本金比例
-  const weights = v8.computeRoundWeights(
-    state.params,
-    state.stakeRows.filter((row) => row.round_id === roundId),
-  );
-
+  // B4：chain 模式 rewardEstimateRaw 是本地估算（非链上可领取额），带 estimate:true 供前端标注
   return [...aggregate.byAddress.entries()]
     .sort((a, b) => (a[1].amountRaw === b[1].amountRaw ? a[0].localeCompare(b[0]) : a[1].amountRaw > b[1].amountRaw ? -1 : 1))
     .slice(0, 50)
-    .map(([address, entry], index) => {
-      const weight = weights.byAddress.get(address)?.weight ?? 0n;
-      const estimate = weights.totalWeight > 0n ? (rewardBudget * weight) / weights.totalWeight : 0n;
-      return {
-        rank: index + 1,
-        address,
-        amountRaw: entry.amountRaw.toString(),
-        shareBps: Number((entry.amountRaw * 10000n) / aggregate.totalRaw),
-        rewardEstimateRaw: estimate.toString(),
-        acceptedAt: entry.acceptedAt,
-        estimate: state.params.dataSource === 'chain',
-      };
-    });
+    .map(([address, entry], index) => ({
+      rank: index + 1,
+      address,
+      amountRaw: entry.amountRaw.toString(),
+      shareBps: Number((entry.amountRaw * 10000n) / aggregate.totalRaw),
+      rewardEstimateRaw: rewardFor(rewardBudget, entry.amountRaw, aggregate.totalRaw).toString(),
+      acceptedAt: entry.acceptedAt,
+      estimate: state.params.dataSource === 'chain',
+    }));
 }
 
-export async function buildMe(env: Env, state: ReconcileResult, address: string): Promise<MeResponse> {
-  const { params, now } = state;
-  const rows = await store.listStakesForAddress(env, address);
-  const claims = await store.listClaimsForAddress(env, address);
-  const rewardRows = await store.listRoundRewardsForAddress(env, address);
-  const roundsById = new Map(state.rounds.map((row) => [row.round_id, row]));
-  const rewardStateByRound = new Map(rewardRows.map((row) => [row.round_id, row.state]));
-  const lastRoundRow = roundsById.get(params.roundCount);
-  const unlockStarted =
-    !!lastRoundRow &&
-    (lastRoundRow.state === 'SUCCEEDED' || lastRoundRow.state === 'FAILED_PERMANENT' || lastRoundRow.state === 'TECHNICAL_ABORTED') &&
-    state.unlockPool.start_at > 0;
+/** 退款账本的 roundsMask 位（合约 maskBit(0)）。 */
+const REFUND_MASK_BIT = 1 << 15;
 
-  const perRound = new Map<
-    number,
-    { amount: bigint; weight: bigint; streak: number; acceptedAt: number; principalClaimed: boolean; rewardClaimed: boolean }
-  >();
+export async function buildMe(env: Env, state: ReconcileResult, address: string): Promise<MeResponse> {
+  const [rows, claims, refundRows] = await Promise.all([
+    store.listStakesForAddress(env, address),
+    store.listClaimsForAddress(env, address),
+    store.listRefundEntries(env, address),
+  ]);
+  const roundsById = new Map(state.rounds.map((row) => [row.round_id, row]));
+
+  const perRound = new Map<number, { amount: bigint; acceptedAt: number; claimed: boolean }>();
   for (const row of rows) {
     const current = perRound.get(row.round_id);
     const amount = toBigInt(row.amount_raw);
-    const weight = toBigInt(row.weight_raw);
-    const streak = typeof row.streak === 'number' && row.streak > 0 ? row.streak : 1;
+    const claimed = row.principal_claimed === 1;
     if (current) {
       current.amount += amount;
-      current.weight += weight;
-      current.streak = Math.max(current.streak, streak);
       current.acceptedAt = Math.min(current.acceptedAt, row.accepted_at);
-      current.principalClaimed = current.principalClaimed && row.principal_claimed === 1;
-      current.rewardClaimed = current.rewardClaimed && row.reward_claimed === 1;
+      current.claimed = current.claimed && claimed;
     } else {
-      perRound.set(row.round_id, {
-        amount,
-        weight,
-        streak,
-        acceptedAt: row.accepted_at,
-        principalClaimed: row.principal_claimed === 1,
-        rewardClaimed: row.reward_claimed === 1,
-      });
+      perRound.set(row.round_id, { amount, acceptedAt: row.accepted_at, claimed });
     }
   }
 
-  const stakes: StakePosition[] = [...perRound.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([roundId, entry]) => ({
+  const stakes: StakePosition[] = [];
+  const claimable: MeResponse['claimable'] = [];
+  let stakedTotal = 0n;
+  let rewardTotal = 0n;
+  let mask = 0;
+  let claimablePrincipal = 0n;
+  let claimableReward = 0n;
+  for (const [roundId, entry] of [...perRound.entries()].sort((a, b) => a[0] - b[0])) {
+    const round = roundsById.get(roundId);
+    const roundState = round?.state ?? 'UNOPENED';
+    const reward = round ? rewards.rewardOfAddress(round, address, state.stakeRows, state.rewardRows) : 0n;
+    const canClaim = !entry.claimed && entry.amount > 0n && (roundState === 'SUCCEEDED' || roundState === 'TECHNICAL_ABORTED');
+    stakedTotal += entry.amount;
+    rewardTotal += reward;
+    stakes.push({
       roundId,
       address,
       amountRaw: entry.amount.toString(),
-      weightRaw: entry.weight.toString(),
-      weightMultiplierBps: entry.amount > 0n ? Number((entry.weight * 10000n) / entry.amount) : 10_000,
-      streak: entry.streak,
-      rewardState: (rewardStateByRound.get(roundId) ?? 0) as MeResponse['stakes'][number]['rewardState'],
-      principalClaimed: entry.principalClaimed,
-      rewardClaimed: entry.rewardClaimed,
+      rewardRaw: reward.toString(),
+      state: roundState,
+      claimed: entry.claimed,
+      claimable: canClaim,
       acceptedAt: entry.acceptedAt,
-    }));
-
-  const claimable: MeResponse['claimable'] = [];
-  let claimedTotal = 0n;
-  for (const claim of claims) claimedTotal += toBigInt(claim.amount_raw);
-
-  let rewardTotal = 0n;
-  for (const [roundId, entry] of perRound) {
-    const round = roundsById.get(roundId);
-    if (!round) continue;
-    if (round.state === 'SUCCEEDED') {
-      const rewardRow = rewardRows.find((row) => row.round_id === roundId);
-      // P1-C：V8 权重公式（权重含 streak 与邀请加成）；解锁开始后 PENDING 奖励转入解锁池，不再算「可领取」
-      const reward = rewardRow
-        ? toBigInt(rewardRow.reward_raw)
-        : v8WeightRewardEstimate(state, round.round_id, address);
-      rewardTotal += reward;
-      const principalRaw = entry.principalClaimed ? 0n : entry.amount;
-      const rewardRaw = entry.rewardClaimed || unlockStarted ? 0n : reward;
-      if (principalRaw > 0n || rewardRaw > 0n) {
-        claimable.push({
-          roundId,
-          principalRaw: principalRaw.toString(),
-          rewardRaw: rewardRaw.toString(),
-          state: round.state,
-        });
-      }
+    });
+    if (canClaim) {
+      claimable.push({ roundId, principalRaw: entry.amount.toString(), rewardRaw: reward.toString(), state: roundState });
+      mask |= 1 << (roundId - 1);
+      claimablePrincipal += entry.amount;
+      claimableReward += reward;
     }
   }
 
-  let stakedTotal = 0n;
-  for (const entry of perRound.values()) stakedTotal += entry.amount;
+  const refund = store.refundBalance(refundRows);
+  if (refund.pending > 0n) {
+    claimable.unshift({ roundId: 0, principalRaw: refund.pending.toString(), rewardRaw: '0', state: 'UNOPENED' });
+    mask |= REFUND_MASK_BIT;
+    claimablePrincipal += refund.pending;
+  }
 
-  const rewards = v8.buildRoundRewardsView(params, state.rounds, roundsById, rewardRows, state.stakeRows, unlockStarted);
-  const stakeStreak = v8.streakSummaryFromStakes(
-    state.stakeRows.filter((row) => row.address === address),
-  );
-  const ownReferral = await store.getReferralOf(env, address);
-  const inviteeRows = await store.listInvitees(env, address);
-  const relations = [...(ownReferral ? [ownReferral] : []), ...inviteeRows];
-  const referral = v8.buildReferralInfo(params, address, relations, state.stakeRows, state.rounds);
-  const unlock = await v8.buildUnlockInfo(env, params, state.rewardRows, roundsById, address, now);
-  const lockedReward = v8.lockedRewardFor(state.rewardRows, roundsById, address);
+  let claimedTotal = 0n;
+  for (const claim of claims) claimedTotal += toBigInt(claim.amount_raw);
+  claimedTotal += refund.claimed;
 
   return {
     address,
     stakes,
     claimable,
-    rewards,
-    stake: stakeStreak,
-    referral,
-    unlock,
+    refund: {
+      pendingRaw: refund.pending.toString(),
+      creditedRaw: refund.credited.toString(),
+      claimedRaw: refund.claimed.toString(),
+    },
+    claimableAll: {
+      principalRaw: claimablePrincipal.toString(),
+      rewardRaw: claimableReward.toString(),
+      roundsMask: mask,
+    },
     totals: {
       stakedRaw: stakedTotal.toString(),
       rewardRaw: rewardTotal.toString(),
       claimedRaw: claimedTotal.toString(),
-      lockedRewardRaw: lockedReward.toString(),
-    },
-  };
-}
-
-/** 旧数据（无 round_rewards）的奖励估算：按 V8 权重（own weight + 邀请加成）/ 总权重。 */
-function v8WeightRewardEstimate(state: ReconcileResult, roundId: number, address: string): bigint {
-  const round = state.rounds.find((row) => row.round_id === roundId);
-  if (!round) return 0n;
-  const stakes = state.stakeRows.filter((row) => row.round_id === roundId);
-  if (!stakes.length) return 0n;
-  const weights = v8.computeRoundWeights(state.params, stakes);
-  const weight = weights.byAddress.get(address)?.weight ?? 0n;
-  if (weights.totalWeight === 0n || weight === 0n) return 0n;
-  return (toBigInt(round.reward_budget_raw) * weight) / weights.totalWeight;
-}
-
-/** GET /api/referral/:address：邀请关系 + 加成明细。 */
-export async function buildReferralResponse(
-  env: Env,
-  state: ReconcileResult,
-  address: string,
-): Promise<ReferralResponse> {
-  const { params } = state;
-  const ownReferral = await store.getReferralOf(env, address);
-  const inviteeRows = await store.listInvitees(env, address);
-  const relations = [...(ownReferral ? [ownReferral] : []), ...inviteeRows];
-  const referral = v8.buildReferralInfo(params, address, relations, state.stakeRows, state.rounds);
-  const invitees = v8.buildReferralInvitees(params, address, relations, state.stakeRows, state.rounds);
-  return {
-    address,
-    referrer: ownReferral?.referrer ?? null,
-    boundAt: ownReferral?.created_at ?? null,
-    invitees,
-    invitedCount: referral.invitedCount,
-    invitedStakeRaw: referral.invitedStakeRaw,
-    bonusThisRoundRaw: referral.bonusThisRoundRaw,
-    bonusTotalRaw: referral.bonusTotalRaw,
-    config: {
-      referralBonusBps: params.referralBonusBps,
-      referralCapMultiple: params.referralCapMultiple,
-      minStakeRaw: params.minStakeRaw.toString(),
     },
   };
 }

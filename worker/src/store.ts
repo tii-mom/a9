@@ -37,9 +37,9 @@ export interface RoundRow {
   candles_seen: number;
   qualified_candles: number;
   total_accepted_stake_raw: string;
-  /** V8：Σ(own weight + 邀请加成) */
+  /** v10 = 总质押（权重已删除；列保留以兼容 get_round.totalWeight 槽位） */
   total_weight_raw: string;
-  /** V8：K 线滚动哈希（链上只存此值） */
+  /** K 线滚动哈希（链上只存此值） */
   candle_hash: string | null;
   /** chain 模式（索引器落库）：最近一根已收盘 K 线 TWAP / 时间（USD_E8 / unix ms） */
   last_candle_twap_usd_e8?: string | null;
@@ -51,6 +51,8 @@ export interface RoundRow {
   staker_count: number;
   result: 'SUCCESS' | 'FAILURE' | 'TECHNICAL_ABORT' | null;
   burned_raw: string | null;
+  /** v10：成功轮团队释放额（RoundSettled.teamReleasedRaw；链上确认后写入，未结算/被退回为 NULL） */
+  team_released_raw?: string | null;
   updated_at: number;
 }
 
@@ -72,17 +74,12 @@ export interface StakeRow {
   round_id: number;
   address: string;
   amount_raw: string;
-  /** V8 own weight（含 streak 加成，不含邀请加成） */
+  /** v10 = amount_raw（列保留） */
   weight_raw: string;
   nonce: string;
   risk_disclosure_version: number;
   accept_full_principal_burn: number;
-  /** V8 连续参与轮次（入账时判定） */
-  streak: number;
-  /** V8 奖励三态：0 PENDING / 1 ROLLED / 2 EARLY（按轮聚合同值） */
-  reward_state: number;
-  /** V8 绑定邀请人快照（入账时） */
-  referred_by: string | null;
+  /** v10：一次 Claim 同时领本金 + 奖励，两列同时置 1 */
   principal_claimed: number;
   reward_claimed: number;
   accepted_at: number;
@@ -92,7 +89,7 @@ export interface ClaimRow {
   id: number;
   round_id: number;
   address: string;
-  kind: 'principal' | 'reward' | 'unlock';
+  kind: 'principal' | 'reward';
   amount_raw: string;
   claimed_at: number;
 }
@@ -118,7 +115,7 @@ export interface BookRow {
 export interface BurnRow {
   id: number;
   round_id: number;
-  kind: 'reward' | 'principal';
+  kind: 'reward' | 'principal' | 'team';
   amount_raw: string;
   burn_ref: string;
   confirmed: number;
@@ -246,17 +243,19 @@ export interface FinalizeSuccessInput {
   now: number;
   candlesSeen: number;
   qualifiedCandles: number;
+  /** 成功轮团队释放额（v10：RC 直接转团队钱包） */
+  teamReleasedRaw: string;
 }
 
 export async function finalizeSuccess(env: Env, input: FinalizeSuccessInput): Promise<boolean> {
-  const { roundId, now, candlesSeen, qualifiedCandles } = input;
+  const { roundId, now, candlesSeen, qualifiedCandles, teamReleasedRaw } = input;
   const result = await env.DB.batch([
     env.DB.prepare(
       `UPDATE rounds
-          SET state = 'SUCCEEDED', result = 'SUCCESS', burned_raw = NULL,
+          SET state = 'SUCCEEDED', result = 'SUCCESS', burned_raw = NULL, team_released_raw = ?,
               candles_seen = ?, qualified_candles = ?, updated_at = ?
         WHERE round_id = ? AND state = 'SETTLING_SUCCESS'`,
-    ).bind(candlesSeen, qualifiedCandles, now, roundId),
+    ).bind(teamReleasedRaw, candlesSeen, qualifiedCandles, now, roundId),
   ]);
   return (result[0]?.meta?.changes ?? 0) > 0;
 }
@@ -272,7 +271,7 @@ export interface FinalizeFailureInput {
   burnedRaw: string;
 }
 
-/** 失败终态：写入两笔销毁账本 + 轮次 FAILED_PERMANENT，单事务批量执行（幂等）。 */
+/** 失败终态：写入销毁账本（v10 链上是一笔 burn，账本按 reward/team/principal 拆分记录）+ 轮次 FAILED_PERMANENT，单事务批量执行（幂等）。 */
 export async function finalizeFailure(env: Env, input: FinalizeFailureInput): Promise<boolean> {
   const { roundId, now, candlesSeen, qualifiedCandles, rewardBurnRaw, teamBurnRaw, principalBurnRaw, burnedRaw } = input;
   const results = await env.DB.batch([
@@ -364,8 +363,8 @@ export async function insertRounds(env: Env, rows: RoundRow[]): Promise<void> {
       `INSERT OR REPLACE INTO rounds
         (round_id, state, target_tier, target_price_usd_e8, reward_budget_raw, stake_open_at, stake_close_at,
          observation_start, observation_end, candles_seen, qualified_candles, total_accepted_stake_raw,
-         total_weight_raw, candle_hash, staker_count, result, burned_raw, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         total_weight_raw, candle_hash, staker_count, result, burned_raw, team_released_raw, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       row.round_id,
       row.state,
@@ -384,6 +383,7 @@ export async function insertRounds(env: Env, rows: RoundRow[]): Promise<void> {
       row.staker_count,
       row.result,
       row.burned_raw,
+      row.team_released_raw ?? null,
       row.updated_at,
     ),
   );
@@ -397,12 +397,6 @@ export interface StakeSeedRow {
   weight_raw: string;
   nonce: string;
   risk_disclosure_version: number;
-  /** V8 连续轮次（入账时判定） */
-  streak: number;
-  /** V8 邀请人快照 */
-  referred_by: string | null;
-  /** V8 奖励三态 */
-  reward_state: number;
   principal_claimed: number;
   reward_claimed: number;
   accepted_at: number;
@@ -414,9 +408,8 @@ export async function insertStakesBulk(env: Env, rows: StakeSeedRow[]): Promise<
     env.DB.prepare(
       `INSERT OR REPLACE INTO stakes
         (round_id, address, amount_raw, weight_raw, nonce, risk_disclosure_version,
-         accept_full_principal_burn, streak, reward_state, referred_by,
-         principal_claimed, reward_claimed, accepted_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+         accept_full_principal_burn, principal_claimed, reward_claimed, accepted_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
     ).bind(
       row.round_id,
       row.address,
@@ -424,9 +417,6 @@ export async function insertStakesBulk(env: Env, rows: StakeSeedRow[]): Promise<
       row.weight_raw,
       row.nonce,
       row.risk_disclosure_version,
-      row.streak,
-      row.reward_state,
-      row.referred_by,
       row.principal_claimed,
       row.reward_claimed,
       row.accepted_at,
@@ -437,7 +427,7 @@ export async function insertStakesBulk(env: Env, rows: StakeSeedRow[]): Promise<
 
 export async function insertClaimsBulk(
   env: Env,
-  rows: { round_id: number; address: string; kind: 'principal' | 'reward' | 'unlock'; amount_raw: string; claimed_at: number }[],
+  rows: { round_id: number; address: string; kind: 'principal' | 'reward'; amount_raw: string; claimed_at: number }[],
 ): Promise<void> {
   if (!rows.length) return;
   const statements = rows.map((row) =>
@@ -498,30 +488,25 @@ export async function clearDemoData(env: Env): Promise<void> {
     env.DB.prepare('DELETE FROM burn_ledger'),
     env.DB.prepare('DELETE FROM candles'),
     env.DB.prepare('DELETE FROM round_rewards'),
-    env.DB.prepare('DELETE FROM referrals'),
+    env.DB.prepare('DELETE FROM refund_ledger'),
     env.DB.prepare('DELETE FROM rounds'),
     env.DB.prepare('DELETE FROM trades'),
     env.DB.prepare('DELETE FROM book_levels'),
-    env.DB.prepare("INSERT OR REPLACE INTO unlock_pool (id, start_at, total_locked_raw, claimed_raw, updated_at) VALUES (1, 0, '0', '0', 0)"),
   ]);
 }
 
 /* ------------------------------------------------------------------ *
- * V8：每轮奖励三态（round_rewards）
+ * 每轮奖励账本（round_rewards）：v10 只用 weight_raw（= 质押额）与 reward_raw（全额奖励）。
+ * V8 的 state/paid/locked/rolled 列保留在库里，写入时固定为默认值。
  * ------------------------------------------------------------------ */
 
 export interface RoundRewardRow {
   round_id: number;
   address: string;
-  /** own weight + 邀请加成（对齐合约 get_user_weight） */
+  /** v10 = 本轮质押额 */
   weight_raw: string;
-  /** floor(rewardBudget × weight / totalWeight) */
+  /** floor(rewardBudget × stake / totalStake)（合约 rewardOf 同口径） */
   reward_raw: string;
-  /** 0 PENDING / 1 ROLLED / 2 EARLY */
-  state: number;
-  paid_raw: string;
-  locked_raw: string;
-  rolled_raw: string;
   created_at: number;
   updated_at: number;
 }
@@ -546,16 +531,12 @@ export async function replaceRoundRewards(env: Env, roundId: number, rows: Round
       env.DB.prepare(
         `INSERT OR REPLACE INTO round_rewards
            (round_id, address, weight_raw, reward_raw, state, paid_raw, locked_raw, rolled_raw, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, 0, '0', '0', '0', ?, ?)`,
       ).bind(
         roundId,
         row.address,
         row.weight_raw,
         row.reward_raw,
-        row.state,
-        row.paid_raw,
-        row.locked_raw,
-        row.rolled_raw,
         row.created_at,
         row.updated_at,
       ),
@@ -564,49 +545,19 @@ export async function replaceRoundRewards(env: Env, roundId: number, rows: Round
   await runBatches(env, statements);
 }
 
-export async function updateRoundReward(
-  env: Env,
-  input: { roundId: number; address: string; state?: number; paidRaw?: string; lockedRaw?: string; rolledRaw?: string; now: number },
-): Promise<void> {
-  const sets: string[] = ['updated_at = ?'];
-  const binds: Bind[] = [input.now];
-  if (input.state !== undefined) {
-    sets.push('state = ?');
-    binds.push(input.state);
-  }
-  if (input.paidRaw !== undefined) {
-    sets.push('paid_raw = ?');
-    binds.push(input.paidRaw);
-  }
-  if (input.lockedRaw !== undefined) {
-    sets.push('locked_raw = ?');
-    binds.push(input.lockedRaw);
-  }
-  if (input.rolledRaw !== undefined) {
-    sets.push('rolled_raw = ?');
-    binds.push(input.rolledRaw);
-  }
-  binds.push(input.roundId, input.address);
-  await run(env, `UPDATE round_rewards SET ${sets.join(', ')} WHERE round_id = ? AND address = ?`, ...binds);
-}
-
-/** 演示数据重建：整批写入每轮奖励三态。 */
+/** 演示数据重建：整批写入每轮奖励。 */
 export async function insertRoundRewardsBulk(env: Env, rows: RoundRewardRow[]): Promise<void> {
   if (!rows.length) return;
   const statements = rows.map((row) =>
     env.DB.prepare(
       `INSERT OR REPLACE INTO round_rewards
          (round_id, address, weight_raw, reward_raw, state, paid_raw, locked_raw, rolled_raw, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 0, '0', '0', '0', ?, ?)`,
     ).bind(
       row.round_id,
       row.address,
       row.weight_raw,
       row.reward_raw,
-      row.state,
-      row.paid_raw,
-      row.locked_raw,
-      row.rolled_raw,
       row.created_at,
       row.updated_at,
     ),
@@ -615,108 +566,7 @@ export async function insertRoundRewardsBulk(env: Env, rows: RoundRewardRow[]): 
 }
 
 /* ------------------------------------------------------------------ *
- * V8：邀请关系（一层、一次性绑定，对齐合约 extras.referrer）
- * ------------------------------------------------------------------ */
-
-export interface ReferralRow {
-  address: string;
-  referrer: string;
-  created_at: number;
-}
-
-export async function listReferrals(env: Env): Promise<ReferralRow[]> {
-  return all<ReferralRow>(env, 'SELECT * FROM referrals ORDER BY created_at ASC');
-}
-
-export async function getReferralOf(env: Env, address: string): Promise<ReferralRow | null> {
-  return first<ReferralRow>(env, 'SELECT * FROM referrals WHERE address = ?', address);
-}
-
-export async function listInvitees(env: Env, referrer: string): Promise<ReferralRow[]> {
-  return all<ReferralRow>(env, 'SELECT * FROM referrals WHERE referrer = ? ORDER BY created_at ASC', referrer);
-}
-
-export async function insertReferralsBulk(env: Env, rows: ReferralRow[]): Promise<void> {
-  if (!rows.length) return;
-  const statements = rows.map((row) =>
-    env.DB.prepare('INSERT OR REPLACE INTO referrals (address, referrer, created_at) VALUES (?, ?, ?)').bind(
-      row.address,
-      row.referrer,
-      row.created_at,
-    ),
-  );
-  await runBatches(env, statements);
-}
-
-/** 返回 false 表示已绑定/非法（幂等拒绝）；调用方负责自邀/互绑校验。 */
-export async function insertReferral(env: Env, address: string, referrer: string, now: number): Promise<boolean> {
-  const changes = await run(
-    env,
-    'INSERT OR IGNORE INTO referrals (address, referrer, created_at) VALUES (?, ?, ?)',
-    address,
-    referrer,
-    now,
-  );
-  return changes > 0;
-}
-
-/* ------------------------------------------------------------------ *
- * V8：R10 后线性解锁池（单例）
- * ------------------------------------------------------------------ */
-
-export interface UnlockPoolRow {
-  id: number;
-  start_at: number;
-  total_locked_raw: string;
-  claimed_raw: string;
-  updated_at: number;
-}
-
-export async function getUnlockPool(env: Env): Promise<UnlockPoolRow> {
-  const row = await first<UnlockPoolRow>(env, 'SELECT * FROM unlock_pool WHERE id = 1');
-  return row ?? { id: 1, start_at: 0, total_locked_raw: '0', claimed_raw: '0', updated_at: 0 };
-}
-
-export async function updateUnlockPool(
-  env: Env,
-  patch: { startAt?: number; totalLockedRaw?: string; claimedRaw?: string },
-  now: number,
-): Promise<void> {
-  const sets: string[] = ['updated_at = ?'];
-  const binds: Bind[] = [now];
-  if (patch.startAt !== undefined) {
-    sets.push('start_at = ?');
-    binds.push(patch.startAt);
-  }
-  if (patch.totalLockedRaw !== undefined) {
-    sets.push('total_locked_raw = ?');
-    binds.push(patch.totalLockedRaw);
-  }
-  if (patch.claimedRaw !== undefined) {
-    sets.push('claimed_raw = ?');
-    binds.push(patch.claimedRaw);
-  }
-  await run(env, `UPDATE unlock_pool SET ${sets.join(', ')} WHERE id = 1`, ...binds);
-}
-
-/** 演示数据重建：写入解锁池单例行。 */
-export async function setUnlockPool(
-  env: Env,
-  row: { startAt: number; totalLockedRaw: string; claimedRaw: string },
-  now: number,
-): Promise<void> {
-  await run(
-    env,
-    'INSERT OR REPLACE INTO unlock_pool (id, start_at, total_locked_raw, claimed_raw, updated_at) VALUES (1, ?, ?, ?, ?)',
-    row.startAt,
-    row.totalLockedRaw,
-    row.claimedRaw,
-    now,
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * V8：轮次总权重 / K 线滚动哈希
+ * 轮次总权重（v10 = 总质押）/ K 线滚动哈希
  * ------------------------------------------------------------------ */
 
 export async function updateRoundWeightHash(
@@ -780,6 +630,7 @@ export interface RoundChainPatch {
   candle_hash?: string | null;
   result?: 'SUCCESS' | 'FAILURE' | 'TECHNICAL_ABORT' | null;
   burned_raw?: string | null;
+  team_released_raw?: string | null;
   chain_status?: number | null;
   last_candle_twap_usd_e8?: string | null;
   last_candle_at?: number | null;
@@ -814,6 +665,7 @@ export async function patchRoundChain(
   if (patch.candle_hash !== undefined) add('candle_hash', patch.candle_hash);
   if (patch.result !== undefined) add('result', patch.result);
   if (patch.burned_raw !== undefined) add('burned_raw', patch.burned_raw);
+  if (patch.team_released_raw !== undefined) add('team_released_raw', patch.team_released_raw);
   if (patch.chain_status !== undefined) add('chain_status', patch.chain_status);
   if (patch.last_candle_twap_usd_e8 !== undefined) add('last_candle_twap_usd_e8', patch.last_candle_twap_usd_e8);
   if (patch.last_candle_at !== undefined) add('last_candle_at', patch.last_candle_at);
@@ -964,7 +816,7 @@ export interface RoundAggregate {
 
 export type StakeAggregates = Map<number, RoundAggregate>;
 
-/** 一次查询取出全部质押（V8 需要 weight/streak/referred_by 全字段）。 */
+/** 一次查询取出全部质押。 */
 export async function listAllStakes(env: Env): Promise<StakeRow[]> {
   return all<StakeRow>(env, 'SELECT * FROM stakes');
 }
@@ -1030,10 +882,6 @@ export interface StakeInsertInput {
   riskDisclosureVersion: number;
   acceptFullPrincipalBurn: boolean;
   acceptedAt: number;
-  /** V8 连续轮次（入账时按 lastRound/count 推导） */
-  streak: number;
-  /** V8 邀请人快照 */
-  referredBy: string | null;
 }
 
 /** 返回 false 表示 nonce 重复（幂等拒绝）。 */
@@ -1042,9 +890,8 @@ export async function insertStake(env: Env, input: StakeInsertInput): Promise<bo
     env,
     `INSERT OR IGNORE INTO stakes
        (round_id, address, amount_raw, weight_raw, nonce, risk_disclosure_version,
-        accept_full_principal_burn, streak, reward_state, referred_by,
-        principal_claimed, reward_claimed, accepted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?)`,
+        accept_full_principal_burn, principal_claimed, reward_claimed, accepted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)`,
     input.roundId,
     input.address,
     input.amountRaw.toString(),
@@ -1052,8 +899,6 @@ export async function insertStake(env: Env, input: StakeInsertInput): Promise<bo
     input.nonce,
     input.riskDisclosureVersion,
     input.acceptFullPrincipalBurn ? 1 : 0,
-    input.streak,
-    input.referredBy,
     input.acceptedAt,
   );
   return changes > 0;
@@ -1078,6 +923,10 @@ export async function refreshRoundStakeTotals(env: Env, roundId: number, now: nu
   );
 }
 
+export async function listAllClaims(env: Env): Promise<ClaimRow[]> {
+  return all<ClaimRow>(env, 'SELECT * FROM claims ORDER BY round_id ASC, address ASC, kind ASC');
+}
+
 export async function listClaimsForAddress(env: Env, address: string): Promise<ClaimRow[]> {
   return all<ClaimRow>(env, 'SELECT * FROM claims WHERE address = ? ORDER BY round_id ASC, kind ASC', address);
 }
@@ -1086,55 +935,99 @@ export async function getClaim(
   env: Env,
   roundId: number,
   address: string,
-  kind: 'principal' | 'reward' | 'unlock',
+  kind: 'principal' | 'reward',
 ): Promise<ClaimRow | null> {
   return first<ClaimRow>(env, 'SELECT * FROM claims WHERE round_id = ? AND address = ? AND kind = ?', roundId, address, kind);
 }
 
 /**
- * 记录领取。
- *  - principal / reward：一次性领取，claims 唯一键兜底（重复返回 false）。
- *  - unlock：线性解锁允许多次部分领取，必须**累加**已有记录（claimed_raw += 本次份额）。
- *    金额是 raw units 字符串，A9 总供应 1e19 > SQLite INTEGER 上限（2^63≈9.2e18），
- *    因此不能写 SQL 加法；这里读出旧值、用 BigInt 相加后写回（D1 无事务 API，靠单写者/限流兜底）。
+ * 记录一轮领取（v10 Claim：本金 + 全额奖励一次领完）。
+ * claims 唯一键 (round, address, kind) 兜底幂等：principal 行已存在则返回 false。
+ * rewardRaw 为 0（技术终止轮）时不写 reward 行。
  */
-export async function recordClaim(
+export async function recordRoundClaim(
   env: Env,
-  input: { roundId: number; address: string; kind: 'principal' | 'reward' | 'unlock'; amountRaw: bigint; claimedAt: number },
+  input: { roundId: number; address: string; principalRaw: bigint; rewardRaw: bigint; claimedAt: number },
 ): Promise<boolean> {
-  if (input.kind === 'unlock') {
-    const existing = await first<{ amount_raw: string }>(
-      env,
-      "SELECT amount_raw FROM claims WHERE round_id = ? AND address = ? AND kind = 'unlock'",
-      input.roundId,
-      input.address,
-    );
-    const total = (existing ? toBigInt(existing.amount_raw) : 0n) + input.amountRaw;
-    await run(
-      env,
-      `INSERT INTO claims (round_id, address, kind, amount_raw, claimed_at) VALUES (?, ?, 'unlock', ?, ?)
-       ON CONFLICT(round_id, address, kind) DO UPDATE SET
-         amount_raw = excluded.amount_raw,
-         claimed_at = excluded.claimed_at`,
-      input.roundId,
-      input.address,
-      total.toString(),
-      input.claimedAt,
-    );
-    return true;
-  }
-  const results = await env.DB.batch([
+  const statements = [
     env.DB.prepare(
       `INSERT OR IGNORE INTO claims (round_id, address, kind, amount_raw, claimed_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).bind(input.roundId, input.address, input.kind, input.amountRaw.toString(), input.claimedAt),
-    env.DB.prepare(
-      input.kind === 'principal'
-        ? 'UPDATE stakes SET principal_claimed = 1 WHERE round_id = ? AND address = ?'
-        : 'UPDATE stakes SET reward_claimed = 1 WHERE round_id = ? AND address = ?',
-    ).bind(input.roundId, input.address),
-  ]);
+       VALUES (?, ?, 'principal', ?, ?)`,
+    ).bind(input.roundId, input.address, input.principalRaw.toString(), input.claimedAt),
+  ];
+  if (input.rewardRaw > 0n) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO claims (round_id, address, kind, amount_raw, claimed_at)
+         VALUES (?, ?, 'reward', ?, ?)`,
+      ).bind(input.roundId, input.address, input.rewardRaw.toString(), input.claimedAt),
+    );
+  }
+  statements.push(
+    env.DB.prepare('UPDATE stakes SET principal_claimed = 1, reward_claimed = 1 WHERE round_id = ? AND address = ?').bind(
+      input.roundId,
+      input.address,
+    ),
+  );
+  const results = await env.DB.batch(statements);
   return (results[0]?.meta?.changes ?? 0) > 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * 退款账本（v10 合约 round 0；migrations/0010）
+ * ------------------------------------------------------------------ */
+
+export type RefundKind = 'credit' | 'instant' | 'dust' | 'claim';
+
+export interface RefundLedgerRow {
+  tx_lt: string;
+  address: string;
+  kind: RefundKind;
+  amount_raw: string;
+  created_at: number;
+}
+
+export async function listRefundEntries(env: Env, address?: string): Promise<RefundLedgerRow[]> {
+  if (address) {
+    return all<RefundLedgerRow>(env, 'SELECT * FROM refund_ledger WHERE address = ? ORDER BY created_at ASC, tx_lt ASC', address);
+  }
+  return all<RefundLedgerRow>(env, 'SELECT * FROM refund_ledger ORDER BY created_at ASC, tx_lt ASC');
+}
+
+/** 幂等写入（主键 tx_lt+address+kind）；返回实际新增行数。 */
+export async function insertRefundEntry(env: Env, row: RefundLedgerRow): Promise<boolean> {
+  const changes = await run(
+    env,
+    'INSERT OR IGNORE INTO refund_ledger (tx_lt, address, kind, amount_raw, created_at) VALUES (?, ?, ?, ?, ?)',
+    row.tx_lt,
+    row.address,
+    row.kind,
+    row.amount_raw,
+    row.created_at,
+  );
+  return changes > 0;
+}
+
+export interface RefundBalance {
+  pending: bigint;
+  credited: bigint;
+  claimed: bigint;
+  instant: bigint;
+  dust: bigint;
+}
+
+/** 账本余额 = Σcredit − Σclaim（合约领取时整条删除，所以 claim 金额 = 领取前余额）。 */
+export function refundBalance(rows: RefundLedgerRow[]): RefundBalance {
+  const out: RefundBalance = { pending: 0n, credited: 0n, claimed: 0n, instant: 0n, dust: 0n };
+  for (const row of rows) {
+    const amount = toBigInt(row.amount_raw);
+    if (row.kind === 'credit') out.credited += amount;
+    else if (row.kind === 'claim') out.claimed += amount;
+    else if (row.kind === 'instant') out.instant += amount;
+    else out.dust += amount;
+  }
+  out.pending = out.credited > out.claimed ? out.credited - out.claimed : 0n;
+  return out;
 }
 
 /* ------------------------------------------------------------------ *

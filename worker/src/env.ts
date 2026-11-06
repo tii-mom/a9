@@ -18,8 +18,6 @@ export interface Env {
   DEMO_AUTOPLAY?: string;
   /** 演示质押窗口时长（秒，默认 900） */
   DEMO_STAKE_SECONDS?: string;
-  /** 演示模式「解锁中」展示时长（秒，默认 1800）：R10 终态后先展示 ClaimUnlocked 再重置演示 */
-  DEMO_UNLOCK_SECONDS?: string;
   DEMO_PREVIEW_SECONDS?: string;
   /** CORS 允许来源，'*' 或逗号分隔白名单 */
   ALLOWED_ORIGINS?: string;
@@ -58,7 +56,10 @@ export interface Env {
   /** 'mainnet' | 'testnet' */
   CHAIN_NETWORK?: string;
   ROUND_CONTROLLER_ADDRESS?: string;
-  TEAM_VAULT_ADDRESS?: string;
+  /** v10：团队收款钱包（与 get_protocol_config 的 teamVault 槽比对） */
+  TEAM_WALLET_ADDRESS?: string;
+  /** v10：唯一 keeper（与 get_protocol_config 的 admin/oracle 槽比对） */
+  KEEPER_ADDRESS?: string;
   JETTON_MASTER_ADDRESS?: string;
   ORACLE_CONFIG_VERSION?: string;
   ORACLE_CONFIG_HASH?: string;
@@ -126,7 +127,7 @@ export function chainConfigError(env: Env, kv?: Map<string, string>): string | n
 }
 
 /** D1 schema 版本，与 migrations 文件名一致，健康检查里暴露用于上线核对。 */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 /** Worker 默认语义化版本。 */
 export const DEFAULT_VERSION = '1.0.0';

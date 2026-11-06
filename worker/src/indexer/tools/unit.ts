@@ -1,9 +1,14 @@
 /**
- * 纯函数单元自检（开发者工具）：snapshot 映射 / ledger 三态 / config digest / candle 行。
+ * 纯函数单元自检（开发者工具）：snapshot 映射 / v10 结算记账 / config digest / candle 行 / v10 事件与入站消息解码。
  * 运行：tsc 编译成 CJS 后 `node /tmp/a9idx/indexer/tools/unit.js`（不参与 worker 运行时）。
  */
 import { buildCandleRow, buildRoundPatch, chainStatusToRoundState } from '../snapshot';
-import { burnRef, confirmedBurnedTotal, decodeBurnQueryId, deriveBurnObservations, expectedBurnAmount } from '../ledger';
+import { burnRef, confirmedBurnedTotal, expectedRcWalletBalance, settlementAmounts } from '../ledger';
+import { decodeEvent, EVENT_OP, REFUND_LEDGER_BIT, roundsInMask } from '../events';
+import { decodeInboundMessage, TX_OP } from '../messages';
+import { rewardFor } from '../../protocol';
+import { refundBalance } from '../../store';
+import { cell } from './cell';
 import { PROTOCOL_CONFIG_KEYS, protocolConfigDigest, type ProtocolConfigFields } from '../config';
 import type { RoundRow } from '../../store';
 
@@ -17,7 +22,7 @@ function check(name: string, ok: boolean, detail: string): void {
 
 const config: ProtocolConfigFields = {
   admin: '0:' + '1'.repeat(64),
-  oracle: '0:' + '2'.repeat(64),
+  oracle: '0:' + '1'.repeat(64),
   jettonMaster: '0:' + '3'.repeat(64),
   stakingJettonWallet: '0:' + '4'.repeat(64),
   teamVault: '0:' + '5'.repeat(64),
@@ -25,7 +30,7 @@ const config: ProtocolConfigFields = {
   priceMultiplier: '2',
   roundRewardRaw: '700000000000000000',
   teamRoundRaw: '120000000000000000',
-  minStakeRaw: '10000000000000',
+  minStakeRaw: '100000000000000',
   maxStakePerAddressBps: '1000',
   maxTotalStakeRaw: '200000000000000000',
   previewSeconds: '43200',
@@ -34,7 +39,7 @@ const config: ProtocolConfigFields = {
   candleCount: '24',
   minQualifiedCandles: '16',
   observationSeconds: '86400',
-  techAbortPauseSeconds: '1209600',
+  techAbortPauseSeconds: '604800',
   techAbortObsTimeoutSeconds: '604800',
   riskDisclosureVersion: '1',
   configVersion: '1',
@@ -82,15 +87,67 @@ async function main(): Promise<void> {
   check('candle.coverage', candle.coverage_bps === 10000 && candle.valid_source_count === 1, '真实覆盖率/单提交者');
 
   check('ledger.burnRef', burnRef(3, 'team') === 'R3:team', burnRef(3, 'team'));
-  const query = decodeBurnQueryId((3n << 16n) | (2n << 8n));
-  check('ledger.queryId', query !== null && query.roundId === 3 && query.kind === 'team', JSON.stringify(query));
-  check('ledger.amounts', expectedBurnAmount('team', config, 7n) === 120000000000000000n && expectedBurnAmount('principal', config, 7n) === 7n, 'ok');
+  const failAmounts = settlementAmounts(9, config, 1000n);
+  check('ledger.failure', failAmounts.reward === 700000000000000000n && failAmounts.team === 120000000000000000n && failAmounts.principal === 1000n && failAmounts.teamReleased === 0n, 'reward+team+principal 一笔 burn');
+  const okAmounts = settlementAmounts(8, config, 1000n);
+  check('ledger.success', okAmounts.reward === 0n && okAmounts.teamReleased === 120000000000000000n, '成功：团队释放 1.2 亿，不销毁');
+  check('ledger.successNoStaker', settlementAmounts(8, config, 0n).reward === 700000000000000000n, 'D-18b：0 质押成功轮 burn 奖励');
+  check('ledger.abort', settlementAmounts(10, config, 5n).teamReleased === 0n && settlementAmounts(10, config, 5n).reward === 0n, '技术终止：不动 8.2 亿');
 
   const failed = { ...view, status: 9, rewardBurnConfirmed: true, teamBurnConfirmed: true, principalBurnConfirmed: true, totalAcceptedStakeRaw: 1000n };
   check('ledger.confirmedTotal', confirmedBurnedTotal(failed, config) === 820000000000000000n + 1000n, String(confirmedBurnedTotal(failed, config)));
-  check('ledger.notConfirmedIsNull', confirmedBurnedTotal({ ...failed, teamBurnConfirmed: false }, config) === null, '三笔未齐不显示已销毁');
-  check('ledger.observations', deriveBurnObservations(failed, config).length === 3, '三笔');
+  check('ledger.bouncedIsNull', confirmedBurnedTotal({ ...failed, rewardBurnConfirmed: false }, config) === null, 'burn 被退回待重试时不显示已销毁');
+  check('ledger.successNoBurn', confirmedBurnedTotal({ ...view, status: 8, totalAcceptedStakeRaw: 5n, rewardBurnConfirmed: false }, config) === null, '有质押成功轮没有 burn');
   check('state.previewMapping', chainStatusToRoundState(1) === 'UNOPENED' && chainStatusToRoundState(9) === 'FAILED_PERMANENT', 'ok');
+  check('state.removedStatuses', [3, 5, 6, 7].every((status) => chainStatusToRoundState(status) === null), 'v10 不再出现 3/5/6/7');
+  check('reward.proRata', rewardFor(700n, 3n, 4n) === 525n && rewardFor(700n, 1n, 0n) === 0n, 'floor(budget × stake / total)');
+
+  // RC 钱包公式：82 亿 + 质押 + 记入 + 零头 − 团队释放 − 已销毁 − 已领取 − 退款已领
+  const wallet = expectedRcWalletBalance({
+    config,
+    stakes: [{ amount_raw: '400' }, { amount_raw: '100' }] as never,
+    rounds: [{ team_released_raw: '120000000000000000' }, { team_released_raw: null }] as never,
+    burns: [{ amount_raw: '820000000000000100', confirmed: 1 }, { amount_raw: '9', confirmed: 0 }] as never,
+    claims: [{ amount_raw: '50' }] as never,
+    refunds: { pending: 5n, credited: 7n, claimed: 2n, instant: 99n, dust: 3n },
+  });
+  check('ledger.rcWallet', wallet === 8_200_000_000_000_000_000n + 500n + 7n + 3n - 120000000000000000n - 820000000000000100n - 50n - 2n, wallet.toString());
+
+  const refunds = refundBalance([
+    { tx_lt: '1', address: 'a', kind: 'credit', amount_raw: '10', created_at: 0 },
+    { tx_lt: '2', address: 'a', kind: 'dust', amount_raw: '1', created_at: 0 },
+    { tx_lt: '3', address: 'a', kind: 'claim', amount_raw: '10', created_at: 0 },
+    { tx_lt: '4', address: 'a', kind: 'credit', amount_raw: '4', created_at: 0 },
+  ]);
+  check('refund.balance', refunds.pending === 4n && refunds.credited === 14n && refunds.claimed === 10n && refunds.dust === 1n, JSON.stringify({ p: String(refunds.pending) }));
+
+  // ---------------- v10 事件解码（按 types.tolk 布局构造） ----------------
+  const owner = '0:' + 'ab'.repeat(32);
+  const ev = (op: number, body: ReturnType<typeof cell>) => decodeEvent({ emitter: 'rc', txLt: '1', txHash: 'h', txNow: 1, opcode: op, body: body.toBoc() });
+  const settled = ev(EVENT_OP.roundSettled, cell().u(EVENT_OP.roundSettled, 32).u(2, 8).u(9, 8).u(3, 8).u(24, 8).u(777n, 128).u(2, 8).u(7n, 128).u(8n, 128).u(9n, 128).u(0n, 128));
+  check('event.roundSettled', !!settled && settled.opcode === EVENT_OP.roundSettled && settled.rewardBurnRaw === 7n && settled.teamBurnRaw === 8n && settled.principalBurnRaw === 9n && settled.teamReleasedRaw === 0n && settled.totalAcceptedStakeRaw === 777n, '四个新 u128 字段');
+  const claimed = ev(EVENT_OP.claimed, cell().u(EVENT_OP.claimed, 32).address(owner).u(0x8005, 16).u(11n, 128).u(22n, 128));
+  check('event.claimed', !!claimed && claimed.opcode === EVENT_OP.claimed && claimed.owner.raw === owner && claimed.roundsMask === 0x8005 && claimed.principalRaw === 11n && claimed.rewardRaw === 22n, 'owner/mask/principal/reward');
+  check('event.mask', roundsInMask(0x8005).join(',') === '1,3' && (0x8005 & REFUND_LEDGER_BIT) !== 0, 'bit r-1 = 第 r 轮，bit 15 = 退款账本');
+  const refunded = ev(EVENT_OP.depositRefunded, cell().u(EVENT_OP.depositRefunded, 32).address(owner).u(5n, 128).bool(false).bool(true));
+  check('event.depositRefunded', !!refunded && refunded.opcode === EVENT_OP.depositRefunded && refunded.amountRaw === 5n && !refunded.instant && refunded.recorded, 'instant=false recorded=true');
+  const bounced = ev(EVENT_OP.settlementBounced, cell().u(EVENT_OP.settlementBounced, 32).u(4, 8).u(2, 8));
+  check('event.settlementBounced', !!bounced && bounced.opcode === EVENT_OP.settlementBounced && bounced.roundId === 4 && bounced.action === 2, 'roundId/action');
+  const unexpected = ev(EVENT_OP.unexpectedBounce, cell().u(EVENT_OP.unexpectedBounce, 32).u(0x0f8a7ea5, 32).u(123n, 64));
+  check('event.unexpectedBounce', !!unexpected && unexpected.opcode === EVENT_OP.unexpectedBounce && unexpected.op === 0x0f8a7ea5 && unexpected.queryId === 123n, 'op/queryId');
+  check('event.removedOps', [0x52540105, 0x52540106, 0x52540107, 0x52540108, 0x52540201, 0x52540202].every((op) => ev(op, cell().u(op, 32).u(0, 64)) === null), '旧 V8 / TeamVault 事件不再解码');
+
+  // ---------------- 入站消息 ----------------
+  const claimMsg = decodeInboundMessage({ opcode: TX_OP.claim, body: cell().u(TX_OP.claim, 32).u(9n, 64).u(0, 8).toBoc() });
+  check('msg.claim', !!claimMsg && claimMsg.opcode === TX_OP.claim && 'roundId' in claimMsg && claimMsg.roundId === 0, 'Claim(0) = 退款账本');
+  const retry = decodeInboundMessage({ opcode: TX_OP.retrySettlement, body: cell().u(TX_OP.retrySettlement, 32).u(1n, 64).u(3, 8).toBoc() });
+  check('msg.retrySettlement', !!retry && retry.opcode === TX_OP.retrySettlement, '0x52540015');
+  const payload = cell().u(TX_OP.stakeDeposit, 32).u(1, 8).u(2, 8).u(42n, 64).u(1, 16).u(1, 8);
+  const inline = decodeInboundMessage({ opcode: TX_OP.transferNotification, body: cell().u(TX_OP.transferNotification, 32).u(5n, 64).coins(100000000000000n).address(owner).u(0, 1).u(TX_OP.stakeDeposit, 32).u(1, 8).u(2, 8).u(42n, 64).u(1, 16).u(1, 8).toBoc() });
+  check('msg.transferNotification.inline', !!inline && inline.opcode === TX_OP.transferNotification && inline.jettonAmount === 100000000000000n && inline.stake?.roundId === 2 && inline.stake.depositNonce === 42n && inline.transferInitiator?.raw === owner, 'Either 左支');
+  const inRef = decodeInboundMessage({ opcode: TX_OP.transferNotification, body: cell().u(TX_OP.transferNotification, 32).u(5n, 64).coins(7n).address(owner).u(1, 1).ref(payload).toBoc() });
+  check('msg.transferNotification.ref', !!inRef && inRef.opcode === TX_OP.transferNotification && inRef.stake?.depositNonce === 42n, 'Either 右支（ref cell，前端质押格式）');
+  check('msg.removedOps', [0x52540005, 0x52540007, 0x52540009, 0x52540017, 0x52540018, 0x52540019, 0x5254001a].every((op) => decodeInboundMessage({ opcode: op, body: cell().u(op, 32).u(0n, 64).u(1, 8).toBoc() }) === null), '已删除的入站 opcode 不再解码');
 
   if (failures.length) { console.error('UNIT FAILURES: ' + failures.length); process.exit(1); }
   console.log('UNIT OK');

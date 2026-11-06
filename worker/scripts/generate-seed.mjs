@@ -8,13 +8,13 @@
  * 设计目标：
  *  - 可复现：所有地址/数量/成交由固定种子推导，时间以 EPOCH（默认 now）为锚点。
  *  - 幂等：先 DELETE 再 INSERT OR REPLACE，可反复执行（本地/远端都安全）。
- *  - 与 worker/src/sources/demo.ts 的判定规则一致：R1 20/24 成功、R2 12/24 失败（三笔销毁）、
+ *  - 与 worker/src/demo-cycle.ts（resetDemoData）的演示数据集一致：R1 20/24 成功、R2 12/24 失败（三笔销毁）、
  *    R3 观察中（已收盘 12 根，按 DEMO_CANDLE_SECONDS 继续推进）、R4..R10 UNOPENED。
  *  - 目标价按 D-28 档位（tier = 1 + 已成功轮数；失败不升档）：R1 tier1=232000、R2 tier2=464000、
  *    R3 沿用 tier2=464000（R2 同档重试）、R4（R3 通过后）tier3=928000、…、R10 投影 tier9。
- *  - V8（docs/17）：stakes 权重/streak/邀请快照/reward_state、rounds 总权重 + K 线滚动哈希、
- *    round_rewards 奖励三态、referrals 邀请关系、unlock_pool 解锁样例；夹具含 10 轮老兵、
- *    2 组邀请、1 个已滚存、1 个已早领、解锁池 3/12 进度。
+ *  - v10（docs/34）：奖励纯按质押比例 floor(7 亿 × 我的质押 / 本轮总质押)，仅 SUCCEEDED 轮有效；
+ *    stakes.weight_raw = amount_raw；A0 已领 R1（本金 + 全额奖励一次领完）；rounds.team_released_raw 记 R1 的 1.2 亿。
+ *    不再生成 V8 的权重 / 邀请 / 连续参与 / 滚存 / 早领 / 解锁池数据（不写邀请表与解锁池表）。
  *  - K 线不写进 seed：由 Worker 的 reconcile 依据 observation_start 确定性回填（单一事实来源）。
  *
  * 用法：
@@ -85,74 +85,15 @@ function demoAddress(index) {
 
 const ADDRESSES = Array.from({ length: 12 }, (_, i) => demoAddress(i));
 
-/* ------------------------------ V8 参数与计算 ------------------------------ */
-const STREAK_BONUS_BPS = 1000; // +10%/轮
-const STREAK_MAX_ROUNDS = 10;
-const REFERRAL_BONUS_BPS = 2000; // 被邀请人质押的 20%
-const REFERRAL_CAP_MULTIPLE = 10000; // 封顶 = 邀请人自己质押额（1.0×）
-const EARLY_CLAIM_PENALTY_BPS = 5000; // 早领只付 50%
-const ROLLOVER_CAP_RAW = 20_000_000n * TOKEN_SCALE;
-const MIN_STAKE_RAW = 10_000n * TOKEN_SCALE;
-const UNLOCK_DURATION_SECONDS = 31_104_000; // 12 × 30 天
-/** 演示夹具：A0 为「10 轮老兵」（R1/R2/R3 的 streak 设为 8/9/10 → 当前 2.00× 权重上限） */
-const V8_STREAKS = { 0: { 1: 8, 2: 9, 3: 10 } };
-/** 演示夹具：两组邀请关系（被邀请人 → 邀请人，一层、不可改） */
-const V8_REFERRALS = { 5: 0, 6: 1 };
+/* ------------------------------ v10 奖励计算 ------------------------------ */
 
-function streakForSeed(roundId, index) {
-  const fixed = V8_STREAKS[index];
-  if (fixed && fixed[roundId]) return fixed[roundId];
-  return roundId; // 其余地址从 R1 起连续参与 → streak 1/2/3
+/** 与 worker/src/protocol.ts rewardFor / 合约 rewardOf 同口径：floor(奖励 × 质押 / 总质押)。 */
+function rewardFor(rewardBudgetRaw, stakeRaw, totalStakeRaw) {
+  if (totalStakeRaw <= 0n || stakeRaw <= 0n) return 0n;
+  return (rewardBudgetRaw * stakeRaw) / totalStakeRaw;
 }
 
-function weightBpsForStreak(streak) {
-  return 10000 + Math.min(streak, STREAK_MAX_ROUNDS) * STREAK_BONUS_BPS;
-}
-
-function ownWeightFor(amountRaw, streak) {
-  return (amountRaw * BigInt(weightBpsForStreak(streak))) / 10000n;
-}
-
-/** 与 worker/src/v8.ts computeRoundWeights 同口径：按入账顺序累计邀请加成（不追溯） */
-function computeWeights(records) {
-  const ordered = [...records].sort((a, b) => a.acceptedAt - b.acceptedAt || a.index - b.index);
-  const byAddress = new Map();
-  const get = (address) => {
-    let entry = byAddress.get(address);
-    if (!entry) {
-      entry = { amount: 0n, ownWeight: 0n, bonus: 0n, weight: 0n };
-      byAddress.set(address, entry);
-    }
-    return entry;
-  };
-  const bonusSoFar = new Map();
-  let totalWeight = 0n;
-  for (const record of ordered) {
-    const amount = BigInt(record.amountRaw);
-    const own = BigInt(record.weightRaw);
-    const entry = get(record.address);
-    entry.amount += amount;
-    entry.ownWeight += own;
-    entry.weight += own;
-    totalWeight += own;
-    if (!record.referredBy) continue;
-    if (amount < MIN_STAKE_RAW) continue;
-    const refEntry = get(record.referredBy);
-    const already = bonusSoFar.get(record.referredBy) ?? 0n;
-    const room = refEntry.amount > already ? refEntry.amount - already : 0n;
-    const rawAdd = (amount * BigInt(REFERRAL_BONUS_BPS)) / 10000n;
-    const add = rawAdd < room ? rawAdd : room;
-    if (add > 0n) {
-      refEntry.bonus += add;
-      refEntry.weight += add;
-      totalWeight += add;
-      bonusSoFar.set(record.referredBy, already + add);
-    }
-  }
-  return { totalWeight, byAddress };
-}
-
-/** K 线滚动哈希（与 worker/src/v8.ts computeCandleHash 同公式） */
+/** K 线滚动哈希（与 worker/src/rewards.ts computeCandleHash 同公式） */
 function rollingCandleHash(rows) {
   let hash = '0x' + '0'.repeat(64);
   const ordered = [...rows].sort((a, b) => Number(a[1]) - Number(b[1]));
@@ -217,7 +158,7 @@ const ROUND_STAKES_TOKENS = {
   3: 386_200_000n,
 };
 
-// R3：已收盘 6 根（4 达标 / 2 未达标），第 7 根为 live；之后按 C 继续推进
+// R3：已收盘 12 根（24 根过半，其中 8 根达标），第 13 根为 live；之后按 C 继续推进
 const R3_SEEDED_CANDLES = 12;
 const R3_OBSERVATION_START = EPOCH - R3_SEEDED_CANDLES * C;
 const R3_STAKE_CLOSE = R3_OBSERVATION_START;
@@ -225,6 +166,39 @@ const R3_STAKE_OPEN = R3_STAKE_CLOSE - 3 * DAY;
 
 const R1_STAKE_CLOSE = EPOCH - 21 * DAY;
 const R2_STAKE_CLOSE = EPOCH - 14 * DAY;
+
+/* ------------------------------ 质押 / 领取（v10） --------------------------- */
+const stakeRecords = [];
+for (const roundId of [1, 2, 3]) {
+  const amounts = splitAmount(ROUND_STAKES_TOKENS[roundId]);
+  const openAt =
+    roundId === 1 ? R1_STAKE_CLOSE - 3 * DAY : roundId === 2 ? R2_STAKE_CLOSE - 3 * DAY : R3_STAKE_OPEN;
+  amounts.forEach((tokens, index) => {
+    stakeRecords.push({
+      roundId,
+      index,
+      address: ADDRESSES[index],
+      amountRaw: BigInt(tokens) * TOKEN_SCALE,
+      acceptedAt: openAt + index * 3600_000 + ((index * 7919) % 3_600_000),
+      // 夹具：A0 已领 R1（本金 + 全额奖励一次领完）
+      claimed: roundId === 1 && index === 0 ? 1 : 0,
+    });
+  });
+}
+
+// 每轮总质押（v10：总权重 = 总质押）
+const roundStakeTotals = new Map();
+for (const roundId of [1, 2, 3]) {
+  const total = stakeRecords
+    .filter((record) => record.roundId === roundId)
+    .reduce((acc, record) => acc + record.amountRaw, 0n);
+  roundStakeTotals.set(roundId, total);
+}
+
+// R1 奖励（仅 SUCCEEDED 轮；纯按质押比例）
+const r1Records = stakeRecords.filter((record) => record.roundId === 1);
+const r1TotalStake = roundStakeTotals.get(1);
+const rewardOf = (stakeRaw) => rewardFor(ROUND_REWARD_RAW, stakeRaw, r1TotalStake);
 
 const roundRows = [];
 for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
@@ -241,6 +215,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
   let stakers = 0;
   let result = 'NULL';
   let burned = 'NULL';
+  let teamReleased = 'NULL';
   let updatedAt = EPOCH;
 
   if (roundId === 1) {
@@ -254,6 +229,7 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     totalStake = ROUND_STAKES_TOKENS[1] * TOKEN_SCALE;
     stakers = ADDRESSES.length;
     result = "'SUCCESS'";
+    teamReleased = q(raw(TEAM_ROUND_TOKENS));
     updatedAt = R1_STAKE_CLOSE + CANDLE_COUNT * C;
   } else if (roundId === 2) {
     state = 'FAILED_PERMANENT';
@@ -294,175 +270,58 @@ for (let roundId = 1; roundId <= ROUND_COUNT; roundId++) {
     n(candlesSeen),
     n(qualified),
     q(totalStake.toString()),
-    q('0'), // total_weight_raw（下方按 V8 权重回填）
+    q('0'), // total_weight_raw（v10 = 总质押，下方回填）
     'NULL', // candle_hash（下方按滚动哈希回填）
     n(stakers),
     result,
     burned,
+    teamReleased,
     n(updatedAt),
   ]);
 }
 
-/* ------------------------------ 质押 / 领取 --------------------------- */
-
-/* ------------------------------ 质押 / 领取（V8） --------------------------- */
-const stakeRecords = [];
-for (const roundId of [1, 2, 3]) {
-  const amounts = splitAmount(ROUND_STAKES_TOKENS[roundId]);
-  const openAt =
-    roundId === 1 ? R1_STAKE_CLOSE - 3 * DAY : roundId === 2 ? R2_STAKE_CLOSE - 3 * DAY : R3_STAKE_OPEN;
-  amounts.forEach((tokens, index) => {
-    const amountRaw = BigInt(tokens) * TOKEN_SCALE;
-    const streak = streakForSeed(roundId, index);
-    stakeRecords.push({
-      roundId,
-      index,
-      address: ADDRESSES[index],
-      amountRaw: amountRaw.toString(),
-      weightRaw: ownWeightFor(amountRaw, streak).toString(),
-      streak,
-      referredBy: V8_REFERRALS[index] !== undefined ? ADDRESSES[V8_REFERRALS[index]] : null,
-      acceptedAt: openAt + index * 3600_000 + ((index * 7919) % 3_600_000),
-    });
-  });
-}
-
-// R1 权重与奖励（邀请加成按入账顺序累计，与合约/worker 同口径）
-const r1Records = stakeRecords.filter((record) => record.roundId === 1);
-const r1Weights = computeWeights(r1Records);
-const rewardByAddress = new Map();
-for (const [address, entry] of r1Weights.byAddress) {
-  rewardByAddress.set(address, (ROUND_REWARD_RAW * entry.weight) / r1Weights.totalWeight);
-}
-
-// 夹具 1：A1 的 R1 奖励「滚存」进 R2（单地址上限 2000 万，超出部分进解锁池）
-const rollAddress = ADDRESSES[1];
-const rollReward = rewardByAddress.get(rollAddress) ?? 0n;
-const rollAmount = rollReward > ROLLOVER_CAP_RAW ? ROLLOVER_CAP_RAW : rollReward;
-const rollLocked = rollReward - rollAmount;
-if (rollAmount > 0n) {
-  const rollStreak = streakForSeed(2, 1);
-  stakeRecords.push({
-    roundId: 2,
-    index: 1,
-    address: rollAddress,
-    amountRaw: rollAmount.toString(),
-    weightRaw: ownWeightFor(rollAmount, rollStreak).toString(),
-    streak: rollStreak,
-    referredBy: null,
-    acceptedAt: R2_STAKE_CLOSE - 3 * DAY + 1, // 报名一开启即滚存
-    isRoll: true,
-  });
-}
-
-// 夹具 2：A2 的 R1 奖励「已早领」（立即 50%，另 50% 进解锁池）
-const earlyAddress = ADDRESSES[2];
-const earlyReward = rewardByAddress.get(earlyAddress) ?? 0n;
-const earlyPaid = earlyReward / 2n;
-const earlyLocked = earlyReward - earlyPaid;
-
-// 每轮质押记录、总质押、总权重
-const roundStakeTotals = new Map();
-const roundWeightTotals = new Map();
-const roundWeights = new Map();
-for (const roundId of [1, 2, 3]) {
-  const records = stakeRecords.filter((record) => record.roundId === roundId);
-  const weights = computeWeights(records);
-  roundWeights.set(roundId, weights);
-  roundWeightTotals.set(roundId, weights.totalWeight);
-  let total = 0n;
-  for (const record of records) total += BigInt(record.amountRaw);
-  roundStakeTotals.set(roundId, total);
-}
 const roundRowById = new Map(roundRows.map((row) => [Number(row[0]), row]));
 for (const roundId of [1, 2, 3]) {
   const row = roundRowById.get(roundId);
   row[11] = q(roundStakeTotals.get(roundId).toString());
-  row[12] = q(roundWeightTotals.get(roundId).toString());
+  row[12] = q(roundStakeTotals.get(roundId).toString());
   row[14] = n(12);
 }
-// R2 三笔销毁：奖励 7 亿 + 团队 1.2 亿 + 本轮全部本金（含滚存进来的 2000 万）
+// R2 三笔销毁：奖励 7 亿 + 团队 1.2 亿 + 本轮全部本金（241.5M）
 const r2TotalRaw = roundStakeTotals.get(2);
 const r2BurnedRaw = ROUND_REWARD_RAW + TEAM_ROUND_TOKENS * TOKEN_SCALE + r2TotalRaw;
 roundRowById.get(2)[16] = q(r2BurnedRaw.toString());
 
-// V8 每轮奖励三态账本（演示只对已成功的 R1 生成；ROLLED / EARLY 两个夹具）
-const roundRewardRows = [];
-for (const [address, entry] of r1Weights.byAddress) {
-  const reward = rewardByAddress.get(address) ?? 0n;
-  let state = 0;
-  let paid = 0n;
-  let locked = 0n;
-  let rolled = 0n;
-  if (address === rollAddress) {
-    state = 1;
-    rolled = rollAmount;
-    locked = rollLocked;
-  } else if (address === earlyAddress) {
-    state = 2;
-    paid = earlyPaid;
-    locked = earlyLocked;
-  }
-  roundRewardRows.push([
-    n(1),
-    q(address),
-    q(entry.weight.toString()),
-    q(reward.toString()),
-    n(state),
-    q(paid.toString()),
-    q(locked.toString()),
-    q(rolled.toString()),
-    n(R1_STAKE_CLOSE + CANDLE_COUNT * C),
-    n(EPOCH),
-  ]);
-}
-
-// 领取记录：A0 已领 R1 本金；A2 已早领 50%（A1 为滚存，无转账）
-const claimRows = [];
-const a0Record = r1Records.find((record) => record.index === 0);
-if (a0Record) claimRows.push([n(1), q(ADDRESSES[0]), q('principal'), q(a0Record.amountRaw), n(R1_STAKE_CLOSE + 9 * DAY)]);
-claimRows.push([n(1), q(earlyAddress), q('reward'), q(earlyPaid.toString()), n(R1_STAKE_CLOSE + CANDLE_COUNT * C + 2 * DAY)]);
-
-// V8 stakes 行（weight/streak/reward_state/referred_by）
-const stakeRows = stakeRecords.map((record) => {
-  const isRoll = record.isRoll === true;
-  const principalClaimed = record.index === 0 && record.roundId === 1 ? 1 : 0;
-  const rewardClaimed =
-    record.roundId === 1 && (record.address === rollAddress || record.address === earlyAddress) ? 1 : 0;
-  const rewardState =
-    record.roundId === 1 && record.address === rollAddress ? 1 : record.roundId === 1 && record.address === earlyAddress ? 2 : 0;
-  return [
-    n(record.roundId),
-    q(record.address),
-    q(record.amountRaw),
-    q(record.weightRaw),
-    q(isRoll ? 'roll-r1-1' : 'seed-r' + record.roundId + '-' + record.index),
-    n(RISK_DISCLOSURE_VERSION),
-    1,
-    n(record.streak),
-    n(rewardState),
-    record.referredBy ? q(record.referredBy) : 'NULL',
-    n(principalClaimed),
-    n(rewardClaimed),
-    n(record.acceptedAt),
-  ];
-});
-
-// 邀请关系（2 组，一层、不可改）
-const referralRows = Object.entries(V8_REFERRALS).map(([inviteeIndex, referrerIndex]) => [
-  q(ADDRESSES[Number(inviteeIndex)]),
-  q(ADDRESSES[referrerIndex]),
-  n(EPOCH - 5 * DAY),
+// v10 奖励账本（演示只对已成功的 R1 生成，按质押比例全额）
+const roundRewardRows = r1Records.map((record) => [
+  n(1),
+  q(record.address),
+  q(record.amountRaw.toString()),
+  q(rewardOf(record.amountRaw).toString()),
+  n(R1_STAKE_CLOSE + CANDLE_COUNT * C),
+  n(EPOCH),
 ]);
 
-// 解锁池样例：R10 后线性解锁演示（seed 时刻已过 90 天 = 3/12 进度）
-const unlockPoolRow = [
-  n(1),
-  n(EPOCH - 90 * DAY),
-  q((rollLocked + earlyLocked).toString()),
-  q('0'),
-  n(EPOCH),
-];
+// 领取记录：A0 已领 R1 本金 + 全额奖励（一次 Claim）
+const claimRows = [];
+const a0Record = r1Records.find((record) => record.index === 0);
+const a0ClaimedAt = R1_STAKE_CLOSE + 9 * DAY;
+claimRows.push([n(1), q(ADDRESSES[0]), q('principal'), q(a0Record.amountRaw.toString()), n(a0ClaimedAt)]);
+claimRows.push([n(1), q(ADDRESSES[0]), q('reward'), q(rewardOf(a0Record.amountRaw).toString()), n(a0ClaimedAt)]);
+
+// stakes 行（v10：weight_raw = amount_raw；V8 的连续参与 / 奖励态 / 邀请人列不再写入）
+const stakeRows = stakeRecords.map((record) => [
+  n(record.roundId),
+  q(record.address),
+  q(record.amountRaw.toString()),
+  q(record.amountRaw.toString()),
+  q('seed-r' + record.roundId + '-' + record.index),
+  n(RISK_DISCLOSURE_VERSION),
+  1,
+  n(record.claimed),
+  n(record.claimed),
+  n(record.acceptedAt),
+]);
 
 /* ------------------------------ K 线（与 worker/src/sources/demo.ts 同算法） ----------------------------- */
 
@@ -547,7 +406,7 @@ const candleSeedRows = [
   ...candleRows(3, targetForRound(3), R3_OBSERVATION_START, R3_SEEDED_CANDLES, EPOCH),
 ];
 
-// V8：按轮计算 K 线滚动哈希并回填 rounds.candle_hash（链上只存这一个值）
+// v10：按轮计算 K 线滚动哈希并回填 rounds.candle_hash（链上只存这一个值）
 const candlesByRound = new Map();
 for (const row of candleSeedRows) {
   const roundId = Number(row[0]);
@@ -621,7 +480,7 @@ for (let i = 0; i < 10; i++) {
 const eventRows = [
   [n(R1_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R1 质押窗口开启（演示种子）')],
   [n(R1_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R1 质押窗口关闭：12 个地址，214,800,000 A9')],
-  [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：10/12 根达标，本金不销毁，7 亿奖励开放领取，团队 1.2 亿额度已释放')],
+  [n(R1_STAKE_CLOSE + CANDLE_COUNT * C), q('info'), q('system'), q('ROUND_SUCCEEDED'), q('R1 SUCCEEDED：20/24 根达标，本金不销毁，7 亿奖励按质押比例开放领取，团队 1.2 亿已释放')],
   [n(R2_STAKE_CLOSE - 7 * DAY), q('info'), q('system'), q('ROUND_OPENED'), q('R2 质押窗口开启（演示种子）')],
   [n(R2_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R2 质押窗口关闭：12 个地址，241,500,000 A9')],
   [
@@ -629,19 +488,19 @@ const eventRows = [
     q('warn'),
     q('system'),
     q('ROUND_FAILED_PERMANENT'),
-    q('R2 FAILED_PERMANENT：6/12 达标，销毁奖励 700,000,000 + 团队 120,000,000 + 质押本金 241,500,000 = 991,500,000 A9'),
+    q('R2 FAILED_PERMANENT：12/24 达标，销毁奖励 700,000,000 + 团队 120,000,000 + 质押本金 241,500,000 = 1,061,500,000 A9'),
   ],
   [
     n(R2_STAKE_CLOSE + CANDLE_COUNT * C + 60_000),
     q('warn'),
     q('system'),
     q('BURN_CONFIRMED'),
-    q('R2 burnId R2:reward / R2:principal 已确认，供应量减少 991,500,000 A9'),
+    q('R2 burnId R2:reward / R2:team / R2:principal 已确认，供应量减少 1,061,500,000 A9'),
   ],
   [n(R3_STAKE_OPEN), q('info'), q('system'), q('ROUND_OPENED'), q('R3 质押窗口开启（演示种子）')],
   [n(R3_STAKE_CLOSE), q('info'), q('system'), q('STAKING_CLOSED'), q('R3 质押窗口关闭：12 个地址，386,200,000 A9')],
-  [n(R3_OBSERVATION_START), q('info'), q('oracle'), q('OBSERVATION_STARTED'), q('R3 观察窗口开始：12 根，已收盘 6 根')],
-  [n(EPOCH), q('info'), q('admin'), q('SEED_APPLIED'), q('演示种子数据写入完成（含 10 轮 / 36 笔质押 / 2 笔销毁）')],
+  [n(R3_OBSERVATION_START), q('info'), q('oracle'), q('OBSERVATION_STARTED'), q('R3 观察窗口开始：12 根，已收盘 12 根')],
+  [n(EPOCH), q('info'), q('admin'), q('SEED_APPLIED'), q('演示种子数据写入完成（含 10 轮 / 36 笔质押 / 3 笔销毁）')],
 ];
 
 /* ------------------------------ config / metrics --------------------- */
@@ -672,17 +531,9 @@ const configRows = [
   ['demo_stake_seconds', '900'],
   ['demo_preview_seconds', '90'],
   ['demo_autoplay', '1'],
-  // ---- V8（docs/17；不得擅改）----
-  ['streak_bonus_bps', String(STREAK_BONUS_BPS)],
-  ['streak_max_rounds', String(STREAK_MAX_ROUNDS)],
-  ['referral_bonus_bps', String(REFERRAL_BONUS_BPS)],
-  ['referral_cap_multiple', String(REFERRAL_CAP_MULTIPLE)],
-  ['early_claim_penalty_bps', String(EARLY_CLAIM_PENALTY_BPS)],
-  ['rollover_cap_per_address_raw', ROLLOVER_CAP_RAW.toString()],
-  ['unlock_duration_seconds', String(UNLOCK_DURATION_SECONDS)],
-  ['min_stake_raw', MIN_STAKE_RAW.toString()],
+  // ---- v10（docs/34）：奖励纯按质押比例 ----
+  ['min_stake_raw', (100_000n * TOKEN_SCALE).toString()],
   ['max_total_stake_raw', (200_000_000n * TOKEN_SCALE).toString()],
-  ['demo_unlock_seconds', '1800'],
   ['ton_usd_e8', '300000000'],
   ['tonconnect_manifest_url', '/tonconnect-manifest.json'],
   ['liquidity_usd_e8', '180000000000000'],
@@ -691,16 +542,14 @@ const configRows = [
   ['oracle_coverage_bps', '9950'],
   ['oracle_config_version', 'v1.0.0-demo'],
   ['oracle_paused', '0'],
-  // 合约地址：主网部署前由 Lead 填入（null 表示未部署）
+  // 合约地址：主网部署前由 Lead 填入（空串表示未部署）
   ['contract_jetton_master', ''],
   ['contract_round_controller', ''],
   ['contract_staking_vault', ''],
   ['contract_reward_vault', ''],
-  ['contract_oracle_adapter', ''],
   ['contract_code_hash', ''],
   ['contract_oracle_config_hash', ''],
-  ['contract_admin_owner', ''],
-  ['contract_team_vault', ''],
+  ['contract_keeper', ''],
   ['contract_team_wallet', ''],
   ['contract_audit_report_url', ''],
 ];
@@ -709,8 +558,6 @@ const metricsRows = [
   ['demo_epoch_ms', String(EPOCH)],
   ['demo_candle_seconds', String(DEMO_CANDLE_SECONDS)],
   ['demo_stake_seconds', '900'],
-  ['unlock_start_round', 'sample'],
-  ['unlock_started_at', String(EPOCH - 90 * DAY)],
   ['oracle_paused', '0'],
   ['oracle_last_update', String(EPOCH - 2500)],
   ['oracle_valid_sources', '5'],
@@ -731,21 +578,21 @@ statementChunks.push(
     '-- EPOCH=' + EPOCH + ' (' + new Date(EPOCH).toISOString() + '), DEMO_CANDLE_SECONDS=' + DEMO_CANDLE_SECONDS + '\n' +
     '-- 状态：R1 SUCCEEDED(20/24)、R2 FAILED_PERMANENT(12/24，三笔销毁 1,061.5M)、R3 OBSERVING(12/24 已收盘)、R4..R10 UNOPENED\n' +
     '-- 档位（D-28 tier = 1 + 已成功轮数，失败不升档）：R1 tier1=232000 / R2 tier2=464000 / R3 tier2=464000 / R4 tier3=928000 …\n' +
+    '-- v10：奖励 = floor(7 亿 × 质押 / 总质押)，仅 R1 有账；A0 已领 R1（本金 + 奖励）；weight_raw = amount_raw。\n' +
     '-- 幂等：先清空业务表再 INSERT OR REPLACE，可安全重复执行。\n',
 );
 statementChunks.push('DELETE FROM claims;');
 statementChunks.push('DELETE FROM round_rewards;');
-statementChunks.push('DELETE FROM referrals;');
 statementChunks.push('DELETE FROM stakes;');
 statementChunks.push('DELETE FROM burn_ledger;');
 statementChunks.push('DELETE FROM candles;');
 statementChunks.push('DELETE FROM rounds;');
 statementChunks.push('DELETE FROM trades;');
 statementChunks.push('DELETE FROM book_levels;');
+statementChunks.push('DELETE FROM refund_ledger;');
 statementChunks.push('DELETE FROM admin_events;');
 statementChunks.push('DELETE FROM config;');
 statementChunks.push('DELETE FROM metrics;');
-statementChunks.push("INSERT OR REPLACE INTO unlock_pool (id, start_at, total_locked_raw, claimed_raw, updated_at) VALUES (1, 0, '0', '0', 0);");
 statementChunks.push("DELETE FROM sqlite_sequence WHERE name IN ('stakes','claims','burn_ledger','book_levels','admin_events');\n");
 
 statementChunks.push(
@@ -783,6 +630,7 @@ statementChunks.push(
       'staker_count',
       'result',
       'burned_raw',
+      'team_released_raw',
       'updated_at',
     ],
     roundRows,
@@ -799,9 +647,6 @@ statementChunks.push(
       'nonce',
       'risk_disclosure_version',
       'accept_full_principal_burn',
-      'streak',
-      'reward_state',
-      'referred_by',
       'principal_claimed',
       'reward_claimed',
       'accepted_at',
@@ -815,27 +660,8 @@ statementChunks.push(
 statementChunks.push(
   multiInsert(
     'round_rewards',
-    [
-      'round_id',
-      'address',
-      'weight_raw',
-      'reward_raw',
-      'state',
-      'paid_raw',
-      'locked_raw',
-      'rolled_raw',
-      'created_at',
-      'updated_at',
-    ],
+    ['round_id', 'address', 'weight_raw', 'reward_raw', 'created_at', 'updated_at'],
     roundRewardRows,
-  ),
-);
-statementChunks.push(multiInsert('referrals', ['address', 'referrer', 'created_at'], referralRows));
-statementChunks.push(
-  multiInsert(
-    'unlock_pool',
-    ['id', 'start_at', 'total_locked_raw', 'claimed_raw', 'updated_at'],
-    [unlockPoolRow],
   ),
 );
 statementChunks.push(
@@ -892,21 +718,20 @@ const tierInvariant =
   expectedTargets[3] === '928000' &&
   expectedTargets[9] === (P0_USD_E8 * 512n).toString();
 
-// V8 自检：奖励不超发 / 权重上限 / 三态夹具 / 邀请 / 解锁样例
+// v10 自检：奖励不超发 / 权重 = 质押 / 最低质押 / A0 已领 R1 / R1 团队额度已释放 / 无 V8 账本
 let rewardSum = 0n;
-for (const reward of rewardByAddress.values()) rewardSum += reward;
-const streakBpsA0 = weightBpsForStreak(V8_STREAKS[0][3]);
-const v8Invariant =
+for (const record of r1Records) rewardSum += rewardOf(record.amountRaw);
+const v10Invariant =
   rewardSum <= ROUND_REWARD_RAW &&
-  streakBpsA0 === 20000 &&
-  roundRewardRows.some((row) => Number(row[4]) === 1) && // 已滚存
-  roundRewardRows.some((row) => Number(row[4]) === 2) && // 已早领
-  referralRows.length === 2 &&
-  unlockPoolRow[1] === String(EPOCH - 90 * DAY);
+  stakeRecords.every((record) => record.amountRaw >= 100_000n * TOKEN_SCALE) &&
+  stakeRows.every((row) => row[2] === row[3]) &&
+  roundRowById.get(1)[17] === q(raw(TEAM_ROUND_TOKENS)) &&
+  a0Record.claimed === 1 &&
+  claimRows.length === 2;
 
 const ok =
   tierInvariant &&
-  v8Invariant &&
+  v10Invariant &&
   r2BurnedRaw === 700_000_000n * TOKEN_SCALE + 120_000_000n * TOKEN_SCALE + r2TotalRaw &&
   ADDRESSES.length === 12 &&
   new Set(ADDRESSES).size === 12 &&
@@ -917,13 +742,12 @@ console.log('seed.sql 已生成 →', OUT_FILE);
 console.log('  EPOCH                :', EPOCH, '(' + new Date(EPOCH).toISOString() + ')');
 console.log('  DEMO_CANDLE_SECONDS  :', DEMO_CANDLE_SECONDS);
 console.log('  rounds               :', roundRows.length, '(R1 SUCCEEDED / R2 FAILED_PERMANENT / R3 OBSERVING / R4-R10 UNOPENED)');
-console.log('  stakes               :', stakeRows.length, '（12 地址 × R1/R2/R3）');
-console.log('  claims               :', claimRows.length);
+console.log('  stakes               :', stakeRows.length, '（12 地址 × R1/R2/R3，weight_raw = amount_raw）');
+console.log('  claims               :', claimRows.length, '（A0 R1 本金 + 奖励）');
 const toM = (raw) => (Number(raw / TOKEN_SCALE) / 1e6).toFixed(2) + 'M';
 console.log('  burn_ledger          :', burnRows.length, '(R2 reward 700M + team 120M + principal', toM(r2TotalRaw) + ' =', toM(r2BurnedRaw) + ' A9)');
-console.log('  V8 stakes            : 12 地址 × R1/R2/R3；A0 streak 8/9/10（2.00×）；邀请 2 组（A5→A0, A6→A1）');
-console.log('  V8 reward 三态       : 已滚存', toM(rollAmount), '（A1/R1）；已早领', toM(earlyPaid), '（A2/R1）；其余 PENDING');
-console.log('  V8 unlock 样例       : start=EPOCH-90d（3/12 进度），显式 locked', toM(rollLocked + earlyLocked));
+console.log('  v10 reward (R1)      : 按质押比例 floor(700M × stake / 总质押)，已派发合计', toM(rewardSum), '；round_rewards', roundRewardRows.length, '行');
+console.log('  team_released (R1)   :', raw(TEAM_ROUND_TOKENS), 'raw（1.2 亿）');
 console.log('  candles              :', candleSeedRows.length, '(R1 24 / R2 24 / R3 12)');
 console.log('  trades               :', tradeRows.length, '/ book_levels:', bookRows.length, '/ admin_events:', eventRows.length);
 console.log('  R3 已收盘 K 线       :', R3_SEEDED_CANDLES, '（8 达标 / 4 未达标，第 13 根为 live）');
