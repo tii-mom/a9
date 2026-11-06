@@ -180,25 +180,45 @@ wrangler secret put ADMIN_TOKEN            # 强随机 ≥32 bytes，只存密�
 wrangler secret put TONCENTER_API_KEY      # 主网 key
 # 可选增加：TONCENTER_V2_URL/TONCENTER_V3_URL（默认公共端点）
 ~~~
-环境变量（wrangler.toml [vars]）必须设置：
+环境变量（`wrangler.toml` 的 **`[env.production.vars]`**，不是顶层 demo `[vars]`）必须满足：
 - DATA_SOURCE=chain
 - CHAIN_NETWORK=mainnet
 - JETTON_MASTER_ADDRESS / ROUND_CONTROLLER_ADDRESS / TEAM_VAULT_ADDRESS（主网地址）
 - ORACLE_CONFIG_VERSION / ORACLE_CONFIG_HASH（与链上一致）
-- DEMO_ALLOW_UNSIGNED_WRITES=false
+- DEMO_ALLOW_UNSIGNED_WRITES=false（且 DEMO_AUTOPLAY=false）
 - ALLOWED_ORIGINS=https://a9.lat,https://www.a9.lat
 - TON_PROOF_DOMAINS=a9.lat,www.a9.lat（去掉 localhost）
-- RATE_LIMIT_* 生产值（TODO app-dev 给建议）
-- VERSION/GIT_SHA/DEPLOYED_AT（部署时覆盖）
+- RATE_LIMIT_* 生产值
+- TONCENTER_V2_URL / TONCENTER_V3_URL（主网端点）
+- VERSION（部署时可覆盖 GIT_SHA/DEPLOYED_AT）
 
-### 6.2 部署
+> **D-38（仓库公开）**：主网合约地址 / oracle config hash **只以占位符**提交在
+> `wrangler.toml [env.production.vars]`（`0:__ROUND_CONTROLLER_ADDRESS__` 等）。
+> 部署时由 CI 从 **GitHub Variables**（`PROD_ROUND_CONTROLLER_ADDRESS`、
+> `PROD_TEAM_VAULT_ADDRESS`、`PROD_JETTON_MASTER_ADDRESS`、`PROD_ORACLE_CONFIG_HASH`）
+> 通过 `--var` 注入；**禁止把真实地址提交进仓库**。
+> `TONCENTER_API_KEY` / `ADMIN_TOKEN` 仍用 `wrangler secret put`（不进 toml、不进仓库）。
+
+### 6.2 部署（必须 `--env production` + 门禁）
 ~~~bash
 pnpm -C web build
 cd worker
-wrangler deploy --var GIT_SHA:<sha> --var DEPLOYED_AT:<iso>
+# CI 自动执行：wrangler deploy --env production（地址由 GitHub Variables 注入）
+# 手工部署同一口径（示例）：
+wrangler deploy --env production \
+  --var ROUND_CONTROLLER_ADDRESS:"$PROD_ROUND_CONTROLLER_ADDRESS" \
+  --var TEAM_VAULT_ADDRESS:"$PROD_TEAM_VAULT_ADDRESS" \
+  --var JETTON_MASTER_ADDRESS:"$PROD_JETTON_MASTER_ADDRESS" \
+  --var ORACLE_CONFIG_HASH:"$PROD_ORACLE_CONFIG_HASH"
 ~~~
+- CI 在 deploy **之前**有硬门禁（`.github/workflows/ci.yml`）：读取 `[env.production.vars]` +
+  GitHub Variables，若 `DATA_SOURCE != chain` 或 `DEMO_ALLOW_UNSIGNED_WRITES != false` 或
+  `CHAIN_NETWORK != mainnet`，或地址/哈希仍是占位符 → **直接 fail 并打印原因**。
+- 唯一绕过方式：`workflow_dispatch` 勾选 `allow_demo_deploy=true`（仅演示用途，会在日志留痕）。
+- 顶层 `[vars]` 仍是 **demo 配置**，只给本地 `wrangler dev` 用；**严禁**用默认环境部署生产。
+
 期望：Worker 版本号输出；自定义域名 a9.lat / www 生效。
-失败：D1 id/绑定错误、assets 缺失、证书未 Active → 停止，不要回滚到 demo。
+失败：门禁失败（打印 demo 配置原因）/ D1 id/绑定错误 / assets 缺失 / 证书未 Active → 停止，**不要回滚到 demo**。
 
 ### 6.3 验证
 ~~~bash

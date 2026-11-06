@@ -10,6 +10,10 @@ on:
         description: '显式允许跳过 E2E（仅用于 E2E_BASE_URL 不可用时的应急；会在 job summary 留痕，默认 false）'
         type: boolean
         default: false
+      allow_demo_deploy:
+        description: '显式允许用 demo 配置部署到生产（仅演示用途；会跳过 chain/mainnet 部署门禁，默认 false）'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -34,7 +38,7 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Guard: migrations 目录只允许 NNNN_*.sql
+      - name: "Guard: migrations 目录只允许 NNNN_*.sql"
         # S-2 防呆：seed 放进 migrations/ 会被 wrangler d1 migrations apply 当迁移执行（生产灌假数据）
         run: |
           bad=0
@@ -215,7 +219,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Guard: migrations 目录只允许 NNNN_*.sql
+      - name: "Guard: migrations 目录只允许 NNNN_*.sql"
         # S-2 防呆：任何非迁移 .sql 混入 migrations/ 都会让生产 apply 执行它（例如演示 seed）
         run: |
           bad=0
@@ -229,15 +233,90 @@ jobs:
           if [ "$bad" != "0" ]; then exit 1; fi
           echo "migrations OK:"
           ls worker/migrations
+      - name: "Gate: production config (chain / mainnet / no unsigned writes)"
+        # P0 门禁：默认 [vars] 是 demo，绝不能直接部署到生产。
+        # 读取 wrangler.toml 的 [env.production.vars]（叠加 GitHub Variables 注入的地址），
+        # 非 chain/mainnet/关闭无签名写 一律 fail；地址/哈希仍是占位符也 fail。
+        working-directory: worker
+        env:
+          ALLOW_DEMO_DEPLOY: ${{ inputs.allow_demo_deploy }}
+          PROD_ROUND_CONTROLLER_ADDRESS: ${{ vars.PROD_ROUND_CONTROLLER_ADDRESS }}
+          PROD_TEAM_VAULT_ADDRESS: ${{ vars.PROD_TEAM_VAULT_ADDRESS }}
+          PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
+          PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
+        run: |
+          python3 - <<'PY'
+          import os, sys, tomllib
+
+          allow_demo = os.environ.get('ALLOW_DEMO_DEPLOY', '').strip().lower() == 'true'
+          with open('wrangler.toml', 'rb') as f:
+              cfg = tomllib.load(f)
+          prod = cfg.get('env', {}).get('production', {})
+          values = dict(prod.get('vars', {}) or {})
+
+          overrides = {
+              'ROUND_CONTROLLER_ADDRESS': os.environ.get('PROD_ROUND_CONTROLLER_ADDRESS', ''),
+              'TEAM_VAULT_ADDRESS': os.environ.get('PROD_TEAM_VAULT_ADDRESS', ''),
+              'JETTON_MASTER_ADDRESS': os.environ.get('PROD_JETTON_MASTER_ADDRESS', ''),
+              'ORACLE_CONFIG_HASH': os.environ.get('PROD_ORACLE_CONFIG_HASH', ''),
+          }
+          for key, value in overrides.items():
+              if value.strip():
+                  values[key] = value.strip()
+
+          errors = []
+          expected = {
+              'DATA_SOURCE': 'chain',
+              'DEMO_ALLOW_UNSIGNED_WRITES': 'false',
+              'CHAIN_NETWORK': 'mainnet',
+          }
+          for key, want in expected.items():
+              got = str(values.get(key, ''))
+              if got != want:
+                  errors.append(f'{key}={got!r}，要求 {want!r}')
+
+          required = [
+              'ROUND_CONTROLLER_ADDRESS', 'TEAM_VAULT_ADDRESS', 'JETTON_MASTER_ADDRESS',
+              'ORACLE_CONFIG_HASH', 'TONCENTER_V2_URL', 'TONCENTER_V3_URL',
+          ]
+          for key in required:
+              got = str(values.get(key, '')).strip()
+              if not got or '__' in got or 'PLACEHOLDER' in got.upper():
+                  errors.append(f'{key} 未注入真实值（当前 {got!r}；用 GitHub Variables PROD_* 注入，禁止把主网地址提交进仓库 D-38）')
+
+          if errors and not allow_demo:
+              print('::error::生产部署门禁失败：即将部署的 env.production 不是 chain 主网配置。')
+              for err in errors:
+                  print(' - ' + err)
+              print('如确属演示用途，请在 workflow_dispatch 勾选 allow_demo_deploy=true（会在 summary 留痕）。')
+              sys.exit(1)
+          if errors and allow_demo:
+              print('::warning::allow_demo_deploy=true，已显式绕过生产门禁：')
+              for err in errors:
+                  print(' - ' + err)
+          else:
+              print('✅ 生产配置门禁通过：DATA_SOURCE=chain / CHAIN_NETWORK=mainnet / DEMO_ALLOW_UNSIGNED_WRITES=false，地址与配置哈希已注入')
+          PY
       - name: Apply D1 migrations
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote
-      - name: Deploy Worker
+      - name: Deploy Worker (env production)
+        # 必须 --env production；真实主网地址由 GitHub Variables 通过 --var 注入，仓库内只有占位符（D-38）
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: ./node_modules/.bin/wrangler deploy
+          PROD_ROUND_CONTROLLER_ADDRESS: ${{ vars.PROD_ROUND_CONTROLLER_ADDRESS }}
+          PROD_TEAM_VAULT_ADDRESS: ${{ vars.PROD_TEAM_VAULT_ADDRESS }}
+          PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
+          PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
+        run: |
+          args=(--env production)
+          [ -n "$PROD_ROUND_CONTROLLER_ADDRESS" ] && args+=(--var "ROUND_CONTROLLER_ADDRESS:$PROD_ROUND_CONTROLLER_ADDRESS")
+          [ -n "$PROD_TEAM_VAULT_ADDRESS" ] && args+=(--var "TEAM_VAULT_ADDRESS:$PROD_TEAM_VAULT_ADDRESS")
+          [ -n "$PROD_JETTON_MASTER_ADDRESS" ] && args+=(--var "JETTON_MASTER_ADDRESS:$PROD_JETTON_MASTER_ADDRESS")
+          [ -n "$PROD_ORACLE_CONFIG_HASH" ] && args+=(--var "ORACLE_CONFIG_HASH:$PROD_ORACLE_CONFIG_HASH")
+          ./node_modules/.bin/wrangler deploy "${args[@]}"

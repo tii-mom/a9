@@ -68,3 +68,62 @@ custom_domain = true
 [[routes]]
 pattern = "www.a9.lat"
 custom_domain = true
+
+# ===========================================================================
+# 生产环境（CI deploy 使用 --env production；本地 wrangler dev 仍用上面的 [vars] demo）
+#
+# 审查 P0：默认 [vars] 是 demo + DEMO_ALLOW_UNSIGNED_WRITES=true，绝不能被直接部署到
+# 生产 a9.lat。因此：
+#   1) 生产配置全部在这里显式声明（vars / d1 绑定不会被 env 继承，必须重复声明）；
+#   2) 地址/配置哈希只放**占位符**（D-38：仓库公开，禁止提交主网真实地址）；
+#   3) CI deploy 前有硬门禁：DATA_SOURCE != chain / DEMO_ALLOW_UNSIGNED_WRITES != false /
+#      CHAIN_NETWORK != mainnet / 地址或哈希仍是占位符 → 直接 fail（除显式 allow_demo_deploy）。
+#   GitHub Variables（PROD_ROUND_CONTROLLER_ADDRESS 等）会在部署时通过 --var 注入真实值。
+# ===========================================================================
+[env.production]
+# 与顶层同名，确保部署覆盖现有 Worker（保留 a9.lat / www 自定义域名）
+name = "fuse-protocol"
+
+[env.production.vars]
+DATA_SOURCE = "chain"
+CHAIN_NETWORK = "mainnet"
+DEMO_AUTOPLAY = "false"
+DEMO_ALLOW_UNSIGNED_WRITES = "false"
+
+# 链上数据源（toncenter）
+TONCENTER_V2_URL = "https://toncenter.com/api/v2"
+TONCENTER_V3_URL = "https://toncenter.com/api/v3"
+
+# 主网合约/配置：部署时由 CI 用 GitHub Variables 注入；仓库内只保留占位符
+ROUND_CONTROLLER_ADDRESS = "0:__ROUND_CONTROLLER_ADDRESS__"
+TEAM_VAULT_ADDRESS = "0:__TEAM_VAULT_ADDRESS__"
+JETTON_MASTER_ADDRESS = "0:__JETTON_MASTER_ADDRESS__"
+ORACLE_CONFIG_VERSION = "1"
+ORACLE_CONFIG_HASH = "__ORACLE_CONFIG_HASH__"
+
+# 生产安全 / 限流 / 展示参数（与 demo 段一致的公共项）
+ALLOWED_ORIGINS = "https://a9.lat,https://www.a9.lat"
+TON_PROOF_DOMAINS = "a9.lat,www.a9.lat"
+RATE_LIMIT_PER_MINUTE = "60"
+RATE_LIMIT_NONCE_PER_MINUTE = "10"
+RATE_LIMIT_READ_PER_MINUTE = "120"
+RATE_LIMIT_STATIC_PER_MINUTE = "600"
+VERSION = "1.0.0"
+EDGE_CACHE_SECONDS = "1"
+TONCONNECT_MANIFEST_URL = "/tonconnect-manifest.json"
+
+# D1 绑定不会被 env 继承，必须在生产环境重复声明（同一个库；id 非机密）
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "fuse-protocol"
+database_id = "b5945609-374e-4eaa-add2-80460ebcb680"
+
+# 自定义域名（env 会继承顶层 routes，但显式声明可避免 wrangler 的
+# "environment inherits custom domains" 警告，并保证生产路由不被默认环境抢占）
+[[env.production.routes]]
+pattern = "a9.lat"
+custom_domain = true
+
+[[env.production.routes]]
+pattern = "www.a9.lat"
+custom_domain = true
