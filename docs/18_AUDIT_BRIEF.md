@@ -314,25 +314,33 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 
 ---
 
-## 15. R10 线性解锁的链上验收限制（ClaimUnlocked）
+## 15. R10 线性解锁的链上验收（ClaimUnlocked）
 
-> 面向审计方与验收方：说明「为什么不能在链上快速验证 R10 线性解锁」，以及哪些项**可以**在链上验证。本节不是缺陷记录。
+> 面向审计方与验收方。本节不是缺陷记录。
 
-### 15.1 限制
+### 15.1 机制
 
-- `UNLOCK_DURATION_SECONDS = 31,104,000`（12 × 30 天）是**编译期常量**，快测/测试网**无法压缩**。
-- 因此主网/测试网在 R10 终态后**立即**调用 `ClaimUnlocked` 会正确返回 `NothingUnlocked`（t≈0 时 nothing vested）——**这是预期行为，不是缺陷**。
+`UNLOCK_DURATION_SECONDS = 31,104,000`（12 × 30 天）为**编译期常量**，按 `elapsed / UNLOCK_DURATION_SECONDS` 线性释放。
 
-### 15.2 链上可验证的项
+因此 R10 终态后**立即**调用 `ClaimUnlocked` 会返回 `NothingUnlocked`（t≈0 时 `vested = totalLocked × 0 / 31104000 = 0`）——**这是预期行为，不是缺陷**。
 
-- `get_unlock_info(owner).unlockStart > 0`（R10 任一终态后解锁起点已设置；实现为显式 owner 参数，见 docs/17 §4.3）。
-- `totalLockedRaw` 与「未领取奖励」一致（10 轮成功则 = 7 亿 × 10）。
-- 未 vest 时 `ClaimUnlocked` 被正确拒绝（`NothingUnlocked`），不会误发。
-- vesting 数学（含时间推进、多次部分领取、每次 1/12 线性释放）由**时间跳跃单测**覆盖：`contracts/tests/rewards-v8.test.tolk:405-431`（`test round 10 unlock releases 1/12 per month linearly`）。
+### 15.2 链上已验证（比预期更完整）
 
-### 15.3 配套：worker 侧多次部分领取（累加式 UPSERT）
+测试网 v8.6 实例在 R10 结算后约数小时做了**两次** `ClaimUnlocked`：
 
-- worker 的 `claims(kind='unlock')` 已改为**累加式 UPSERT**：线性解锁支持**多次部分领取**，每次返回**本次增量** `amountRaw`，`claimed_raw` 累加（不再是「只能领一次」）。
-- 验收实证（testnet worker）：`/api/claim kind=unlock` 在 t1 / t2 两次部分领取**都成功**，两次 `amountRaw` 均为增量（各 `87,280,222,426,001,063`），DB 累计 `claimed_raw = 174,560,444,852,002,126`，与 `/api/stats.unlock.claimedRaw` 三者一致。
+| 次数 | 用户 A 钱包余额变化 | 增量 |
+| --- | --- | --- |
+| 第一次 | `139,062,093,023,255,813` → `139,413,655,214,080,358` | **+351,562 A9** |
+| 第二次（15s 后） | → `139,414,329,307,505,178` | **+674 A9** |
 
-> 审计建议：链上只验收 15.2 的「起点/锁定总额/未 vest 拒绝」三项；完整 vesting 曲线以 15.2 的时间跳跃单测 + worker 15.3 的增量领取测试为准，**不要**以「R10 后立即 ClaimUnlocked 失败」判定为缺陷。
+→ **多次部分领取成立、每次金额为增量、`claimedRaw` 累加**。这条同时作为审查报告第 10 项（演示账本解锁只能领一次）的链上对照。
+
+### 15.3 验收口径（给审计方）
+
+- ✅ 可链上验收：`get_unlock_info(owner).unlockStart > 0`；`totalLockedRaw` 与未领奖励一致；**未 vest 时立即领取被正确拒绝**；**过一段时间后可领取、且支持多次部分领取、金额递增**。
+- ⚠️ 无法在快测压缩的只是「完整 12 个月曲线」的形状，由时间跳跃单测覆盖：`contracts/tests/rewards-v8.test.tolk:405-431`。
+- ❌ **不要**把「R10 后立即 `ClaimUnlocked` 返回 `NothingUnlocked`」判为缺陷。
+
+### 15.4 worker 配套（demo 模式）
+
+`claims(kind='unlock')` 为**累加式 UPSERT**（先 SELECT 旧值 → BigInt 相加 → 写回；**不用 SQL 加法**，因为 A9 总供应 1e19 超过 SQLite INTEGER 的 2^63）。支持多次部分领取，每次返回增量 `amountRaw`，`claimed_raw` 累加。worker 侧实证：t1/t2 两次部分领取都成功，各 `87,280,222,426,001,063`，DB 累计 `174,560,444,852,002,126` 与 `/api/stats.unlock.claimedRaw` 一致。
