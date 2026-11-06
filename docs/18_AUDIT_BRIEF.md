@@ -349,9 +349,9 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 
 ---
 
-## 16. v8.7 外部审计修复（当前冻结基线）
+## 16. v8.7 外部审计修复（历史基线，已被 §17 取代）
 
-> 状态：**已冻结**，tag `v8.7-audit-fixed` @ `e6c4278`。**主网部署基线以本节为准**，§8 的 v8.6 基线已 superseded。
+> 状态：**历史基线**，tag `v8.7-audit-fixed` @ `e6c4278`；**当前主网基线见 §17（v8.8）**。§8 的 v8.6 基线已 superseded。
 > 输入：两份外部审计报告（`docs/22_EXTERNAL_AUDIT_REPORT.md` + 第二份对话提供），交叉核实与合并计划见 `docs/23_AUDIT_TRIAGE.md`。
 
 ### 16.1 冻结基线（v8.7）
@@ -397,3 +397,41 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 2. 测试网实例重跑 10 轮链上验收 + 100 亿守恒（误差 0 raw）；
 3. 索引器对新实例重跑 `chain-reconcile.mjs`，DIFFS 必须 0；
 4. 提交两位审计方执行 M4 复核。
+
+---
+
+## 17. v8.8 冻结基线（当前基线）
+
+> **§16 是 v8.7 历史基线；§17 是当前基线。** 主网部署、task-54 preflight 与 docs/29 的 hash 校核均以本节为准。
+
+### 17.1 冻结标识
+
+- **tag**：`v8.8-audit-fixed`
+- **commit**：`fb6bb45`
+- **验证**：`acton check` 0 error 0 warning；`acton test` **177 passed / 18 files**（v8.7 为 175/18，新增 M4 回归 2 条 + 真 JettonWallet 场景）。
+
+### 17.2 v8.8 冻结基线（5 个 code hash）
+
+| 合约 | Code Hash | 与 §16（v8.7）相比 |
+| --- | --- | --- |
+| RoundController | `0x4EE42C5C0EB13CDB6689823BEA883D30E852EEA066D3C108A6531A69D4093EF8` | **变更** |
+| TeamVault | `0xDE6BE49154E3024C9B6945EA81E7181F3E1D04FECC85DBC629C08EDE6A673FB6` | 不变 |
+| OracleAdapter | `0x0C91E5338E00F18B5FFC7C5C26B510424775D8089588F4147E5B667703676768` | 不变 |
+| JettonMaster | `0xB8FAF413176C6329A98B2474FEDF765A796A14EDA96C031EE1FE5B27E59EE272` | 不变 |
+| JettonWallet | `0xC40F41ED05BEFFB7EF17E25FA0D1BB2AFDA72C567052546A2E310C0275D31D13` | 不变 |
+
+> **只有 RoundController 变化**：v8.8 的两个 M4 修复都在 RC 的退款账本逻辑内，**不涉及 JettonWallet / JettonMaster 内嵌 code**，因此不会改变 jetton wallet 地址推导（但仍建议按 docs/29 §4.3 做全新部署验证）。
+
+### 17.3 M4 两处修复摘要（v8.7 → v8.8）
+
+| 编号 | 问题 | 修复要点 | 回归测试 |
+| --- | --- | --- | --- |
+| **A9-M4-01**（commit `7445a8d`） | 领过的退款余额被 `carry` 再次计入 → 同一笔退款可被二次领取 | 不再把「已领取」的余额带入账本；领取后 bounce 回滚 `claimed` 但保留 `amountRaw` | `M4-01 claimed refund carry cannot be withdrawn twice`；`M4-01 refund claim bounce preserves ledger amount and claimability`（真 JettonWallet） |
+| **A9-M4-02**（commit `eeba2e1`） | `get_claimable_all` 把 round-0 退款计入，与 `ClaimAll`（只扫 1..10）口径不一致 | `get_claimable_all` 排除 round-0；退款统一走 `ClaimPrincipal(0)` | 同上回归 + 链上攻击链复现（见 `docs/28_M4_1_DELTA_REVIEW.md`） |
+
+### 17.4 与 §16（v8.7）的差异说明
+
+- 合约代码：**只有 RoundController 的 hash 变化**（M4-01/M4-02）；其余 4 个 hash 逐字相同。
+- 测试：175/18 → **177/18**（新增 2 条 M4 回归，均使用真 JettonWallet）。
+- 部署影响：**必须全新部署**（不要 resume 旧 RC）；由于 JettonWallet 未变，jetton wallet 地址推导与 v8.7 相同，但仍以部署脚本输出的 canonical 地址为准。
+- 审查记录：`docs/28_M4_1_DELTA_REVIEW.md`（M4.1 delta review，含修复前失败证据与链上回归）。
