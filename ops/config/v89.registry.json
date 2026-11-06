@@ -1,0 +1,118 @@
+{
+  "network": "testnet",
+  "chainId": -3,
+  "status": "deployed_unfunded",
+  "configVersion": 1,
+  "paramsDigest": null,
+  "codeHashes": {},
+  "createdAt": "2026-11-05T14:13:41.427Z",
+  "updatedAt": "2026-11-06T11:12:59.020Z",
+  "contracts": {
+    "jettonMaster": {
+      "address": "kQBnEm-jgkTMnKORlgSft2NB10meB0jtLqTH0zbRR2edE60u",
+      "raw": "0:67126fa38244cc9ca39196049fb76341d7499e0748ed2ea4c7d336d147679d13",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-06T11:12:59.019Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "jettonMasterTreasuryWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "teamVault": {
+      "address": "kQCjfgro1mAnrScsAvTN5-sE9BDw4f7U_1mq3fD9fvZgO10h",
+      "raw": "0:a37e0ae8d66027ad272c02f4cde7eb04f410f0e1fed4ff59aaddf0fd7ef6603b",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-06T11:12:59.020Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "teamVaultJettonWallet": {
+      "address": "kQCj-RnEvm53qr3yJ_j0sPoSbZwfLH3M7cdckA5MRDzXgVSt",
+      "raw": "0:a3f919c4be6e77aabdf227f8f4b0fa126d9c1f2c7dccedc75c900e4c443cd781",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-06T11:12:59.020Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "roundController": {
+      "address": "kQD9TXvfEbAAIEW-Oyj58V4TO7b5HGALQgmPh-Ja1tRRcYAK",
+      "raw": "0:fd4d7bdf11b0002045be3b28f9f15e133bb6f91c600b42098f87e25ad6d45171",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-06T11:12:59.020Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "roundControllerJettonWallet": {
+      "address": "kQD9IDS1ai9Xb1n0wYhh48Opt3gVG0kHPx7O_2Vu4Rewe4qc",
+      "raw": "0:fd2034b56a2f576f59f4c18861e3c3a9b778151b49073f1eceff656ee117b07b",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-06T11:12:59.020Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "teamWalletJettonWallet": {
+      "address": null,
+      "raw": null,
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": null,
+      "note": null
+    },
+    "oracleAdapter": {
+      "address": "kQD49Jh93W21bhf_Y3lWvG7mNx651bAvxoh4irUkEr6hNR5F",
+      "raw": "0:f8f4987ddd6db56e17ff637956bc6ee6371eb9d5b02fc688788ab52412bea135",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-06T11:12:59.020Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    }
+  },
+  "wallets": {
+    "adminOwner": {
+      "address": "kQCG9Jshu3qX9ECL3OjWEaX15hqkSh_a6Zwlv5GHsCjg4UYa",
+      "note": "v89 admin (a9-deployer, unique vs earlier masters)"
+    },
+    "treasury": {
+      "address": "kQBHGqPyQ7o7zsFYRoExhC1mCsfbWaUyPpsgE938ZVCdKyH5",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamWallet": {
+      "address": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "marketingWallet": {
+      "address": "kQABBFhvUcpVi949_kOhqjegdXMa86jJVJijoT9UvnmPLyZ7",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "liquidityWallet": {
+      "address": "kQB4Hjp2NL_FFDsKrhQhbcWl1pNk8wpY8yHpv-UJCxHKs7kn",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    },
+    "teamInternalWallet": {
+      "address": "kQDCyYrTE6EOr1wMq3VHh9wF7KaTFQCU0oHVy_IbQK1UGwZd",
+      "note": "role wallet",
+      "updatedAt": "2026-11-05T15:05:56.823Z"
+    }
+  },
+  "bindings": {
+    "teamVaultAcceptsOnly": "kQD9TXvfEbAAIEW-Oyj58V4TO7b5HGALQgmPh-Ja1tRRcYAK"
+  },
+  "funding": [],
+  "verification": {
+    "lastRunAt": null,
+    "healthy": null,
+    "checks": [],
+    "digest": null
+  },
+  "notes": "v8.9 audit regression: fast timing 10/120/10/24/16/240"
+}
