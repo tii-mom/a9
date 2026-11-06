@@ -40,10 +40,14 @@ const OP_SET_ORACLE_ADMIN: uint32 = 0x52540023;
 const OP_SUBMIT_SIGNED_OPEN: uint32 = 0x52540024;
 const OP_SUBMIT_SIGNED_CLOSE: uint32 = 0x52540025;
 const OP_SUBMIT_SIGNED_CANDLE: uint32 = 0x52540026;
+const OP_RESET_ROUND_CANDLES: uint32 = 0x52540028;
 
 const SIGNED_ACTION_OPEN: uint8 = 1;
 const SIGNED_ACTION_CLOSE: uint8 = 2;
 const SIGNED_ACTION_CANDLE: uint8 = 3;
+const SIGNED_MASK_OPEN: uint8 = 1;
+const SIGNED_MASK_CLOSE: uint8 = 2;
+const SIGNED_MASK_CANDLE: uint8 = 4; // action id 3 needs its own bit in usedMask
 const SIGNED_TIMESTAMP_WINDOW: uint32 = 300;
 
 // Reserved (phase-2 OracleAdapter). RoundController has no handler for this yet;

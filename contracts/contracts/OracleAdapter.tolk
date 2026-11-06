@@ -29,6 +29,7 @@ type OracleAllowedMessage =
     | SubmitSignedOpenRound
     | SubmitSignedCloseStaking
     | SubmitSignedCandle
+    | ResetRoundCandles
     | TopUpTons
 
 // ---------------------------------------------------------------------------
@@ -267,10 +268,10 @@ fun onInternalMessage(in: InMessage) {
             }
             val mask = st.usedMask.get(msg.roundId);
             val used: uint8 = mask.isFound ? mask.loadValue() : 0;
-            if ((used & SIGNED_ACTION_OPEN) != 0) {
+            if ((used & SIGNED_MASK_OPEN) != 0) {
                 throw Errors.ReplayAction;
             }
-            st.usedMask.set(msg.roundId, used | SIGNED_ACTION_OPEN);
+            st.usedMask.set(msg.roundId, used | SIGNED_MASK_OPEN);
             val q = forwardQueryId(msg.roundId, SIGNED_ACTION_OPEN, 0);
             st.pending.set(q, OraclePendingForward {
                 kind: SIGNED_ACTION_OPEN,
@@ -300,10 +301,10 @@ fun onInternalMessage(in: InMessage) {
             }
             val mask = st.usedMask.get(msg.roundId);
             val used: uint8 = mask.isFound ? mask.loadValue() : 0;
-            if ((used & SIGNED_ACTION_CLOSE) != 0) {
+            if ((used & SIGNED_MASK_CLOSE) != 0) {
                 throw Errors.ReplayAction;
             }
-            st.usedMask.set(msg.roundId, used | SIGNED_ACTION_CLOSE);
+            st.usedMask.set(msg.roundId, used | SIGNED_MASK_CLOSE);
             val q = forwardQueryId(msg.roundId, SIGNED_ACTION_CLOSE, 0);
             st.pending.set(q, OraclePendingForward {
                 kind: SIGNED_ACTION_CLOSE,
@@ -344,7 +345,7 @@ fun onInternalMessage(in: InMessage) {
             st.lastCandle.set(msg.roundId, acceptedPlus);
             val mask = st.usedMask.get(msg.roundId);
             val used: uint8 = mask.isFound ? mask.loadValue() : 0;
-            st.usedMask.set(msg.roundId, used | SIGNED_ACTION_CANDLE);
+            st.usedMask.set(msg.roundId, used | SIGNED_MASK_CANDLE);
             val q = forwardQueryId(msg.roundId, SIGNED_ACTION_CANDLE, msg.candleIndex);
             st.pending.set(q, OraclePendingForward {
                 kind: SIGNED_ACTION_CANDLE,
@@ -362,6 +363,32 @@ fun onInternalMessage(in: InMessage) {
                 .storeUint(msg.twapPriceUsdE8, 128)
                 .storeUint(msg.dataDigest, 256)
                 .endCell());
+        }
+        ResetRoundCandles => {
+            var st = lazy OracleAdapterStorage.load();
+            val cfg = st.config.load();
+            val isAdmin = in.senderAddress == cfg.admin;
+            val isController = cfg.controller != null && in.senderAddress == cfg.controller!;
+            if (!isAdmin && !isController) {
+                throw Errors.NotAdmin;
+            }
+            assert (msg.roundId >= 1 && msg.roundId <= MAX_ROUNDS) throw Errors.BadRoundId;
+            // A9-F5: clear the per-round candle cursor and only the CANDLE pending
+            // entries (key = roundId<<16 | action<<8 | candleIndex); OPEN/CLOSE stay.
+            st.lastCandle.delete(msg.roundId);
+            val maskRes = st.usedMask.get(msg.roundId);
+            if (maskRes.isFound) {
+                val mask = maskRes.loadValue();
+                st.usedMask.set(msg.roundId, mask & ~SIGNED_MASK_CANDLE);
+            }
+            var i: uint8 = 0;
+            while (i < 32) {
+                val q: uint64 = ((msg.roundId as uint64) << 16) |
+                    ((SIGNED_ACTION_CANDLE as uint64) << 8) | (i as uint64);
+                st.pending.delete(q);
+                i += 1;
+            }
+            st.save();
         }
         TopUpTons => {}
         else => throw Errors.UnknownMessage,
@@ -398,7 +425,8 @@ fun onBouncedMessage(in: InMessageBounced) {
     } else if (p.kind == SIGNED_ACTION_CANDLE) {
         val lastRes = st.lastCandle.get(roundId);
         val current: uint8 = lastRes.isFound ? lastRes.loadValue() : 0;
-        if (current == p.acceptedLastPlus) {
+        // A9-F5: FIFO bounce order — roll back to the minimum unconfirmed cursor.
+        if (p.prevLastPlus < current) {
             st.lastCandle.set(roundId, p.prevLastPlus);
         }
     }
@@ -442,8 +470,8 @@ get fun get_used_actions(roundId: uint8): OracleUsedActions {
     val mask: uint8 = maskRes.isFound ? maskRes.loadValue() : 0;
     val lastRes = st.lastCandle.get(roundId);
     return {
-        openUsed: (mask & SIGNED_ACTION_OPEN) != 0,
-        closeUsed: (mask & SIGNED_ACTION_CLOSE) != 0,
+        openUsed: (mask & SIGNED_MASK_OPEN) != 0,
+        closeUsed: (mask & SIGNED_MASK_CLOSE) != 0,
         lastCandleIndex: lastRes.isFound && lastRes.loadValue() > 0 ? lastRes.loadValue() - 1 : 0,
     };
 }

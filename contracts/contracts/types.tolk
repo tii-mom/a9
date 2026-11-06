@@ -772,6 +772,10 @@ struct (0x52540025) SubmitSignedCloseStaking {
     sigs: cell
 }
 
+struct (0x52540028) ResetRoundCandles {
+    roundId: uint8
+}
+
 struct (0x52540026) SubmitSignedCandle {
     roundId: uint8
     candleIndex: uint8

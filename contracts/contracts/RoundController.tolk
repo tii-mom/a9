@@ -723,6 +723,21 @@ fun handleResumeOracle(sender: address, _msg: ResumeOracle) {
     s.pausedAt = 0;
     s.rounds.set(s.currentRoundId, updated);
     s.save();
+
+    // A9-F5: tell OracleAdapter to reset its candle cursor. This is best-effort:
+    // IGNORE_ERRORS ensures a failed notification can never revert ResumeOracle.
+    // If oracle is still the admin wallet (testnet manual mode), skip the send.
+    // Fallback: OA admin can call ResetRoundCandles manually (see README runbook).
+    val oracleAddr = addresses(s).oracle;
+    if (oracleAddr != addresses(s).admin) {
+        val out = createMessage({
+            bounce: true,
+            value: ton("0.1"),
+            dest: oracleAddr,
+            body: ResetRoundCandles { roundId: s.currentRoundId },
+        });
+        out.send(SEND_MODE_PAY_FEES_SEPARATELY | SEND_MODE_IGNORE_ERRORS);
+    }
 }
 
 fun handleAbortTechnical(_sender: address, _msg: AbortTechnical) {

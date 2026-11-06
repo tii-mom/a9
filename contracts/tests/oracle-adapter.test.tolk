@@ -586,3 +586,150 @@ get fun `test C-2 candle index 255 is rejected before uint8 wrap`() {
         .toHaveFailedTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address, exitCode: Errors.BadCandleOrder });
     expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
 }
+
+
+// ===========================================================================
+// A9-F5: OA candle cursor reset + FIFO bounce convergence
+// ===========================================================================
+
+fun resetCandles(adapter: AdapterHandle, from: address, roundId: uint8, value: coins = ton("0.2")): SendResultList {
+    return net.send(from, createMessage({
+        bounce: true, value, dest: adapter.address,
+        body: ResetRoundCandles { roundId },
+    }));
+}
+
+get fun `test F5 ResetRoundCandles is admin/controller only and clears candle state`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val outsider = testing.treasury("oa-out");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val receiver = deployReceiver();
+    expect(setController(adapter, admin.address, receiver.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    // create a candle cursor + OPEN marker
+    val h0 = signedHash(CHAIN_ID, receiver.address, SIGNED_ACTION_CANDLE, 1, 0, 0, 0, 240000 as uint128, 1 as uint256, T0 as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address,
+        body: SubmitSignedCandle { roundId: 1, candleIndex: 0, periodStart: 0, periodEnd: 0,
+            twapPriceUsdE8: 240000, dataDigest: 1 as uint256, timestamp: T0 as uint64,
+            sigCount: 3, sigs: buildSigs(keys, eqArray3(), h0) } })))
+        .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+    val openH = signedHash(CHAIN_ID, receiver.address, SIGNED_ACTION_OPEN, 1, 0, 0, 0, 300000 as uint128, 0 as uint256, T0 as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address,
+        body: signedOpenBody(openH, keys, eqArray3(), 1, 300000, T0 as uint64) })))
+        .toHaveSuccessfulTx<SubmitSignedOpenRound>({ from: admin.address, to: adapter.address });
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
+
+    expect(resetCandles(adapter, outsider.address, 1)).toHaveFailedTx<ResetRoundCandles>({
+        from: outsider.address, to: adapter.address, exitCode: Errors.NotAdmin,
+    });
+    expect(resetCandles(adapter, admin.address, 1)).toHaveSuccessfulTx<ResetRoundCandles>({
+        from: admin.address, to: adapter.address,
+    });
+    val used = net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]);
+    expect(used.lastCandleIndex).toEqual(0);
+    expect(used.openUsed).toBeTrue(); // OPEN pending/marker preserved
+    // controller(rc) can also reset
+    expect(resetCandles(adapter, receiver.address, 1)).toHaveSuccessfulTx<ResetRoundCandles>({
+        from: receiver.address, to: adapter.address,
+    });
+}
+
+get fun `test F5 FIFO double bounce converges cursor to zero`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val rc = deployRoundController(admin.address, adapter.address, admin.address, admin.address);
+    expect(setController(adapter, admin.address, rc.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    // two candles accepted by OA but queued (not delivered to RC); RC will reject both
+    var i: uint8 = 0;
+    while (i < 2) {
+        val h = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_CANDLE, 1, i, 0, 0, 240000 as uint128, 1 as uint256, T0 as uint64);
+        val body = SubmitSignedCandle { roundId: 1, candleIndex: i, periodStart: 0, periodEnd: 0,
+            twapPriceUsdE8: 240000, dataDigest: 1 as uint256, timestamp: T0 as uint64,
+            sigCount: 3, sigs: buildSigs(keys, eqArray3(), h) };
+        testing.processSingleTraceStep(admin.address, createMessage({
+            bounce: false, value: ton("0.3"), dest: adapter.address, body,
+        }));
+        i += 1;
+    }
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(1);
+    // FIFO bounces: q0 then q1
+    var j: uint8 = 0;
+    while (j < 2) {
+        val q: uint64 = ((1 as uint64) << 16) | ((SIGNED_ACTION_CANDLE as uint64) << 8) | (j as uint64);
+        val body = beginCell().storeUint(0xFFFFFFFF, 32).storeUint(OP_SUBMIT_CANDLE, 32).storeUint(q, 64).endCell();
+        testing.processSingleTraceStep(rc.address, createMessage({
+            bounce: false, value: ton("0.1"), dest: adapter.address, body,
+        }).bounced());
+        j += 1;
+    }
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
+}
+
+
+get fun `test F5 real RC resume resets OA cursor and observation restarts at index 0`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val keys = newKeys();
+    val adapter = deployAdapter(admin.address, CHAIN_ID, signerSetView(keys, 3));
+    val rc = deployRoundController(admin.address, adapter.address, admin.address, admin.address);
+    expect(setController(adapter, admin.address, rc.address)).toHaveSuccessfulTx<SetOracleController>({
+        from: admin.address, to: adapter.address,
+    });
+    val openH = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_OPEN, 1, 0, 0, 0, 300000 as uint128, 0 as uint256, T0 as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address,
+        body: signedOpenBody(openH, keys, eqArray3(), 1, 300000, T0 as uint64) })))
+        .toHaveSuccessfulTx<SubmitSignedOpenRound>({ from: admin.address, to: adapter.address });
+    advance(STAKE_DURATION_SECONDS as int);
+    expect(closeStaking(rc, admin.address, 0)).toHaveSuccessfulTx<CloseStaking>({ from: admin.address, to: rc.address });
+    expect(startObservation(rc, admin.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: admin.address, to: rc.address });
+
+    // submit one real candle via adapter
+    var start = rcRound(rc, 1).observationStart;
+    var pEnd = start + (CANDLE_SECONDS as uint64);
+    testing.setNow(pEnd as int);
+    var h = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_CANDLE, 1, 0, start as uint32, pEnd as uint32, 300000 as uint128, 1 as uint256, pEnd as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address,
+        body: SubmitSignedCandle { roundId: 1, candleIndex: 0, periodStart: start as uint32, periodEnd: pEnd as uint32,
+            twapPriceUsdE8: 300000, dataDigest: 1 as uint256, timestamp: pEnd as uint64,
+            sigCount: 3, sigs: buildSigs(keys, eqArray3(), h) } })))
+        .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+    expect(rcRound(rc, 1).candlesSeen).toEqual(1);
+
+    // pause + resume: RC resets its own window and sends ResetRoundCandles to OA
+    expect(pauseOracle(rc, admin.address)).toHaveSuccessfulTx<PauseOracle>({ from: admin.address, to: rc.address });
+    expect(resumeOracle(rc, admin.address)).toHaveSuccessfulTx<ResumeOracle>({ from: admin.address, to: rc.address });
+    expect(net.runGetMethod<OracleUsedActions>(adapter.address, "get_used_actions", [1 as uint8]).lastCandleIndex).toEqual(0);
+    expect(rcRound(rc, 1).candlesSeen).toEqual(0);
+
+    // new observation start; candle index 0 must be accepted again
+    start = rcRound(rc, 1).observationStart;
+    pEnd = start + (CANDLE_SECONDS as uint64);
+    testing.setNow(pEnd as int);
+    h = signedHash(CHAIN_ID, rc.address, SIGNED_ACTION_CANDLE, 1, 0, start as uint32, pEnd as uint32, 300000 as uint128, 2 as uint256, pEnd as uint64);
+    expect(net.send(admin.address, createMessage({ bounce: true, value: ton("0.3"), dest: adapter.address,
+        body: SubmitSignedCandle { roundId: 1, candleIndex: 0, periodStart: start as uint32, periodEnd: pEnd as uint32,
+            twapPriceUsdE8: 300000, dataDigest: 2 as uint256, timestamp: pEnd as uint64,
+            sigCount: 3, sigs: buildSigs(keys, eqArray3(), h) } })))
+        .toHaveSuccessfulTx<SubmitSignedCandle>({ from: admin.address, to: adapter.address });
+    expect(rcRound(rc, 1).candlesSeen).toEqual(1);
+}
+
+get fun `test F5 resume with admin oracle skips OA notification and still succeeds`() {
+    testing.setNow(T0 as int);
+    val admin = testing.treasury("oa-admin");
+    val rc = deployRoundController(admin.address, admin.address, admin.address, admin.address);
+    expect(openRound(rc, admin.address, 300000)).toHaveSuccessfulTx<OpenRound>({ from: admin.address, to: rc.address });
+    advance(STAKE_DURATION_SECONDS as int);
+    expect(closeStaking(rc, admin.address, 0)).toHaveSuccessfulTx<CloseStaking>({ from: admin.address, to: rc.address });
+    expect(startObservation(rc, admin.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: admin.address, to: rc.address });
+    expect(pauseOracle(rc, admin.address)).toHaveSuccessfulTx<PauseOracle>({ from: admin.address, to: rc.address });
+    expect(resumeOracle(rc, admin.address)).toHaveSuccessfulTx<ResumeOracle>({ from: admin.address, to: rc.address });
+    expect(rcRound(rc, 1).candlesSeen).toEqual(0);
+}
