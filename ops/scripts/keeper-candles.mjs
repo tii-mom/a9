@@ -32,6 +32,8 @@ if (!rc) { console.error('缺少 --rc <fastRC>'); process.exit(2); }
 const STATUS = { 0:'UNOPENED',1:'PREVIEW',2:'STAKING_OPEN',3:'STAKING_CLOSED',4:'OBSERVING',5:'ORACLE_PAUSED',6:'SETTLING_SUCCESS',7:'SETTLING_FAILURE',8:'SUCCEEDED',9:'FAILED_PERMANENT',10:'TECHNICAL_ABORTED' };
 const TERMINAL = new Set([8,9,10]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let candleSeconds = 10n;
+let candleCount = 24n;
 const nowSec = () => Math.floor(Date.now() / 1000);
 if (!existsSync(RECORDS_DIR)) mkdirSync(RECORDS_DIR, { recursive: true });
 const logFile = RECORDS_DIR + '/keeper-candles-' + new Date().toISOString().replace(/[:.]/g,'-') + '.jsonl';
@@ -53,6 +55,16 @@ async function round(roundId) {
     obsStart: Number(n(9)), obsEnd: Number(n(10)),
     candlesSeen: Number(n(11)), qualified: Number(n(12)),
   };
+}
+async function readTiming() {
+  const r = await runGetMethod(params, rc, 'get_protocol_config');
+  const stack = r.stack || [];
+  const seconds = stackItemToBigInt(stack[14]);
+  const count = stackItemToBigInt(stack[15]);
+  if (seconds === null || seconds <= 0n || count === null || count <= 0n) {
+    throw new Error('无法从 get_protocol_config 读取 candleSeconds/candleCount');
+  }
+  return { seconds, count };
 }
 async function currentRound() { const r = await runGetMethod(params, rc, 'get_current_round'); return Number(stackItemToBigInt(r.stack[0])); }
 
@@ -127,10 +139,10 @@ function candleTwap(modeChar, target) {
 async function submitCandles(roundId) {
   let rd = await round(roundId);
   const modeChar = modeFor(roundId);
-  while (rd.candlesSeen < 24) {
+  while (BigInt(rd.candlesSeen) < candleCount) {
     const index = rd.candlesSeen;
-    const periodStart = rd.obsStart + index * 10;
-    const periodEnd = periodStart + 10;
+    const periodStart = rd.obsStart + index * Number(candleSeconds);
+    const periodEnd = periodStart + Number(candleSeconds);
     while (nowSec() < periodEnd) await sleep(500);
     const rdNow = await round(roundId);
     if (rdNow.status === 6 || rdNow.status === 7 || TERMINAL.has(rdNow.status)) break;
@@ -173,7 +185,10 @@ async function finalizeWhenReady(roundId) {
 }
 
 async function main() {
-  log({ event: 'keeper-start', rc, signer, mode, rounds, execute, logFile, apiKeySet: Boolean(process.env[params.network.toncenter.apiKeyEnv]), metrics });
+  const timing = await readTiming();
+  candleSeconds = timing.seconds;
+  candleCount = timing.count;
+  log({ event: 'keeper-start', rc, signer, mode, rounds, execute, logFile, candleSeconds: candleSeconds.toString(), candleCount: candleCount.toString(), apiKeySet: Boolean(process.env[params.network.toncenter.apiKeyEnv]), metrics });
   let settled = 0;
   let openedR1 = false;
   let lastCountedRound = 0;
