@@ -9,7 +9,7 @@ import "storage"
 contract JettonWallet {
     author: "A9 Protocol"
     version: "1.0.0"
-    description: "A9 Jetton Wallet. TEP-74/TEP-89 compatible; forwards forward_payload untouched."
+    description: "A9 Jetton Wallet. Unmodified TEP-74/TEP-89 behaviour (Acton jetton template)."
     storage: WalletStorage
     incomingMessages: AllowedMessageToWallet
 }
@@ -23,17 +23,8 @@ type AllowedMessageToWallet =
 type BounceOpToHandle = InternalTransferStep | BurnNotificationForMinter
 
 fun onBouncedMessage(in: InMessageBounced) {
+    // TEP-74: a bounced internal_transfer / burn_notification restores the balance.
     in.bouncedBody.skipBouncedPrefix();
-    val op = in.bouncedBody.preloadUint(32);
-
-    // C-4: parse the queryId from a copy before lazy field access consumes the body.
-    var querySlice = in.bouncedBody;
-    var bouncedQueryId: uint64 = 0;
-    if (op == OP_JETTON_INTERNAL_TRANSFER || op == OP_BURN_NOTIFICATION) {
-        querySlice.loadUint(32);
-        bouncedQueryId = querySlice.loadUint(64) as uint64;
-    }
-
     val msg = lazy BounceOpToHandle.fromSlice(in.bouncedBody);
     val restoreAmount = match (msg) {
         InternalTransferStep => msg.jettonAmount,
@@ -43,29 +34,6 @@ fun onBouncedMessage(in: InMessageBounced) {
     var storage = lazy WalletStorage.load();
     storage.jettonBalance += restoreAmount;
     storage.save();
-
-    // C-4: the second hop (recipient wallet) bounced; the sender wallet only sees
-    // the bounce. Notify the owner so RC/TeamVault can roll back their pending
-    // claim/release instead of being stuck on ClaimPending forever.
-    if (op == OP_JETTON_INTERNAL_TRANSFER || op == OP_BURN_NOTIFICATION) {
-        // A9-HIGH-03/F4: reserve 5-year storage + one notification fee, then carry
-        // the whole remaining bounced value to the owner. IGNORE_ERRORS keeps the
-        // jettonBalance rollback above intact even if the notice cannot be paid.
-        reserveToncoinsOnBalance(
-            calculateJettonWalletMinStorageFee() + (BOUNCE_NOTIFICATION_RESERVE as coins),
-            RESERVE_MODE_AT_MOST,
-        );
-        val notice = createMessage({
-            bounce: BounceMode.NoBounce,
-            value: 0,
-            dest: storage.ownerAddress,
-            body: TransferBounced { queryId: bouncedQueryId },
-        });
-        // SAFETY: reserveToncoinsOnBalance() above keeps storage + 0.015 TON; the rest
-        // is the bounce value that belongs to the owner. IGNORE_ERRORS keeps the
-        // balance rollback committed if the notice cannot be delivered.
-        notice.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_IGNORE_ERRORS);
-    }
 }
 
 fun onInternalMessage(in: InMessage) {
@@ -123,14 +91,11 @@ fun onInternalMessage(in: InMessage) {
                     body: ReturnExcessesBack { queryId: msg.queryId },
                 });
                 // SAFETY: It is safe because of reserveToncoinsOnBalance() called earlier
-                // F-04/P1-1: never silently drop the completion signal; bounce on action failure.
-                excessesMsg.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
+                excessesMsg.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_IGNORE_ERRORS);
             }
         }
 
         AskToTransfer => {
-            // A9-CRIT-01: zero-amount transfers are never needed and enable spoofing.
-            assert (msg.jettonAmount > 0) throw JettonErrors.BalanceError;
             msg.forwardPayload.checkIsCorrectTlbEither();
             assert (
                 msg.transferRecipient.getWorkchain() == MY_WORKCHAIN
@@ -143,11 +108,6 @@ fun onInternalMessage(in: InMessage) {
 
             var storage = lazy WalletStorage.load();
             assert (in.senderAddress == storage.ownerAddress) throw JettonErrors.NotOwner;
-            // A9-CRIT-01: only the owner may receive excesses; prevents a third party
-            // from using this wallet as a confused deputy to spoof ReturnExcessesBack.
-            assert (
-                msg.sendExcessesTo == null || msg.sendExcessesTo! == storage.ownerAddress
-            ) throw JettonErrors.NotOwner;
             assert (storage.jettonBalance >= msg.jettonAmount) throw JettonErrors.BalanceError;
             storage.jettonBalance -= msg.jettonAmount;
             storage.save();
@@ -175,15 +135,10 @@ fun onInternalMessage(in: InMessage) {
         }
 
         AskToBurn => {
-            // A9-CRIT-01: zero amount and third-party excess destinations are forbidden.
-            assert (msg.jettonAmount > 0) throw JettonErrors.BalanceError;
             checkAmountIsEnoughToBurn(in.valueCoins);
 
             var storage = lazy WalletStorage.load();
             assert (in.senderAddress == storage.ownerAddress) throw JettonErrors.NotOwner;
-            assert (
-                msg.sendExcessesTo == null || msg.sendExcessesTo! == storage.ownerAddress
-            ) throw JettonErrors.NotOwner;
             assert (storage.jettonBalance >= msg.jettonAmount) throw JettonErrors.BalanceError;
             storage.jettonBalance -= msg.jettonAmount;
             storage.save();

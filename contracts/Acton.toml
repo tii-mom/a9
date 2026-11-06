@@ -1,6 +1,6 @@
 [package]
 name = "a9-contracts"
-description = "A9 Protocol — RoundController + TeamVault (Tolk / Acton)"
+description = "A9 Protocol v10 — RoundController + standard TEP-74 Jetton (Tolk / Acton)"
 version = "0.1.0"
 license = "MIT"
 
@@ -17,35 +17,10 @@ display-name = "JettonMaster"
 src = "contracts/jetton/JettonMaster.tolk"
 depends = ["JettonWallet"]
 
-[contracts.TeamVault]
-display-name = "TeamVault"
-src = "contracts/TeamVault.tolk"
-depends = []
-
 [contracts.RoundController]
 display-name = "RoundController"
 src = "contracts/RoundController.tolk"
-depends = ["TeamVault"]
-
-[contracts.OracleAdapter]
-display-name = "OracleAdapter"
-src = "contracts/OracleAdapter.tolk"
-depends = []
-
-[contracts.MockBounceOwner]
-display-name = "MockBounceOwner"
-src = "contracts/mocks/MockBounceOwner.tolk"
-depends = []
-
-[contracts.MockOracleReceiver]
-display-name = "MockOracleReceiver"
-src = "contracts/mocks/MockOracleReceiver.tolk"
-depends = []
-
-[contracts.MockJettonWallet]
-display-name = "MockJettonWallet"
-src = "contracts/mocks/MockJettonWallet.tolk"
-depends = []
+depends = ["JettonWallet"]
 
 [test]
 

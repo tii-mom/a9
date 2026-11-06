@@ -54,14 +54,6 @@ struct (0xd53276db) ReturnExcessesBack {
     queryId: uint64
 }
 
-const OP_JETTON_INTERNAL_TRANSFER: uint32 = 0x178d4519;
-const OP_BURN_NOTIFICATION: uint32 = 0x7bdd97de;
-
-// C-4: owner notification after a second-hop transfer bounce.
-struct (0x52540027) TransferBounced {
-    queryId: uint64
-}
-
 struct (0x595f07bc) AskToBurn {
     queryId: uint64
     jettonAmount: coins
@@ -87,14 +79,6 @@ struct (0xd1735400) ResponseWalletAddress {
     queryId: uint64
     jettonWalletAddress: address?
     ownerAddress: Cell<address>?
-}
-
-// task text used 0x7bcdEFA0; accepted as an alias to keep integrations flexible.
-struct (0x7bcdEFA0) BurnNotificationForMinterAlias {
-    queryId: uint64
-    jettonAmount: coins
-    burnInitiator: address
-    sendExcessesTo: address?
 }
 
 struct (0x6501f354) ChangeMinterAdmin {

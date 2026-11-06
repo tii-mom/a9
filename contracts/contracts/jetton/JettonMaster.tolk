@@ -31,7 +31,6 @@ contract JettonMaster {
 type MasterAllowedMessage =
     | MintOnce
     | BurnNotificationForMinter
-    | BurnNotificationForMinterAlias
     | RequestWalletAddress
     | ChangeMinterAdmin
     | ClaimMinterAdmin
@@ -111,16 +110,6 @@ fun onInternalMessage(in: InMessage) {
             );
         }
 
-        BurnNotificationForMinterAlias => {
-            // accepted alias (task text 0x7bcdEFA0); wallet itself emits the standard 0x7bdd97de
-            handleBurnNotification(
-                in.senderAddress,
-                msg.queryId,
-                msg.jettonAmount,
-                msg.burnInitiator,
-                msg.sendExcessesTo,
-            );
-        }
 
         RequestWalletAddress => {
             val ownerAddress: Cell<address>? = msg.includeOwnerAddress
@@ -202,10 +191,6 @@ fun handleBurnNotification(
         sender ==
         calcAddressOfJettonWallet(burnInitiator, contract.getAddress(), jettonWalletCompiledCode())
     ) throw JettonErrors.NotValidWallet;
-    // A9-CRIT-01: a real burn notification must have positive amount and may only
-    // return excesses to the initiator itself (defence in depth on top of wallet).
-    assert (jettonAmount > 0) throw JettonErrors.BalanceError;
-    assert (sendExcessesTo == null || sendExcessesTo! == burnInitiator) throw JettonErrors.NotOwner;
     assert (storage.totalSupply >= jettonAmount) throw JettonErrors.BalanceError;
     storage.totalSupply -= jettonAmount;
     storage.save();
@@ -220,8 +205,7 @@ fun handleBurnNotification(
         value: 0,
         body: ReturnExcessesBack { queryId },
     });
-    // F-04: never silently drop the burn confirmation; let action failure bounce.
-    excessesMsg.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
+    excessesMsg.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE | SEND_MODE_IGNORE_ERRORS);
 }
 
 get fun get_jetton_data(): JettonDataReply {

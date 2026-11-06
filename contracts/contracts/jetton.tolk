@@ -1,7 +1,8 @@
-// Shared TEP-74 message builders + forward-payload helpers.
+// Shared TEP-74 message builders + forward-payload helpers (RoundController side).
 import "constants"
 
-// Builds a standard TEP-74 transfer body (forward_payload inline, empty).
+// Standard TEP-74 transfer body; forward_ton_amount = 0 so the recipient wallet
+// sends no notification (the second hop cannot fail for lack of TON).
 fun buildJettonTransferBody(
     queryId: uint64,
     amount: coins,
@@ -20,7 +21,6 @@ fun buildJettonTransferBody(
         .endCell();
 }
 
-// Builds a standard TEP-74 burn body.
 fun buildJettonBurnBody(queryId: uint64, amount: coins, responseDestination: address): cell {
     return beginCell()
         .storeUint(OP_JETTON_BURN, 32)
@@ -31,10 +31,7 @@ fun buildJettonBurnBody(queryId: uint64, amount: coins, responseDestination: add
         .endCell();
 }
 
-// transfer_notification.forward_payload is an Either Cell ^Cell:
-//   $0 <inline payload>
-//   $1 ^<payload cell>
-// Returns the actual StakePayload slice.
+// transfer_notification.forward_payload is Either Cell ^Cell; returns the payload slice.
 fun unwrapForwardPayload(raw: slice): slice {
     var p = raw;
     if (p.remainingBitsCount() >= 1) {
@@ -44,61 +41,34 @@ fun unwrapForwardPayload(raw: slice): slice {
             if (p.remainingRefsCount() >= 1) {
                 return p.loadRef().beginParse();
             }
-            return p; // malformed; caller will fail payload validation
+            return p; // malformed; caller fails validation
         }
         p.loadUint(1);
     }
     return p;
 }
 
-// Sends a Jetton transfer request from the calling contract's own Jetton Wallet.
-fun sendJettonTransfer(
-    jettonWallet: address,
-    queryId: uint64,
-    amount: coins,
-    recipient: address,
-    responseDestination: address,
-): void {
-    val body = buildJettonTransferBody(queryId, amount, recipient, responseDestination);
+// Settlement transfer/burn paid from the RC balance (bounceable: a first-hop
+// failure comes back to RC and marks the action for retry).
+fun sendFromBalance(jettonWallet: address, body: cell) {
     val out = createMessage({
-        // P0-3: bounceable so failures are observable and state can be rolled back.
         bounce: BounceMode.Only256BitsOfBody,
-        value: ton("0.1"),
+        value: VALUE_JETTON_ACTION,
         dest: jettonWallet,
         body,
     });
     out.send(SEND_MODE_PAY_FEES_SEPARATELY);
 }
 
-// P0-3 tracked variant: send_excesses goes back to the claiming contract so a
-// ReturnExcessesBack proves completion; a bounce proves failure and rolls back.
-fun sendTrackedJettonTransfer(
-    jettonWallet: address,
-    queryId: uint64,
-    amount: coins,
-    recipient: address,
-    responseDestination: address,
-): void {
-    val body = buildJettonTransferBody(queryId, amount, recipient, responseDestination);
+// User-initiated transfer (claim / instant refund): the inbound message pays.
+fun sendWithInboundValue(jettonWallet: address, body: cell) {
     val out = createMessage({
         bounce: BounceMode.Only256BitsOfBody,
-        value: ton("0.1"),
+        value: 0,
         dest: jettonWallet,
         body,
     });
-    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
-}
-
-fun sendJettonBurn(jettonWallet: address, queryId: uint64, amount: coins, responseDestination: address): void {
-    val body = buildJettonBurnBody(queryId, amount, responseDestination);
-    val out = createMessage({
-        // F-04: 0.1 TON so the ReturnExcessesBack hop is always funded; excess is refunded.
-        bounce: BounceMode.Only256BitsOfBody,
-        value: ton("0.1"),
-        dest: jettonWallet,
-        body,
-    });
-    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
+    out.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
 }
 
 fun emitExternalEvent<T>(body: T): void {
