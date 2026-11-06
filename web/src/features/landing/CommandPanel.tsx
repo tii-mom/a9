@@ -394,6 +394,12 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
               <p className="note">{lang === 'zh' ? '单笔最低 10,000 A9；单地址本轮最多 20,000,000 A9。成功奖励按最终权重分配，早领仅得 50%，其余进入解锁池。' : 'Minimum 10,000 A9; up to 20,000,000 A9 per address per round. Success rewards use final participation weights. Early claims pay 50%; the remainder enters the unlock pool.'}</p>
               {!dataReady ? <p className="note" role="status">{lang === 'zh' ? '等待数据恢复后可提交' : 'Submission waits for fresh data'}</p> : null}
               {stakeVal > fuseBalance && wallet.connected ? <p className="note bad">{copy.cmd.toastInsufficientFuse}</p> : null}
+              {realWallet ? (
+                <p className="note" role="note">
+                  {lang === "zh" ? "真实钱包的质押请在「我的质押」完成，首页暂不提交链上交易。" : "Stake with a real wallet on My stake. The homepage does not submit on-chain transactions yet."}{" "}
+                  <Link to="/me">{lang === "zh" ? "前往我的质押" : "Go to My stake"}</Link>
+                </p>
+              ) : null}
               <button className="btn fire full" type="button" disabled={stakeDisabled} onClick={onStake}>
                 {stakeLabel}
               </button>
