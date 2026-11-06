@@ -4,7 +4,7 @@
  *
  * 用法：
  *   node worker/scripts/preflight-mainnet.mjs
- *   node worker/scripts/preflight-mainnet.mjs --tag=v8.8-audit-fixed
+ *   node worker/scripts/preflight-mainnet.mjs --tag=v8.9-audit-fixed
  *   # 真实地址尚未写进 wrangler.toml 时（与 CI 门禁同口径）：
  *   PROD_ROUND_CONTROLLER_ADDRESS=0:... PROD_TEAM_VAULT_ADDRESS=0:... \
  *   PROD_JETTON_MASTER_ADDRESS=0:... PROD_ORACLE_CONFIG_HASH=sha256:... \
@@ -16,9 +16,9 @@
  *   - 任一 FAIL → 进程退出码 1。
  *
  * 基线来源：
- *   - 合约 code hash：docs/18 §17 v8.8 冻结基线（§17 由 docs-sync 落地中；数值与 contracts/README.md v8.8 段、ops/config/regress-v88.registry.json 一致）。
+ *   - 合约 code hash：docs/18 §18 v8.9 冻结基线（§17 由 docs-sync 落地中；数值与 contracts/README.md v8.8 段、ops/config/regress-v88.registry.json 一致）。
  *   - 主网参数：ops/config/mainnet.params.json（唯一参数输入）+ docs/00_DECISIONS_V2.md 的 V7 时间线。
- *   - 源码冻结：tag v8.8-audit-fixed 必须存在，且 contracts/{contracts,build,tests,scripts}
+ *   - 源码冻结：tag v8.9-audit-fixed 必须存在，且 contracts/{contracts,build,tests,scripts}
  *     与 tag 完全一致（文档可以在 tag 之后继续提交；合约/测试/构建产物/部署脚本改动会被拦住）。
  *   - 检查 7：ops/scripts 内禁止写死 `--net testnet`（主网部署脚本必须显式指定网络）。
  *   - 检查 8：生产 D1 必须独立于演示库（database_id 不同且非全 0 占位符）。
@@ -35,9 +35,9 @@ const WORKER = join(ROOT, "worker");
 
 /* ------------------------------ 基线常量 ------------------------------ */
 
-/** v8.8 冻结基线 code hash（hex，小写、无 0x）。来源：docs/18 §17。 */
+/** v8.9 冻结基线 code hash（hex，小写、无 0x）。来源：docs/18 §18。 */
 const V88_BASELINE_HASHES = {
-  RoundController: "4ee42c5c0eb13cdb6689823bea883d30e852eea066d3c108a6531a69d4093ef8",
+  RoundController: "fe7088ed1c52949cd1cb0931d95911f757bc402fc37065502002df15ccdd50ae",
   TeamVault: "de6be49154e3024c9b6945ea81e7181f3e1d04fecc85dbc629c08ede6a673fb6",
   OracleAdapter: "0c91e5338e00f18b5ffc7c5c26b510424775d8089588f4147e5b667703676768",
   JettonMaster: "b8faf413176c6329a98b2474fedf765a796a14eda96c031ee1fe5b27e59ee272",
@@ -47,10 +47,10 @@ function v88BaselineSource() {
   // docs-sync 补完 §17 后自动切换为引用该节；未落地时明确标注回退来源（不静默）
   try {
     const docs = readFileSync(join(ROOT, "docs", "18_AUDIT_BRIEF.md"), "utf8");
-    if (/^## 17\./m.test(docs)) return "docs/18 §17（v8.8 冻结基线）";
-    return "docs/18 §17（v8.8 冻结基线；§17 待 docs-sync 落地，数值与 contracts/README.md v8.8、ops/config/regress-v88.registry.json 一致）";
+    if (/^## 17\./m.test(docs)) return "docs/18 §18（v8.9 冻结基线）";
+    return "docs/18 §18（v8.9 冻结基线；§17 待 docs-sync 落地，数值与 contracts/README.md v8.8、ops/config/regress-v88.registry.json 一致）";
   } catch {
-    return "docs/18 §17（v8.8 冻结基线；docs/18 读取失败，数值与 contracts/README.md v8.8、ops/config/regress-v88.registry.json 一致）";
+    return "docs/18 §18（v8.9 冻结基线；docs/18 读取失败，数值与 contracts/README.md v8.8、ops/config/regress-v88.registry.json 一致）";
   }
 }
 
@@ -326,7 +326,7 @@ function git(args) {
 function checkGitTag() {
   const details = [];
   const arg = process.argv.slice(2).find((item) => item.startsWith("--tag="));
-  const expectedTag = arg ? arg.slice("--tag=".length) : "v8.8-audit-fixed";
+  const expectedTag = arg ? arg.slice("--tag=".length) : "v8.9-audit-fixed";
   if (!expectedTag) fail("--tag= 不能为空");
 
   // 1) tag 必须存在
@@ -465,7 +465,7 @@ console.log("仓库：" + ROOT);
 console.log("");
 
 runCheck(1, "配置：env.production 必须是 chain / mainnet / 无签名关", checkConfig);
-runCheck(2, "合约哈希：contracts/build 必须等于 v8.8 冻结基线", checkContractHashes);
+runCheck(2, "合约哈希：contracts/build 必须等于 v8.9 冻结基线", checkContractHashes);
 runCheck(3, "主网参数：ops/config/mainnet.params.json 必须等于 V7", checkMainnetParams);
 runCheck(4, "迁移目录：只允许 NNNN_*.sql 且不含 seed", checkMigrations);
 runCheck(5, "源码冻结：tag 必须存在，且合约/测试/构建产物/部署脚本与 tag 完全一致", checkGitTag);
