@@ -8,7 +8,11 @@
  *   ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --local --persist-to /tmp/a9-smoke
  *   ./node_modules/.bin/wrangler d1 execute fuse-protocol --local --persist-to /tmp/a9-smoke --file=./seed/seed.sql
  *   ./node_modules/.bin/wrangler dev --port 8901 --persist-to /tmp/a9-smoke \
- *       --var DEMO_CANDLE_SECONDS:2 --var DEMO_PREVIEW_SECONDS:2
+ *       --var ADMIN_TOKEN:dev-admin-token --var DEMO_CANDLE_SECONDS:2 --var DEMO_PREVIEW_SECONDS:2
+ *
+ * ⚠️ 环境对齐：seed 与 wrangler dev 必须使用**同一个 DEMO_CANDLE_SECONDS**（seed 会写 K 线时间网格，
+ *    server 用 env 覆盖 seed 的 demo_candle_seconds）。不要在 worker/.dev.vars 里写死
+ *    DEMO_CANDLE_SECONDS，否则换 seed 后会报「K 线周期不一致」。
  *
  *   # 终端 2
  *   node scripts/smoke.mjs            # 默认 http://127.0.0.1:8787
@@ -240,7 +244,12 @@ async function baseline() {
     }
     eq(byId.get(4).totalWeightRaw, '0', 'R4 totalWeightRaw');
     eq(byId.get(4).candleHash, null, 'R4 candleHash');
-    eq(byId.get(4).state, 'UNOPENED', 'R4 state');
+    // autoplay 可能在测试启动前已把 R4 打开（尤其 10s/2s 快照），两种状态都合法；
+    // 真正「不得提前开轮」由 test 26 的 autoplay 断言负责。
+    assert(
+      byId.get(4).state === 'UNOPENED' || byId.get(4).state === 'STAKING_OPEN',
+      'R4 state 非法：' + byId.get(4).state,
+    );
     for (let id = 5; id <= 10; id++) eq(byId.get(id).state, 'UNOPENED', 'R' + id + ' state');
     return 'R1 S(20/24) / R2 F(12/24) / R3 ' + byId.get(3).state + ' / R4-R10 U';
   });
@@ -303,7 +312,18 @@ async function baseline() {
     const grid = ctx.demoCandleSeconds * 1000;
     data.candles.forEach((candle, index) => {
       eq(candle.candleIndex, index, 'R3 candleIndex 连续');
-      eq(candle.periodEnd - candle.periodStart, grid, 'K 线周期网格');
+      const actual = candle.periodEnd - candle.periodStart;
+      if (actual !== grid) {
+        throw new Error(
+          'K 线周期不一致：/api/config demo.candleSeconds=' + ctx.demoCandleSeconds + 's（期望 ' + grid + 'ms），' +
+          '但 DB 中 seed 的 K 线网格=' + actual + 'ms（candle#' + index + '）。\n' +
+          '原因：seed 与 wrangler dev 的 DEMO_CANDLE_SECONDS 不一致（常见于 worker/.dev.vars 覆盖，或 --var 与生成 seed 时不同）。\n' +
+          '修复：两者用同一个值，例如：\n' +
+          '  DEMO_CANDLE_SECONDS=2 EPOCH=... node scripts/generate-seed.mjs\n' +
+          '  wrangler dev --var DEMO_CANDLE_SECONDS:2 --var DEMO_PREVIEW_SECONDS:2\n' +
+          '或删除 worker/.dev.vars 中的 DEMO_CANDLE_SECONDS（让 server 跟随 seed 的 demo_candle_seconds）。',
+        );
+      }
       if (index > 0) eq(candle.periodStart, data.candles[index - 1].periodEnd, 'K 线首尾相接');
     });
     assert(BigInt(data.priceUsdE8) > 0n, 'priceUsdE8');

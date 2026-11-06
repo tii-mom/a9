@@ -349,12 +349,13 @@ async function main() {
       '--v2-url', 'http://127.0.0.1:' + FIXTURE_PORT + '/v2',
       '--v3-url', 'http://127.0.0.1:' + FIXTURE_PORT + '/v3',
       '--api', 'http://127.0.0.1:' + PORT, '--allow-public',
-    ], { cwd: ROOT, encoding: 'utf8', timeout: 240000 });
+    ], { cwd: ROOT, encoding: 'utf8', timeout: 240000, env: { ...process.env, TONCENTER_API_KEY: 'fixture-key' } });
     cliOk = true;
     cliDetail = (cliOutput.split('\n').find((line) => line.startsWith('DIFFS')) || 'exit=0').trim();
   } catch (error) {
     const stdout = String(error.stdout || '');
-    cliDetail = (stdout.split('\n').find((line) => line.startsWith('DIFFS')) || 'exit!=0').trim();
+    const diffLines = stdout.split('\n').filter((line) => line.startsWith('  - ') || line.startsWith('DIFFS'));
+    cliDetail = diffLines.length ? diffLines.slice(0, 5).join(' | ') : 'exit!=0 ' + String(error.message).slice(0, 120);
   }
   check('cli.reconcileDiff0', cliOk, cliDetail);
 

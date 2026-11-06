@@ -286,6 +286,52 @@ async function getTeamVaultState(tv) {
   return { controller: stackAddress(stack[0]), teamRoundRaw: stackNum(stack[3]) };
 }
 
+
+/* --------------------------- docs/19 辅助：钱包 / 解锁 --------------------------- */
+function bytesToBase64Local(bytes) { return Buffer.from(bytes).toString('base64'); }
+/** 构造 MsgAddressInt 的 slice BOC（ton RunGetMethod 地址参数；含 1 位哨兵，理论见 indexer/boc.ts 注释）。 */
+function addressSliceBoc(parsed) {
+  const bits = [];
+  const push = (value, count) => {
+    let v = typeof value === 'bigint' ? value : BigInt(value);
+    if (v < 0n) v = (1n << BigInt(count)) + v;
+    for (let i = count - 1; i >= 0; i--) bits.push(Number((v >> BigInt(i)) & 1n));
+  };
+  push(2n, 2); push(0n, 1); push(parsed.workchain, 8); push(BigInt('0x' + parsed.hashHex), 256); push(1n, 1);
+  const data = Buffer.alloc(Math.ceil(bits.length / 8));
+  bits.forEach((bit, index) => { if (bit) data[index >> 3] |= 0x80 >> (index & 7); });
+  const bitLen = bits.length;
+  const dataLen = data.length;
+  const d2 = bitLen % 8 === 0 ? dataLen * 2 : (dataLen - 1) * 2 + 1;
+  const cellSize = 2 + dataLen;
+  const out = Buffer.alloc(11 + cellSize);
+  out[0] = 0xb5; out[1] = 0xee; out[2] = 0x9c; out[3] = 0x72; out[4] = 0x01;
+  out[5] = 0x01; out[6] = 0x01; out[7] = 0x01; out[8] = 0x00; out[9] = cellSize; out[10] = 0x00;
+  out[11] = 0x00; out[12] = d2;
+  data.copy(out, 13);
+  return bytesToBase64Local(out);
+}
+async function getUnlockInfo(rcAddress, owner) {
+  const stack = await runGetMethod(rcAddress, 'get_unlock_info', [['slice', { bytes: addressSliceBoc(owner) }]]);
+  return { unlockStart: Number(stackNum(stack[0])), totalLockedRaw: stackNum(stack[1]), claimedRaw: stackNum(stack[2]), claimableRaw: stackNum(stack[3]) };
+}
+async function listJettonWallets(jettonMaster) {
+  const list = [];
+  for (let offset = 0; offset < 200; offset += 100) {
+    const url = V3_BASE + '/jetton/wallets?jetton_address=' + encodeURIComponent(jettonMaster) + '&limit=100&offset=' + offset;
+    const json = await httpJson(url);
+    const batch = json.jetton_wallets || json.wallets || [];
+    list.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return list;
+}
+function sameAddress(left, right) {
+  const a = parseAddress(left);
+  const b = parseAddress(right);
+  return Boolean(a && b && a.raw === b.raw);
+}
+
 /* ------------------------------- 对账主流程 ------------------------------- */
 const diffs = [];
 const failures = [];
@@ -375,6 +421,136 @@ async function main() {
         notes.push('R' + roundId + ' 进行中（status=' + view.status + '）：已解析 ' + candles.length + ' 根 / 链上 ' + view.candlesSeen + ' 根，跳过不可变哈希比对');
       }
     }
+  }
+
+
+  /* ------------------------- docs/19 全生命周期对账 ------------------------- */
+  if (args.doc19) {
+    console.log('\n== docs/19 权威数字对账（不可变项必须 diff=0） ==');
+    // 权威快照（docs/19 §2/§3，2026-11-05 20:13 UTC，由 Lead getter 独立读取）
+    const DOC19 = {
+      supplyRaw: 10000000000000000000n,
+      burnedRaw: 5520910000000000000n,
+      rcWalletDocRaw: 1732259899434318040n, // 1,732,259,899.434318040
+      tvWalletDocRaw: 0n,
+      teamRaw: 600000000000000000n,
+      marketingRaw: 497000000000000000n,
+      liquidityRaw: 500000000000000000n,
+      internalRaw: 800000000000000000n,
+      docUsersRaw: [139062093023000000n, 106413953488000000n, 104354054054000000n], // 仅 3 位小数，容差 1e6 raw
+      unlockLockedRaw: 698900062853551224n,
+      rounds: {
+        1: { status: 8, tier: 1, target: 232000n, qualified: 16, stake: 0n, weight: 0n },
+        2: { status: 9, tier: 2, target: 464000n, qualified: 0, stake: 0n, weight: 0n },
+        3: { status: 8, tier: 2, target: 464000n, qualified: 16, stake: 300000000000000n, weight: 370000000000000n },
+        4: { status: 9, tier: 3, target: 928000n, qualified: 5, stake: 20110000000000000n, weight: 24142000000000000n },
+        5: { status: 8, tier: 3, target: 928000n, qualified: 16, stake: 300000000000000n, weight: 430000000000000n },
+        6: { status: 9, tier: 4, target: 1856000n, qualified: 0, stake: 200000000000000n, weight: 300000000000000n },
+        7: { status: 8, tier: 4, target: 1856000n, qualified: 16, stake: 0n, weight: 0n },
+        8: { status: 9, tier: 5, target: 3712000n, qualified: 0, stake: 300000000000000n, weight: 370000000000000n },
+        9: { status: 9, tier: 5, target: 3712000n, qualified: 0, stake: 300000000000000n, weight: 400000000000000n },
+        10: { status: 8, tier: 5, target: 3712000n, qualified: 16, stake: 300000000000000n, weight: 430000000000000n },
+      },
+    };
+    const threshold = Number(config.minQualifiedCandles);
+    let chainRewardBurn = 0n; let chainTeamBurn = 0n; let chainPrincipalBurn = 0n;
+    let roundMismatch = 0;
+    console.log('轮 | status | tier | target | seen | qualified(封顶) | 质押 raw | 权重 raw | 团队释放 | 三笔销毁确认');
+    for (const [roundId, expected] of Object.entries(DOC19.rounds)) {
+      const view = rounds.get(Number(roundId));
+      if (!view) { failures.push('docs19: 缺少 R' + roundId); roundMismatch++; continue; }
+      const qualified = Math.min(view.qualifiedCandles, threshold);
+      const rows = [];
+      if (view.status !== expected.status) rows.push('status ' + view.status + '≠' + expected.status);
+      if (view.targetTier !== expected.tier) rows.push('tier ' + view.targetTier + '≠' + expected.tier);
+      if (view.targetPriceUsdE8 !== expected.target) rows.push('target ' + view.targetPriceUsdE8 + '≠' + expected.target);
+      if (view.candlesSeen !== 24) rows.push('seen ' + view.candlesSeen + '≠24');
+      if (qualified !== expected.qualified) rows.push('qualified ' + qualified + '≠' + expected.qualified);
+      if (view.totalAcceptedStakeRaw !== expected.stake) rows.push('stake ' + view.totalAcceptedStakeRaw + '≠' + expected.stake);
+      if (view.totalWeight !== expected.weight) rows.push('weight ' + view.totalWeight + '≠' + expected.weight);
+      const success = view.status === 8;
+      const expectRewardBurn = success ? expected.stake === 0n : true;
+      const expectTeamBurn = !success;
+      const expectPrincipalBurn = !success;
+      if (view.teamReleaseConfirmed !== success) rows.push('teamRelease=' + view.teamReleaseConfirmed + '≠' + success);
+      if (view.teamBurnConfirmed !== expectTeamBurn) rows.push('teamBurn=' + view.teamBurnConfirmed + '≠' + expectTeamBurn);
+      if (view.rewardBurnConfirmed !== expectRewardBurn) rows.push('rewardBurn=' + view.rewardBurnConfirmed + '≠' + expectRewardBurn);
+      if (view.principalBurnConfirmed !== expectPrincipalBurn) rows.push('principalBurn=' + view.principalBurnConfirmed + '≠' + expectPrincipalBurn);
+      if (view.rewardBurnConfirmed) chainRewardBurn += BigInt(config.roundRewardRaw);
+      if (view.teamBurnConfirmed) chainTeamBurn += BigInt(config.teamRoundRaw);
+      if (view.principalBurnConfirmed) chainPrincipalBurn += view.totalAcceptedStakeRaw;
+      if (rows.length) { roundMismatch++; diff('R' + roundId + '.doc19', rows.join('; '), 'docs/19'); }
+      console.log(
+        'R' + roundId + ' | ' + view.status + ' | ' + view.targetTier + ' | ' + view.targetPriceUsdE8.toString() + ' | ' + view.candlesSeen +
+          ' | ' + qualified + ' | ' + view.totalAcceptedStakeRaw.toString() + ' | ' + view.totalWeight.toString() +
+          ' | ' + (view.teamReleaseConfirmed ? '✓' : '—') + ' | ' +
+          'R' + (view.rewardBurnConfirmed ? '✓' : '—') + ' T' + (view.teamBurnConfirmed ? '✓' : '—') + ' P' + (view.principalBurnConfirmed ? '✓' : '—'),
+      );
+    }
+    const burnTotal = chainRewardBurn + chainTeamBurn + chainPrincipalBurn;
+    console.log('销毁合计：奖励 ' + chainRewardBurn + ' + 团队 ' + chainTeamBurn + ' + 本金 ' + chainPrincipalBurn + ' = ' + burnTotal + ' raw');
+    if (burnTotal !== DOC19.burnedRaw) diff('doc19.burnedRaw', DOC19.burnedRaw.toString(), burnTotal.toString());
+    if (jetton.totalSupplyRaw + burnTotal !== DOC19.supplyRaw) diff('doc19.supplyInvariant', DOC19.supplyRaw.toString(), (jetton.totalSupplyRaw + burnTotal).toString());
+
+    // 持币者枚举（v3 jetton/wallets）：总量守恒 + 角色钱包 + 快照后 claim 对平
+    const wallets = await listJettonWallets(jm.raw);
+    let holdersSum = 0n;
+    const byOwner = new Map();
+    for (const wallet of wallets) {
+      const balance = BigInt(wallet.balance || '0');
+      holdersSum += balance;
+      byOwner.set(String(wallet.owner).toLowerCase(), balance);
+    }
+    console.log('持币者 ' + wallets.length + ' 个；余额合计 ' + holdersSum.toString() + ' raw（应等于链上总供应 ' + jetton.totalSupplyRaw.toString() + '）');
+    if (holdersSum !== jetton.totalSupplyRaw) diff('doc19.holdersSum', jetton.totalSupplyRaw.toString(), holdersSum.toString());
+    const rcWallet = wallets.find((wallet) => sameAddress(wallet.address, args['rc-wallet'] || ''));
+    const tvWallet = wallets.find((wallet) => sameAddress(wallet.address, args['tv-wallet'] || ''));
+    const roleKeyMap = {
+      teamWallet: 'team', marketingWallet: 'marketing', liquidityWallet: 'liquidity', teamInternalWallet: 'internal',
+    };
+    const roleExpected = { team: DOC19.teamRaw, marketing: DOC19.marketingRaw, liquidity: DOC19.liquidityRaw, internal: DOC19.internalRaw };
+    for (const [walletKey, role] of Object.entries(roleKeyMap)) {
+      const owner = registry && registry.wallets && registry.wallets[walletKey] && registry.wallets[walletKey].address;
+      const ownerParsed = parseAddress(owner);
+      if (!ownerParsed) { notes.push('registry 缺钱包 ' + walletKey + '，跳过角色余额比对'); continue; }
+      const balance = byOwner.get(ownerParsed.raw.toLowerCase()) ?? 0n;
+      if (balance !== roleExpected[role]) diff('doc19.wallet.' + role, roleExpected[role].toString(), balance.toString());
+      else console.log('角色钱包 ' + role + ' = ' + balance.toString() + ' raw ✓');
+    }
+    if (tvWallet && BigInt(tvWallet.balance) !== DOC19.tvWalletDocRaw) diff('doc19.tvWallet', '0', tvWallet.balance);
+
+    // 用户钱包：docs/19 是 20:13 UTC 快照；之后发生 claim，RC 流出必须与用户流入逐 raw 对平
+    const roleOwners = new Set();
+    for (const walletKey of Object.keys(roleKeyMap)) {
+      const parsed = parseAddress(registry && registry.wallets && registry.wallets[walletKey] && registry.wallets[walletKey].address);
+      if (parsed) roleOwners.add(parsed.raw.toLowerCase());
+    }
+    if (rc) roleOwners.add(rc.raw.toLowerCase());
+    if (tv) roleOwners.add(tv.raw.toLowerCase());
+    const userHolders = [...byOwner.entries()]
+      .filter(([owner, balance]) => balance > 0n && !roleOwners.has(owner))
+      .sort((a, b) => (b[1] > a[1] ? 1 : -1))
+      .slice(0, 3);
+    const currentUsers = userHolders.map(([, balance]) => balance);
+    const currentRc = rcWallet ? BigInt(rcWallet.balance) : 0n;
+    const rcOutflow = DOC19.rcWalletDocRaw - currentRc;
+    const usersInflow = currentUsers.reduce((sum, balance, index) => sum + (balance - (DOC19.docUsersRaw[index] ?? 0n)), 0n);
+    console.log('docs/19 之后：RC 钱包流出 ' + rcOutflow.toString() + ' raw；用户 A/B/C 流入 ' + usersInflow.toString() + ' raw');
+    const deltaGap = rcOutflow - usersInflow;
+    if (deltaGap > 1000000n || deltaGap < -1000000n) diff('doc19.postSnapshotClaimDelta', usersInflow.toString(), rcOutflow.toString());
+    else notes.push('docs/19 快照后的 claim：RC 流出 = 用户流入（Δ=' + deltaGap.toString() + ' raw ≤ 0.001 A9，文档余额为时点快照）');
+
+    // 解锁池（R10 终态后）：只读 getter，不触发 claim
+    if (userHolders.length) {
+      const topOwner = parseAddress(userHolders[0][0]);
+      if (topOwner) {
+        const unlock = await getUnlockInfo(rc.raw, topOwner);
+        console.log('解锁池（余额最高用户）：unlockStart=' + unlock.unlockStart + ' totalLockedRaw=' + unlock.totalLockedRaw.toString());
+        if (unlock.unlockStart <= 0) diff('doc19.unlockStart', '>0', String(unlock.unlockStart));
+        if (unlock.totalLockedRaw !== DOC19.unlockLockedRaw) diff('doc19.unlockLockedRaw', DOC19.unlockLockedRaw.toString(), unlock.totalLockedRaw.toString());
+      }
+    }
+    notes.push('docs/19 轮次核对：' + (10 - roundMismatch) + '/10 轮 status/tier/target/qualified/stake/weight/销毁标志全部一致');
   }
 
   if (!apiBase) {
