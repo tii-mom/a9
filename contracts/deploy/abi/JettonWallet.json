@@ -3,7 +3,7 @@
   "contract_name": "JettonWallet",
   "author": "A9 Protocol",
   "version": "1.0.0",
-  "description": "A9 Jetton Wallet. TEP-74/TEP-89 compatible; forwards forward_payload untouched.",
+  "description": "A9 Jetton Wallet. Unmodified TEP-74/TEP-89 behaviour (Acton jetton template).",
   "unique_types": [
     {
       "kind": "void"

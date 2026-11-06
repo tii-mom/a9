@@ -3,7 +3,7 @@
 //   acton script scripts/deploy/fund_jetton.tolk <to_owner> <amount_raw>
 //
 // TEP-74 IMPORTANT: <to_owner> is the jetton OWNER (e.g. the RoundController or
-// TeamVault CONTRACT address), NOT the owner's Jetton Wallet. The source wallet
+// RoundController CONTRACT address), NOT the owner's Jetton Wallet. The source wallet
 // derives the destination wallet from the owner via calcDeployedJettonWallet().
 // Passing a Jetton Wallet address here creates a wallet owned by that wallet
 // contract (unspendable) — do not do it.

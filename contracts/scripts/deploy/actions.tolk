@@ -7,7 +7,6 @@
 //   A9_SIGNER_WALLET                  -> Acton wallet name (default TON_DEPLOYER_WALLET or "treasury")
 //   JETTON_MASTER_ADDRESS             -> fallback: deploy/jetton-master.addr
 //   ROUND_CONTROLLER_ADDRESS          -> fallback: deploy/round-controller.addr
-//   TEAM_VAULT_ADDRESS                -> fallback: deploy/team-vault.addr
 
 import "@acton/env"
 import "@acton/fs"
@@ -18,6 +17,17 @@ import "@acton/io"
 import "@acton/testing/assert"
 import "@acton/emulation/network"
 import "@contracts/types"
+
+// TEP-74 transfer body (same layout as tests/helpers.tolk AskToTransferMsg).
+struct (0x0f8a7ea5) AskToTransferMsg {
+    queryId: uint64
+    jettonAmount: coins
+    transferRecipient: address
+    sendExcessesTo: address?
+    customPayload: cell?
+    forwardTonAmount: coins
+    forwardPayload: RemainingBitsAndRefs
+}
 
 fun signerName(): string {
     return env<string>("A9_SIGNER_WALLET") ?? (env<string>("TON_DEPLOYER_WALLET") ?? "treasury");
@@ -138,7 +148,7 @@ fun buildFundJetton(
         bounce: true,
         value: ton("0.3"),
         dest: sourceWallet,
-        body: AskToTransfer {
+        body: AskToTransferMsg {
             queryId: 0,
             jettonAmount: amountRaw,
             transferRecipient: toOwner,
@@ -168,42 +178,6 @@ fun buildCloseStaking(target: address, twap1hUsdE8: uint128): OutMessage {
     });
 }
 
-fun buildStartObservation(target: address, roundId: uint8): OutMessage {
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body: StartObservation { queryId: 0, roundId },
-    });
-}
-
-fun buildFinalizeRound(target: address, roundId: uint8): OutMessage {
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body: FinalizeRound { queryId: 0, roundId },
-    });
-}
-
-fun buildPauseOracle(target: address, reason: uint32): OutMessage {
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body: PauseOracle { queryId: 0, reason },
-    });
-}
-
-fun buildResumeOracle(target: address): OutMessage {
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body: ResumeOracle { queryId: 0 },
-    });
-}
-
 fun buildAbortTechnical(target: address): OutMessage {
     return createMessage({
         bounce: true,
@@ -213,30 +187,12 @@ fun buildAbortTechnical(target: address): OutMessage {
     });
 }
 
-fun buildRetryPending(target: address, roundId: uint8): OutMessage {
+fun buildRetrySettlement(target: address, roundId: uint8): OutMessage {
     return createMessage({
         bounce: true,
         value: ton("0.3"),
         dest: target,
-        body: RetryPendingActions { queryId: 0, roundId },
-    });
-}
-
-fun buildSetJettonWallet(target: address, wallet: address): OutMessage {
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body: SetJettonWallet { wallet },
-    });
-}
-
-fun buildInitController(target: address, controller: address): OutMessage {
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body: InitController { controller },
+        body: RetrySettlement { queryId: 0, roundId },
     });
 }
 
@@ -264,35 +220,6 @@ fun buildSubmitCandle(
             twapPriceUsdE8: twapUsdE8,
             dataDigest,
         },
-    });
-}
-
-// OracleCandleVerified (0x52540004) shares the SubmitCandle field layout; reserved
-// for the phase-2 OracleAdapter (current RoundController has no handler yet).
-fun buildOracleCandle(
-    target: address,
-    roundId: uint8,
-    candleIndex: uint8,
-    periodStart: uint32,
-    periodEnd: uint32,
-    twapUsdE8: uint128,
-    dataDigest: uint256,
-): OutMessage {
-    val body = beginCell()
-        .storeUint(0x52540004, 32)
-        .storeUint(0, 64)
-        .storeUint(roundId, 8)
-        .storeUint(candleIndex, 8)
-        .storeUint(periodStart, 32)
-        .storeUint(periodEnd, 32)
-        .storeUint(twapUsdE8, 128)
-        .storeUint(dataDigest, 256)
-        .endCell();
-    return createMessage({
-        bounce: true,
-        value: ton("0.3"),
-        dest: target,
-        body,
     });
 }
 

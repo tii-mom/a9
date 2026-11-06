@@ -1,26 +1,18 @@
-// Admin / keeper operation on RoundController (and one-time wiring ops).
+// Keeper / operator operation on RoundController (v10).
 // POSITIONAL args:
 //   acton script scripts/deploy/admin_op.tolk <op> <roundId> <extra>
 //
 // op + args:
 //   open-round        extra = opening 24h TWAP (USD_E8), roundId ignored (0)
 //   close-staking     extra = current 1h TWAP (USD_E8), roundId ignored (0)
-//   start-observation roundId, extra = 0
-//   finalize-round    roundId, extra = 0
-//   pause-oracle      extra = reason code (0 -> 1), roundId ignored
-//   resume-oracle     roundId/extra ignored
-//   abort-technical   roundId/extra ignored
-//   retry-pending     roundId, extra = 0
 //   submit-candle     roundId; candle fields via env:
 //                     A9_CANDLE_INDEX / A9_PERIOD_START / A9_PERIOD_END /
 //                     A9_TWAP_E8 / A9_DIGEST (64 hex or 0x + 64 hex)
-//   oracle-candle     same env as submit-candle; builds OracleCandleVerified
-//                     (0x52540004) for the phase-2 OracleAdapter. DRY-RUN ONLY:
-//                     current RoundController has no handler for it yet.
-//   set-jetton-wallet target = A9_TARGET_ADDRESS (RC or TeamVault),
-//                     wallet = A9_JETTON_WALLET_ADDRESS, roundId/extra ignored
-//   init-controller   target = TEAM_VAULT_ADDRESS (or deploy/team-vault.addr),
-//                     controller = A9_CONTROLLER_ADDRESS (default ROUND_CONTROLLER_ADDRESS)
+//   abort-technical   roundId/extra ignored
+//   retry-settlement  roundId, extra ignored (alias: retry-pending)
+//
+// Removed in v10 (fail with a clear message): start-observation, finalize-round,
+// pause-oracle, resume-oracle, oracle-candle, set-jetton-wallet, init-controller.
 //
 // Addresses: ROUND_CONTROLLER_ADDRESS env or deploy/round-controller.addr.
 // Dry-run by default; broadcast with OPS_EXECUTE=1 OPS_CONFIRM=YES + --net testnet.
@@ -28,8 +20,7 @@
 // Examples:
 //   admin_op.tolk open-round 0 232000
 //   admin_op.tolk close-staking 0 0
-//   admin_op.tolk start-observation 1 0
-//   admin_op.tolk finalize-round 1 0
+//   admin_op.tolk retry-settlement 1 0
 //   A9_CANDLE_INDEX=0 A9_PERIOD_START=... A9_PERIOD_END=... A9_TWAP_E8=232000 \
 //     A9_DIGEST=<64 hex> admin_op.tolk submit-candle 1 0
 
@@ -48,7 +39,6 @@ struct OpPlan {
     label: string
     message: OutMessage
     details: string
-    allowExecute: bool
 }
 
 fun candleEnvInt(name: string, label: string): int {
@@ -67,7 +57,17 @@ fun candleEnvDigest(): uint256 {
     return parseDigestHex(raw!, "A9_DIGEST");
 }
 
-fun planCandleOp(opName: string, roundId: int, rc: address, isOracle: bool): OpPlan {
+fun isRemovedOp(opName: string): bool {
+    return opName.equalTo("start-observation")
+        || opName.equalTo("finalize-round")
+        || opName.equalTo("pause-oracle")
+        || opName.equalTo("resume-oracle")
+        || opName.equalTo("oracle-candle")
+        || opName.equalTo("set-jetton-wallet")
+        || opName.equalTo("init-controller");
+}
+
+fun planCandleOp(opName: string, roundId: int, rc: address): OpPlan {
     if (roundId < 1 || roundId > 10) {
         Assert.fail(format("{} roundId must be 1..10, got {}", opName, roundId));
     }
@@ -99,24 +99,6 @@ fun planCandleOp(opName: string, roundId: int, rc: address, isOracle: bool): OpP
     sb.append(" twapUsdE8=").appendInt(twap);
     sb.append(" digest=0x").append(format("{:x}", digest));
     val details = sb.build();
-    if (isOracle) {
-        return {
-            target: rc,
-            opcode: OP_ORACLE_CANDLE_VERIFIED,
-            label: "OracleCandleVerified",
-            message: buildOracleCandle(
-                rc,
-                roundId as uint8,
-                candleIndex as uint8,
-                periodStart as uint32,
-                periodEnd as uint32,
-                twap as uint128,
-                digest,
-            ),
-            details,
-            allowExecute: false,
-        };
-    }
     return {
         target: rc,
         opcode: OP_SUBMIT_CANDLE,
@@ -131,13 +113,15 @@ fun planCandleOp(opName: string, roundId: int, rc: address, isOracle: bool): OpP
             digest,
         ),
         details,
-        allowExecute: true,
     };
 }
 
 fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan {
     // Acton passes script string args as slices; format() materialises a real string for comparisons.
     val opName = format("{}", op);
+    if (isRemovedOp(opName)) {
+        Assert.fail(format("{} was removed in v10", opName));
+    }
     if (opName.equalTo("open-round")) {
         return {
             target: rc,
@@ -145,7 +129,6 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
             label: "OpenRound",
             message: buildOpenRound(rc, extra as uint128),
             details: "",
-            allowExecute: true,
         };
     }
     if (opName.equalTo("close-staking")) {
@@ -155,48 +138,6 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
             label: "CloseStaking",
             message: buildCloseStaking(rc, extra as uint128),
             details: "",
-            allowExecute: true,
-        };
-    }
-    if (opName.equalTo("start-observation")) {
-        return {
-            target: rc,
-            opcode: OP_START_OBSERVATION,
-            label: "StartObservation",
-            message: buildStartObservation(rc, roundId as uint8),
-            details: "",
-            allowExecute: true,
-        };
-    }
-    if (opName.equalTo("finalize-round")) {
-        return {
-            target: rc,
-            opcode: OP_FINALIZE_ROUND,
-            label: "FinalizeRound",
-            message: buildFinalizeRound(rc, roundId as uint8),
-            details: "",
-            allowExecute: true,
-        };
-    }
-    if (opName.equalTo("pause-oracle")) {
-        val reason: uint32 = extra == 0 ? 1 : (extra as uint32);
-        return {
-            target: rc,
-            opcode: OP_PAUSE_ORACLE,
-            label: "PauseOracle",
-            message: buildPauseOracle(rc, reason),
-            details: "",
-            allowExecute: true,
-        };
-    }
-    if (opName.equalTo("resume-oracle")) {
-        return {
-            target: rc,
-            opcode: OP_RESUME_ORACLE,
-            label: "ResumeOracle",
-            message: buildResumeOracle(rc),
-            details: "",
-            allowExecute: true,
         };
     }
     if (opName.equalTo("abort-technical")) {
@@ -206,61 +147,33 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
             label: "AbortTechnical",
             message: buildAbortTechnical(rc),
             details: "",
-            allowExecute: true,
         };
     }
-    if (opName.equalTo("retry-pending")) {
+    if (opName.equalTo("retry-settlement") || opName.equalTo("retry-pending")) {
         return {
             target: rc,
-            opcode: OP_RETRY_PENDING_ACTIONS,
-            label: "RetryPendingActions",
-            message: buildRetryPending(rc, roundId as uint8),
+            opcode: OP_RETRY_SETTLEMENT,
+            label: "RetrySettlement",
+            message: buildRetrySettlement(rc, roundId as uint8),
             details: "",
-            allowExecute: true,
         };
     }
     if (opName.equalTo("submit-candle")) {
-        return planCandleOp(opName, roundId, rc, false);
-    }
-    if (opName.equalTo("oracle-candle")) {
-        return planCandleOp(opName, roundId, rc, true);
-    }
-    if (opName.equalTo("set-jetton-wallet")) {
-        val target = env<address>("A9_TARGET_ADDRESS");
-        val wallet = env<address>("A9_JETTON_WALLET_ADDRESS");
-        if (target == null || wallet == null) {
-            Assert.fail("set-jetton-wallet needs A9_TARGET_ADDRESS and A9_JETTON_WALLET_ADDRESS");
-        }
-        return {
-            target: target!,
-            opcode: OP_SET_JETTON_WALLET,
-            label: "SetJettonWallet",
-            message: buildSetJettonWallet(target!, wallet!),
-            details: "",
-            allowExecute: true,
-        };
-    }
-    if (opName.equalTo("init-controller")) {
-        val tv = resolveAddress("TEAM_VAULT_ADDRESS", "deploy/team-vault.addr", "TeamVault");
-        val controller = env<address>("A9_CONTROLLER_ADDRESS") ?? rc;
-        return {
-            target: tv,
-            opcode: OP_INIT_CONTROLLER,
-            label: "InitController",
-            message: buildInitController(tv, controller),
-            details: "",
-            allowExecute: true,
-        };
+        return planCandleOp(opName, roundId, rc);
     }
     Assert.fail(
         format(
-            "unknown op: {} (expected open-round/close-staking/start-observation/finalize-round/pause-oracle/resume-oracle/abort-technical/retry-pending/submit-candle/oracle-candle/set-jetton-wallet/init-controller)",
+            "unknown op: {} (expected open-round/close-staking/submit-candle/abort-technical/retry-settlement)",
             opName,
         ),
     );
 }
 
 fun main(op: string, roundId: int, extra: int) {
+    // fail on removed ops before any address lookup
+    if (isRemovedOp(format("{}", op))) {
+        Assert.fail(format("{} was removed in v10", format("{}", op)));
+    }
     val rc = resolveAddress(
         "ROUND_CONTROLLER_ADDRESS",
         "deploy/round-controller.addr",
@@ -279,10 +192,5 @@ fun main(op: string, roundId: int, extra: int) {
         println("  fields      = {}", plan.details);
     }
     printSummary("  message", plan.target, ton("0.3"), plan.opcode, plan.message);
-    if (!plan.allowExecute && executeFlag()) {
-        Assert.fail(
-            "oracle-candle is DRY-RUN only: the current RoundController has no OracleCandleVerified handler (phase-2 OracleAdapter; requires a redeploy with the handler)",
-        );
-    }
     broadcastOrDryRun(signer.address, plan.message);
 }

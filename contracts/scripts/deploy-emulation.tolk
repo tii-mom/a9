@@ -1,19 +1,30 @@
-// A9 Protocol — deterministic deployment order (emulation by default).
+// A9 Protocol v10 — deterministic deployment (emulation by default).
 //
 //   acton script scripts/deploy-emulation.tolk                 # local emulation
 //   acton script scripts/deploy-emulation.tolk --net testnet   # real testnet broadcast
 //
 // Deployment order implemented here:
-//   1. JettonMaster (A9, TEP-74) deployed with admin = admin, empty supply.
-//   2. Mint 10,000,000,000 A9 exactly once to admin; mint closes permanently.
-//   3. TeamVault deployed (placeholder jetton wallet, later SetJettonWallet).
-//   4. RoundController deployed with the REAL JettonMaster address.
-//   5. Query JettonMaster.get_wallet_address(RC / TeamVault) and wire the real
-//      canonical Jetton Wallet addresses via the one-time SetJettonWallet.
-//   6. TeamVault.InitController(RoundController) (one-time, immutable).
-//   7. Remaining ops step (not done here): transfer 7,000,000,000 A9 to the RC
-//      Jetton Wallet, 1,200,000,000 A9 to the TeamVault Jetton Wallet and seed
-//      TON gas balances (RC >= 20 TON, TeamVault >= 10 TON).
+//   1. JettonMaster (A9, TEP-74) deployed with admin = admin wallet, empty supply.
+//   2. Mint 100,000,000,000 A9 exactly once to admin; mint closes permanently.
+//      (Resume mode: A9_RESUME_JETTON_MASTER_ADDRESS reuses an existing master.)
+//   3. RoundController deployed with the REAL JettonMaster. There is no admin and
+//      no wiring step: RC derives its own jetton wallet from its code and address.
+//   4. Verify RC is active with the expected code hash and that
+//      RC.get_jetton_wallet_address == JettonMaster.get_wallet_address(RC).
+//   5. Fund RC with 10 rounds of reward + 10 rounds of team quota via a TEP-74
+//      transfer with forward_ton_amount = 0 (otherwise RC treats it as a deposit
+//      and refunds it), then verify the RC jetton balance.
+//
+// Env (all optional unless noted):
+//   A9_KEEPER_ADDRESS          keeper address (default: deployer wallet)
+//   A9_TEAM_WALLET_ADDRESS     team wallet (REQUIRED with --net; default: deployer wallet)
+//   A9_DEPLOY_ROUND_REWARD_RAW, A9_DEPLOY_TEAM_ROUND_RAW, A9_DEPLOY_MIN_STAKE_RAW (raw A9)
+//   A9_TIMING_PREVIEW_SECONDS, A9_TIMING_STAKE_SECONDS, A9_TIMING_CANDLE_SECONDS,
+//   A9_TIMING_CANDLE_COUNT, A9_TIMING_MIN_QUALIFIED
+//                              A9_TIMING_OBSERVATION_SECONDS is no longer configurable:
+//                              observation = candleSeconds * candleCount. If set, it must match.
+//   A9_DEPLOY_TON_JETTON_MASTER, A9_DEPLOY_TON_ROUND_CONTROLLER, A9_DEPLOY_MINT_TON,
+//   A9_DEPLOY_MINT_FORWARD_TON, A9_DEPLOY_FUND_TON   deployment TON budget (decimal TON)
 
 import "@stdlib/strings"
 import "@acton/env"
@@ -27,13 +38,16 @@ import "@acton/fs"
 import "@acton/emulation/scripts"
 import "@contracts/types"
 import "@contracts/jetton/storage"
+import "deploy/actions"
 
 const PARAM_TOTAL_SUPPLY: coins = 10000000000000000000; // 100 亿 A9 (9 decimals)
 const PARAM_P0: uint128 = 116000;
 const PARAM_ROUND_REWARD: uint128 = 700000000000000000;
 const PARAM_TEAM_ROUND: uint128 = 120000000000000000;
-const PARAM_MIN_STAKE: uint128 = 10000000000000;
+const PARAM_MIN_STAKE: uint128 = 100000000000000;
+const PARAM_MAX_PER_ADDRESS: uint128 = 20000000000000000;
 const PARAM_MAX_TOTAL_STAKE: uint128 = 200000000000000000;
+const PARAM_ABORT_TIMEOUT: uint32 = 604800;
 
 // Deployment TON budget, overridable for low-balance testnet runs. Values are TON.
 fun tonCoins(amountTon: int): coins {
@@ -180,21 +194,13 @@ fun requireActive(addr: address, name: string, expectedCode: cell, needed: coins
 
 fun main() {
     val masterTon = deployTon("A9_DEPLOY_TON_JETTON_MASTER", 5);
-    val adapterTon = deployTon("A9_DEPLOY_TON_ORACLE_ADAPTER", 5);
-    val tvTon = deployTon("A9_DEPLOY_TON_TEAM_VAULT", 1);
     val rcTon = deployTon("A9_DEPLOY_TON_ROUND_CONTROLLER", 5);
     val mintTon = tonSetting("A9_DEPLOY_MINT_TON", "0.55");
     val mintForwardTon = tonSetting("A9_DEPLOY_MINT_FORWARD_TON", "0.4");
-    val wiringTon = tonSetting("A9_DEPLOY_WIRING_TON", "0.2");
     val fundTon = tonSetting("A9_DEPLOY_FUND_TON", "0.3");
     println(
-        "Deploy TON: JettonMaster={} nano [{}] OracleAdapter={} nano [{}]",
+        "Deploy TON: JettonMaster={} nano [{}] RoundController={} nano [{}]",
         masterTon, tonSource("A9_DEPLOY_TON_JETTON_MASTER"),
-        adapterTon, tonSource("A9_DEPLOY_TON_ORACLE_ADAPTER"),
-    );
-    println(
-        "Deploy TON: TeamVault={} nano [{}] RoundController={} nano [{}]",
-        tvTon, tonSource("A9_DEPLOY_TON_TEAM_VAULT"),
         rcTon, tonSource("A9_DEPLOY_TON_ROUND_CONTROLLER"),
     );
     println(
@@ -203,24 +209,36 @@ fun main() {
         mintForwardTon, tonSource("A9_DEPLOY_MINT_FORWARD_TON"),
     );
     println(
-        "Deploy TON extras: wiring={} nano [{}] fund={} nano [{}]",
-        wiringTon, tonSource("A9_DEPLOY_WIRING_TON"),
+        "Deploy TON extras: fund={} nano [{}]",
         fundTon, tonSource("A9_DEPLOY_FUND_TON"),
     );
+
     val previewSeconds = intSetting("A9_TIMING_PREVIEW_SECONDS", 43200);
     val stakeSeconds = intSetting("A9_TIMING_STAKE_SECONDS", 129600);
     val candleSeconds = intSetting("A9_TIMING_CANDLE_SECONDS", 3600);
     val candleCount = intSetting("A9_TIMING_CANDLE_COUNT", 24);
     val minQualified = intSetting("A9_TIMING_MIN_QUALIFIED", 16);
-    val observationSeconds = intSetting("A9_TIMING_OBSERVATION_SECONDS", 86400);
     val roundRewardRaw = coinRawSetting("A9_DEPLOY_ROUND_REWARD_RAW", PARAM_ROUND_REWARD);
     val teamRoundRaw = coinRawSetting("A9_DEPLOY_TEAM_ROUND_RAW", PARAM_TEAM_ROUND);
+    val minStakeRaw = coinRawSetting("A9_DEPLOY_MIN_STAKE_RAW", PARAM_MIN_STAKE);
 
-    if (previewSeconds <= 0 || stakeSeconds <= 0 || candleSeconds <= 0 || candleCount <= 0 || observationSeconds <= 0) {
+    if (previewSeconds <= 0 || stakeSeconds <= 0 || candleSeconds <= 0 || candleCount <= 0) {
         Assert.fail("timing values must all be > 0");
     }
-    if (observationSeconds != candleSeconds * candleCount) {
-        Assert.fail("invalid timing: observationSeconds must equal candleSeconds * candleCount");
+    // observation window is derived in v10; an explicit override must agree with it
+    val observationSeconds = candleSeconds * candleCount;
+    val obsRaw = env<string>("A9_TIMING_OBSERVATION_SECONDS");
+    if (obsRaw != null) {
+        val obsEnv = parseEnvIntStrict(obsRaw!, "A9_TIMING_OBSERVATION_SECONDS");
+        if (obsEnv != observationSeconds) {
+            Assert.fail(
+                format(
+                    "A9_TIMING_OBSERVATION_SECONDS={} must equal candleSeconds*candleCount={} (observation is derived in v10)",
+                    obsEnv,
+                    observationSeconds,
+                ),
+            );
+        }
     }
     if (minQualified > candleCount || minQualified * 2 <= candleCount) {
         Assert.fail("invalid timing: minQualified must be <= candleCount and > candleCount/2");
@@ -236,66 +254,75 @@ fun main() {
         candleCount, intSource("A9_TIMING_CANDLE_COUNT"),
     );
     println(
-        "Timing: minQ={} [{}] obs={} [{}]",
+        "Timing: minQ={} [{}] observation={} (candleSeconds*candleCount)",
         minQualified, intSource("A9_TIMING_MIN_QUALIFIED"),
-        observationSeconds, intSource("A9_TIMING_OBSERVATION_SECONDS"),
+        observationSeconds,
     );
+
     val deployer = scripts.wallet("deployer");
     val admin = scripts.wallet("admin");
-    val teamWallet = scripts.wallet("team-wallet");
+    // keeper / team default to the deployer wallet; team wallet must be explicit on a real network
+    val keeper = env<address>("A9_KEEPER_ADDRESS") ?? deployer.address;
+    val teamEnv = env<address>("A9_TEAM_WALLET_ADDRESS");
+    if (teamEnv == null && net.isBroadcasting()) {
+        Assert.fail("A9_TEAM_WALLET_ADDRESS must be set when broadcasting with --net");
+    }
+    val teamWallet = teamEnv ?? deployer.address;
 
     println("A9 deploy params:");
     println("  totalSupplyRaw     = {}", PARAM_TOTAL_SUPPLY);
+    println("  keeper             = {} [{}]", keeper, env<address>("A9_KEEPER_ADDRESS") == null ? "default: deployer" : "env");
+    println("  teamWallet         = {} [{}]", teamWallet, teamEnv == null ? "default: deployer" : "env");
     println("  p0UsdE8            = {}", PARAM_P0);
     println("  priceMultiplier    = 2");
     println("  roundRewardRaw     = {} [{}]", roundRewardRaw, intSource("A9_DEPLOY_ROUND_REWARD_RAW"));
     println("  teamRoundRaw       = {} [{}]", teamRoundRaw, intSource("A9_DEPLOY_TEAM_ROUND_RAW"));
-    println("  minStakeRaw        = {}", PARAM_MIN_STAKE);
+    println("  minStakeRaw        = {} [{}]", minStakeRaw, intSource("A9_DEPLOY_MIN_STAKE_RAW"));
+    println("  maxStakePerAddress = {}", PARAM_MAX_PER_ADDRESS);
     println("  maxTotalStakeRaw   = {}", PARAM_MAX_TOTAL_STAKE);
 
-    // Resume mode (env): reuse an already-deployed JettonMaster and only deploy
-    // OracleAdapter + TeamVault + RoundController + wiring. Never deploy/mint again.
+    // Resume mode (env): reuse an already-deployed JettonMaster; never deploy/mint again.
     val resumeMaster = env<address>("A9_RESUME_JETTON_MASTER_ADDRESS");
     var masterAddress: address;
     if (resumeMaster == null) {
-    // --- 1. JettonMaster ----------------------------------------------------
-    var metadata: OnchainMetadataReply = { contentDict: [] };
-    metadata.contentDict.set("uri".sha256(), "https://a9.lat/a9.json".prefixWith00());
-    val masterStorage = MasterStorage {
-        totalSupply: 0,
-        adminAddress: admin.address,
-        nextAdminAddress: null,
-        metadata: metadata.toCell(),
-    };
-    val masterInit = ContractState { code: build("JettonMaster"), data: masterStorage.toCell() };
-    masterAddress = AutoDeployAddress { stateInit: masterInit }.calculateAddress();
-    fs.writeString("deploy/jetton-master.addr", format("{}\n", masterAddress));
-    net.send(deployer.address, createMessage({
-        bounce: false,
-        value: masterTon,
-        dest: { stateInit: masterInit },
-        body: TopUpTons {},
-    })).waitForTrace();
-    println("JettonMaster deployed at {}", masterAddress);
+        // --- 1. JettonMaster ------------------------------------------------
+        var metadata: OnchainMetadataReply = { contentDict: [] };
+        metadata.contentDict.set("uri".sha256(), "https://a9.lat/a9.json".prefixWith00());
+        val masterStorage = MasterStorage {
+            totalSupply: 0,
+            adminAddress: admin.address,
+            nextAdminAddress: null,
+            metadata: metadata.toCell(),
+        };
+        val masterInit = ContractState { code: build("JettonMaster"), data: masterStorage.toCell() };
+        masterAddress = AutoDeployAddress { stateInit: masterInit }.calculateAddress();
+        fs.writeString("deploy/jetton-master.addr", format("{}\n", masterAddress));
+        net.send(deployer.address, createMessage({
+            bounce: false,
+            value: masterTon,
+            dest: { stateInit: masterInit },
+            body: TopUpTons {},
+        })).waitForTrace();
+        println("JettonMaster deployed at {}", masterAddress);
 
-    // --- 2. Mint 100 亿 exactly once (admin is cleared by the master) -------
-    val mintBody = beginCell()
-        .storeUint(0x00000015, 32) // MintOnce
-        .storeUint(0, 64)
-        .storeAddress(admin.address)
-        .storeCoins(mintForwardTon) // ton_amount forwarded to the new wallet
-        .storeCoins(PARAM_TOTAL_SUPPLY) // jetton_amount
-        .storeCoins(ton("0.5")) // total_ton_amount attached to mint
-        .storeUint(0, 1) // forward_payload: inline empty
-        .endCell();
-    net.send(admin.address, createMessage({
-        bounce: true,
-        value: mintTon,
-        dest: masterAddress,
-        body: mintBody,
-    })).waitForTrace();
-    println("JettonMaster minted 100e9 A9 to admin; mint is now permanently closed");
-    requireActive(masterAddress, "JettonMaster", build("JettonMaster"), masterTon);
+        // --- 2. Mint 100e9 exactly once (mint closes permanently) -----------
+        val mintBody = beginCell()
+            .storeUint(0x00000015, 32) // MintOnce
+            .storeUint(0, 64)
+            .storeAddress(admin.address)
+            .storeCoins(mintForwardTon) // ton_amount forwarded to the new wallet
+            .storeCoins(PARAM_TOTAL_SUPPLY) // jetton_amount
+            .storeCoins(ton("0.5")) // total_ton_amount attached to mint
+            .storeUint(0, 1) // forward_payload: inline empty
+            .endCell();
+        net.send(admin.address, createMessage({
+            bounce: true,
+            value: mintTon,
+            dest: masterAddress,
+            body: mintBody,
+        })).waitForTrace();
+        println("JettonMaster minted 100e9 A9 to admin; mint is now permanently closed");
+        requireActive(masterAddress, "JettonMaster", build("JettonMaster"), masterTon);
     } else {
         masterAddress = resumeMaster!;
         println("reusing JettonMaster at {}", masterAddress);
@@ -307,124 +334,42 @@ fun main() {
         }
     }
 
-    // --- 3. TeamVault -------------------------------------------------------
-    val tvStorage = TeamVaultStorage {
-        config: TeamVaultConfig {
-            admin: admin.address,
-            controller: null,
-            configVersion: 1,
-        },
-        params: TeamVaultParams {
-            // placeholder: wired with the real wallet after the master exists
-            jettonWallet: admin.address,
-            teamWallet: teamWallet.address,
-            jettonMaster: masterAddress,
-            teamRoundRaw,
-        }.toCell(),
-        extra: TeamVaultExtra { teamWalletJettonWallet: admin.address }.toCell(),
-        rounds: [],
-        pendingBurnIds: [],
-        totalReleasedRaw: 0,
-        totalBurnedRaw: 0,
-        releasedCount: 0,
-        burnedCount: 0,
-    };
-    // OracleAdapter (mainnet M-2): deploy first, then RC is configured with it as oracle.
-    val zeroTail = OracleSignersTail { s3: 0 as uint256, s4: 0 as uint256 }.toCell();
-    val zeroSigners = OracleSignersPacked {
-        s0: 0 as uint256,
-        s1: 0 as uint256,
-        s2: 0 as uint256,
-        threshold: 3,
-        tail: zeroTail,
-    }.toCell();
-    val adapterCfg = OracleAdapterConfig {
-        admin: admin.address,
-        controller: null,
-        chainId: 1,
-        configVersion: 1,
-        signers: zeroSigners,
-    };
-    val adapterStorage = OracleAdapterStorage {
-        config: adapterCfg.toCell(),
-        usedMask: [],
-        lastCandle: [],
-        pending: [],
-    };
-    val adapterInit = ContractState { code: build("OracleAdapter"), data: adapterStorage.toCell() };
-    val adapterAddress = AutoDeployAddress { stateInit: adapterInit }.calculateAddress();
-    fs.writeString("deploy/oracle-adapter.addr", format("{}\n", adapterAddress));
-    net.send(deployer.address, createMessage({
-        bounce: false,
-        value: adapterTon,
-        dest: { stateInit: adapterInit },
-        body: TopUpTons {},
-    })).waitForTrace();
-    requireActive(adapterAddress, "OracleAdapter", build("OracleAdapter"), adapterTon);
-    println("OracleAdapter deployed at {} (RC oracle will point here)", adapterAddress);
-
-    val tvInit = ContractState { code: build("TeamVault"), data: tvStorage.toCell() };
-    val tvAddress = AutoDeployAddress { stateInit: tvInit }.calculateAddress();
-    fs.writeString("deploy/team-vault.addr", format("{}\n", tvAddress));
-    net.send(deployer.address, createMessage({
-        bounce: false,
-        value: tvTon,
-        dest: { stateInit: tvInit },
-        body: TopUpTons {},
-    })).waitForTrace();
-    requireActive(tvAddress, "TeamVault", build("TeamVault"), tvTon);
-    println("TeamVault deployed at {}", tvAddress);
-
-    // --- 4. RoundController (with the real JettonMaster) --------------------
-    val econ = ProtocolEcon {
-        p0UsdE8: PARAM_P0,
-        priceMultiplier: 2,
-        roundRewardRaw,
-        teamRoundRaw,
-        minStakeRaw: PARAM_MIN_STAKE,
-        maxStakePerAddressBps: 1000,
-        maxTotalStakeRaw: PARAM_MAX_TOTAL_STAKE,
-    };
-    val timing = ProtocolTiming {
-        previewSeconds: previewSeconds as uint32,
-        stakeDurationSeconds: stakeSeconds as uint32,
-        candleSeconds: candleSeconds as uint32,
-        candleCount: candleCount as uint8,
-        minQualifiedCandles: minQualified as uint8,
-        observationSeconds: observationSeconds as uint32,
-        techAbortPauseSeconds: 1209600,
-        techAbortObsTimeoutSeconds: 604800,
-        riskDisclosureVersion: 1,
-        configVersion: 1,
-    };
+    // --- 3. RoundController (with the real JettonMaster; no wiring step) ----
     val cfg = ProtocolConfig {
         addresses: ProtocolAddresses {
-            admin: admin.address,
-            oracle: adapterAddress,
+            keeper,
             jettonMaster: masterAddress,
+            teamWallet,
         }.toCell(),
-        vaults: ProtocolVaults {
-            // placeholder: wired right below with the real wallet address
-            stakingJettonWallet: admin.address,
-            teamVault: tvAddress,
-            jettonWalletCode: build("JettonWallet"),
+        econ: ProtocolEcon {
+            p0UsdE8: PARAM_P0,
+            roundRewardRaw,
+            teamRoundRaw,
+            minStakeRaw,
+            maxStakePerAddressRaw: PARAM_MAX_PER_ADDRESS,
+            maxTotalStakeRaw: PARAM_MAX_TOTAL_STAKE,
         }.toCell(),
-        econ: econ.toCell(),
-        timing: timing.toCell(),
+        timing: ProtocolTiming {
+            previewSeconds: previewSeconds as uint32,
+            stakeDurationSeconds: stakeSeconds as uint32,
+            candleSeconds: candleSeconds as uint32,
+            candleCount: candleCount as uint8,
+            minQualifiedCandles: minQualified as uint8,
+            abortTimeoutSeconds: PARAM_ABORT_TIMEOUT,
+            riskDisclosureVersion: 1,
+            configVersion: 1,
+        }.toCell(),
+        jettonWalletCode: build("JettonWallet"),
     };
-    val rcStorage = Storage {
+    val rcData = Storage {
         config: cfg.toCell(),
-        extras: emptyExtras().toCell(),
         currentRoundId: 0,
         successCount: 0,
-        lastSettledAt: 0,
-        pausedAt: 0,
         rounds: [],
         stakes: [],
     };
-    val rcInit = ContractState { code: build("RoundController"), data: rcStorage.toCell() };
+    val rcInit = ContractState { code: build("RoundController"), data: rcData.toCell() };
     val rcAddress = AutoDeployAddress { stateInit: rcInit }.calculateAddress();
-    fs.writeString("deploy/round-controller.addr", format("{}\n", rcAddress));
     net.send(deployer.address, createMessage({
         bounce: false,
         value: rcTon,
@@ -433,130 +378,59 @@ fun main() {
     })).waitForTrace();
     requireActive(rcAddress, "RoundController", build("RoundController"), rcTon);
     println("RoundController deployed at {}", rcAddress);
-    // wire the adapter to this RC (one-time)
-    net.send(admin.address, createMessage({
-        bounce: true,
-        value: wiringTon,
-        dest: adapterAddress,
-        body: SetOracleController { controller: rcAddress },
-    })).waitForTrace();
-    val adapterCfgAfter = net.runGetMethod<OracleConfigView>(adapterAddress, "get_config");
-    if (adapterCfgAfter.controller == null || adapterCfgAfter.controller! != rcAddress) {
-        Assert.fail("OracleAdapter controller wiring failed");
-    }
-    println("OracleAdapter.SetOracleController -> RoundController");
 
-    // --- 5. Resolve + wire the real Jetton Wallet addresses ----------------
-    val rcJettonWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [rcAddress]);
-    val tvJettonWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [tvAddress]);
-    println("RC Jetton Wallet     = {}", rcJettonWallet);
-    println("TeamVault Jetton Wallet = {}", tvJettonWallet);
+    // --- 4. Verify RC jetton wallet derivation ------------------------------
+    val rcWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [rcAddress]);
+    val rcWalletOnChain = net.runGetMethod<address>(rcAddress, "get_jetton_wallet_address");
+    if (rcWalletOnChain != rcWallet) {
+        Assert.fail(
+            format(
+                "RC.get_jetton_wallet_address={} does not match master.get_wallet_address(RC)={}",
+                rcWalletOnChain,
+                rcWallet,
+            ),
+        );
+    }
+    fs.writeString("deploy/round-controller.addr", format("{}\n", rcAddress));
+    println("RC Jetton Wallet     = {}", rcWallet);
 
+    // --- 5. Fund RC: 10 rounds of reward + 10 rounds of team quota ----------
+    val adminWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [admin.address]);
+    val adminBalance = net.runGetMethod<JettonWalletDataReply>(adminWallet, "get_wallet_data").jettonBalance;
+    val rcFundRaw = (roundRewardRaw * 10 + teamRoundRaw * 10) as coins;
+    if (adminBalance < rcFundRaw) {
+        Assert.fail(format("admin A9 balance {} insufficient for RC funding {}", adminBalance, rcFundRaw));
+    }
+    // forward_ton_amount = 0: RC receives no transfer_notification (it would be treated as a deposit)
     net.send(admin.address, createMessage({
         bounce: true,
-        value: wiringTon,
-        dest: rcAddress,
-        body: SetJettonWallet { wallet: rcJettonWallet },
+        value: fundTon,
+        dest: adminWallet,
+        body: AskToTransferMsg {
+            queryId: 1,
+            jettonAmount: rcFundRaw,
+            transferRecipient: rcAddress,
+            sendExcessesTo: admin.address,
+            customPayload: null,
+            forwardTonAmount: 0,
+            forwardPayload: beginCell().storeUint(0, 1).toSlice(),
+        },
     })).waitForTrace();
-    net.send(admin.address, createMessage({
-        bounce: true,
-        value: wiringTon,
-        dest: rcAddress,
-        body: SetJettonWalletCode { code: build("JettonWallet") },
-    })).waitForTrace();
-    net.send(admin.address, createMessage({
-        bounce: true,
-        value: wiringTon,
-        dest: tvAddress,
-        body: SetJettonWallet { wallet: tvJettonWallet },
-    })).waitForTrace();
-    val teamWalletJettonWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [teamWallet.address]);
-    net.send(admin.address, createMessage({
-        bounce: true,
-        value: wiringTon,
-        dest: tvAddress,
-        body: SetTeamWalletJettonWallet { wallet: teamWalletJettonWallet },
-    })).waitForTrace();
-    val rcCfg = net.runGetMethod<ProtocolConfigView>(rcAddress, "get_protocol_config");
-    if (rcCfg.stakingJettonWallet != rcJettonWallet) {
-        Assert.fail("RC SetJettonWallet wiring failed");
+    val rcBalance = net.runGetMethod<JettonWalletDataReply>(rcWallet, "get_wallet_data").jettonBalance;
+    if (rcBalance != rcFundRaw) {
+        Assert.fail(format("RC jetton balance {} != expected funding {}", rcBalance, rcFundRaw));
     }
-    val codeHash = net.runGetMethod<uint256>(rcAddress, "get_jetton_wallet_code_hash");
-    if (codeHash != build("JettonWallet").hash()) {
-        Assert.fail("RC SetJettonWalletCode wiring failed (code hash mismatch)");
-    }
-    println("SetJettonWallet + SetJettonWalletCode wired on RoundController");
-    val tvState = net.runGetMethod<TeamVaultState>(tvAddress, "get_team_vault_state");
-    if (tvState.jettonWallet != tvJettonWallet) {
-        Assert.fail("TeamVault SetJettonWallet wiring failed");
-    }
-    val tvTeamWallet = net.runGetMethod<address>(tvAddress, "get_team_wallet_jetton_wallet");
-    if (tvTeamWallet != teamWalletJettonWallet) {
-        Assert.fail("TeamVault SetTeamWalletJettonWallet wiring failed");
-    }
-    println("SetJettonWallet + SetTeamWalletJettonWallet wired on TeamVault");
+    println("Funded RC Jetton Wallet with {} raw A9 (balance verified = {})", rcFundRaw, rcBalance);
 
-    // --- 6. TeamVault controller (one-time) ---------------------------------
-    net.send(admin.address, createMessage({
-        bounce: true,
-        value: wiringTon,
-        dest: tvAddress,
-        body: InitController { controller: rcAddress },
-    })).waitForTrace();
-    val tvCfg = net.runGetMethod<TeamVaultConfig>(tvAddress, "get_config");
-    if (tvCfg.controller == null || tvCfg.controller! != rcAddress) {
-        Assert.fail("TeamVault.InitController wiring failed");
-    }
-    println("TeamVault.InitController -> {}", rcAddress);
-
-    // --- 8. Fund the protocol Jetton wallets (fresh full deploy only) --------
-    if (resumeMaster == null) {
-        val adminWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [admin.address]);
-        val adminWalletData = net.runGetMethod<JettonWalletDataReply>(adminWallet, "get_wallet_data");
-        val rcFundRaw: uint128 = PARAM_ROUND_REWARD * 10; // 10 rounds of 700M A9
-        val tvFundRaw: uint128 = PARAM_TEAM_ROUND * 10;   // 10 rounds of 120M A9
-        if (adminWalletData.jettonBalance < (rcFundRaw + tvFundRaw) as coins) {
-            Assert.fail("admin A9 balance insufficient for protocol funding");
-        }
-        net.send(admin.address, createMessage({
-            bounce: true,
-            value: fundTon,
-            dest: adminWallet,
-            body: AskToTransfer {
-                queryId: 1,
-                jettonAmount: rcFundRaw as coins,
-                transferRecipient: rcAddress,
-                sendExcessesTo: null,
-                customPayload: null,
-                forwardTonAmount: 0,
-                forwardPayload: beginCell().storeUint(0, 1).toSlice(),
-            },
-        })).waitForTrace();
-        net.send(admin.address, createMessage({
-            bounce: true,
-            value: fundTon,
-            dest: adminWallet,
-            body: AskToTransfer {
-                queryId: 2,
-                jettonAmount: tvFundRaw as coins,
-                transferRecipient: tvAddress,
-                sendExcessesTo: null,
-                customPayload: null,
-                forwardTonAmount: 0,
-                forwardPayload: beginCell().storeUint(0, 1).toSlice(),
-            },
-        })).waitForTrace();
-        val rcWalletData = net.runGetMethod<JettonWalletDataReply>(rcJettonWallet, "get_wallet_data");
-        val tvWalletData = net.runGetMethod<JettonWalletDataReply>(tvJettonWallet, "get_wallet_data");
-        if (rcWalletData.jettonBalance != rcFundRaw as coins || tvWalletData.jettonBalance != tvFundRaw as coins) {
-            Assert.fail("protocol Jetton wallet funding verification failed");
-        }
-        println("Funded RC Jetton Wallet with {} raw A9, TV Jetton Wallet with {} raw A9", rcFundRaw, tvFundRaw);
-    } else {
-        println("resume mode: skipping A9 funding (existing master is assumed already funded)");
-    }
-
-    println("Deploy complete: contracts + wiring + A9 funding are on-chain.");
-    println("TODO (ops): seed extra TON gas balances if needed (RC >= 20 TON, TV >= 10 TON).");
-    println("admin wallet now holds the 100e9 A9 supply (mint closed).");
+    // --- Summary ------------------------------------------------------------
+    println("");
+    println("=== A9 v10 deploy summary ===");
+    println("  JettonMaster       = {}", masterAddress);
+    println("  RoundController    = {}", rcAddress);
+    println("  RC jetton wallet   = {}", rcWallet);
+    println("  RC funded balance  = {} raw A9", rcBalance);
+    println("  keeper             = {}", keeper);
+    println("  teamWallet         = {}", teamWallet);
+    println("  address files      = deploy/jetton-master.addr, deploy/round-controller.addr");
+    println("TODO (ops): seed extra TON gas balance on RC if needed (RC >= 20 TON recommended).");
 }
