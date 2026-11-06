@@ -26,11 +26,33 @@ export function resolvePath(input, base = BAM_ROOT) {
   return isAbsolute(input) ? input : resolve(base, input);
 }
 
+export function networkName(params) {
+  const p = params || loadParams();
+  const declared = p.network && typeof p.network === 'object'
+    ? (p.network.net || (Number(p.network.chainId) === -239 ? 'mainnet' : 'testnet'))
+    : (p.net || 'testnet');
+  return process.env.OPS_NETWORK || declared || 'testnet';
+}
+
 export function loadParams(path = process.env.OPS_PARAMS || DEFAULT_PARAMS) {
   const file = resolvePath(path, BAM_ROOT) || DEFAULT_PARAMS;
   if (!existsSync(file)) throw new Error('参数文件不存在：' + file);
   const params = readJSON(file);
   params.__file = file;
+  const declared = params.network && typeof params.network === 'object'
+    ? (params.network.net || (Number(params.network.chainId) === -239 ? 'mainnet' : 'testnet'))
+    : (params.net || 'testnet');
+  params.__net = networkName(params);
+  // Network fuse: an explicit OPS_NETWORK must match the params file declaration.
+  const explicit = process.env.OPS_NETWORK;
+  if (process.env.OPS_EXECUTE === '1' && explicit && explicit !== declared) {
+    throw new Error('网络保险丝：OPS_NETWORK=' + explicit + ' 与参数文件声明 network=' + declared + ' 不一致，拒绝执行');
+  }
+  // Mainnet extra confirmation. Address format alone cannot identify a network
+  // (TON friendly address is network-agnostic), so the params declaration is the source of truth.
+  if (process.env.OPS_EXECUTE === '1' && params.__net === 'mainnet' && process.env.OPS_CONFIRM_MAINNET !== 'YES') {
+    throw new Error('网络保险丝：mainnet 执行需要 OPS_CONFIRM_MAINNET=YES，且必须使用 mainnet.params.json');
+  }
   return params;
 }
 

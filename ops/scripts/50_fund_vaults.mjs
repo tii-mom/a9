@@ -94,7 +94,7 @@ if (!execute) {
   detail('真实执行时：先用 TON Center v3 / jetton master get_wallet_address 解析每个 owner 的 Jetton Wallet 地址，');
   detail('再把 signer 钱包中的 A9 按上表逐笔转入对应 Jetton Wallet；每笔记录 funding 并核对余额。');
   detail('注意：TEP-74 转账目标是「接收者的 Jetton Wallet 地址」，不是 owner 合约/钱包地址。');
-  detail('执行开关：OPS_EXECUTE=1 + OPS_CONFIRM=YES；真实网络由脚本模板自动带 --net testnet。');
+  detail('执行开关：OPS_EXECUTE=1 + OPS_CONFIRM=YES；真实网络由参数文件 network.net / OPS_NETWORK 决定（testnet 或 mainnet），脚本模板不再硬编码。');
   printNextSteps(['下一步：node scripts/60_verify_and_register.mjs（登记表定稿 + 地址簿）']);
   process.exit(finish({ 模式: 'DRY-RUN', 计划笔数: plan.length, 合计raw: totalRaw.toString() }));
 }

@@ -10,7 +10,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { flag } from './lib/cli.mjs';
-import { resolvePath } from './lib/config.mjs';
+import { networkName, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveAddress, resolveContractAddress, resolveWalletAddress, signerWallet } from './lib/step.mjs';
 import { setContract, writeRegistry } from './lib/registry.mjs';
 import { addressEquals, findJettonWallet } from './lib/ton.mjs';
@@ -86,7 +86,7 @@ let teamWalletWallet = existingTeam;
 if (execute) {
   const resolveViaActon = (owner) => {
     const scriptPath = resolvePath('ops/scripts/tolk/query_one_wallet.tolk');
-    const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton script --manifest-path Acton.toml --net testnet ' + scriptPath + ' ' + jettonMaster + ' ' + owner;
+    const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + scriptPath + ' ' + jettonMaster + ' ' + owner;
     const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
     const match = String(result.stdout || '').match(/JETTON_WALLET=(\S+)/);
     return match ? match[1] : null;

@@ -38,7 +38,10 @@ export function commandTemplate(params, commandName) {
   if (!template) {
     throw new Error('适配器 ' + name + ' 未定义命令模板：' + commandName);
   }
-  return template;
+  // Single network source: params.network.net (or OPS_NETWORK). Keep the
+  // templates' historical --net testnet text but never let it leak to mainnet.
+  const net = (params && params.__net) || (process.env.OPS_NETWORK || (params && params.network && params.network.net) || 'testnet');
+  return String(template).split('--net testnet').join('--net ' + net).split('{net}').join(net);
 }
 
 /** 使用 {name} 占位符替换（split/join，避免正则与 shell 展开）。 */

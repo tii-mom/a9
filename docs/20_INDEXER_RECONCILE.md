@@ -330,3 +330,34 @@ TV 应持有 = TV 初始注资
 - 该实例仍在跑轮次，**对账以报告头部的「快照时间（UTC）」为准**；进行中轮次只校验已解析 K 线的连续性，终态轮次才做不可变哈希比对。
 - 结果见 §C-5（每次重跑以当次输出为准）。
 
+
+### C-5 v8.8 回归实例对账结果（本次快照）
+
+**命令**（`--balances` 为 v8.8 口径开关；实例地址显式传入，因 `regress-v88.registry.json` 在本任务执行期间被重置为未部署模板）：
+
+```bash
+node worker/src/indexer/tools/chain-reconcile.mjs --network testnet --balances \
+  --rc kQAIVoxXHrWkiH88k9yq_DPKiJR8-IfIf2BdeoocUsgGJs6F \
+  --tv kQBwpAyxSG23IAnfem0-OFqf-b-kH7_fv4rt6UsjpJSrO_7A \
+  --jm kQAwyGvhZ2IxD6nktU-d2jyvZ9rJkwbFfoS6h5OcA_xijh-u
+```
+
+**快照**：`2026-11-06T09:38:27.758Z`（UTC）；链上 `currentRound=1`，R1 `status=6 (SETTLING_SUCCESS)`；configHash `sha256:f4f6b5ade3c256527e982c79ac8f5f1efcda27483904e70d41a77cdacca5a93f`。
+
+| 项 | 链上 / 计算 | 备注 |
+| --- | --- | --- |
+| **DIFFS** | **0** | CLI 退出码 0 ✅ |
+| RC 初始注资（首笔 internal_transfer） | 7,000,000,000 A9 | 非写死，自动检测 |
+| Σ DepositAccepted（轮次内） | 100,000 A9 | 9 次质押中 1 次被接受 |
+| round-0 退款账本净留存（被拒 900,000 − 已退 800,000） | 100,000 A9 | 已计入 RC 预期（C-2） |
+| 技术终止不可用余额 | 0（N_aborted=0） | RC/TV 各 0；脚本已支持 N>0 场景 |
+| **RC 应持有 vs 实际** | 7,000,200,000 vs 7,000,200,000 | **Δ=0 raw** |
+| TV 初始注资 | 1,200,000,000 A9 | 自动检测 |
+| **TV 应持有 vs 实际** | 1,200,000,000 vs 1,080,000,000 | Δ=−120,000,000 = 1×teamRoundRaw：R1 处于 SETTLING，团队转账已出 TV 钱包、ack 未落账 → **在途，不计异常**（NOTE） |
+| 持币者合计 vs totalSupply | 10,000,000,000 vs 10,000,000,000 | Δ=0 raw（7 个钱包） |
+| totalSupply + burned vs 1e19 | 10,000,000,000 + 0 | Δ=0 raw（尚无销毁） |
+
+**说明**：该实例仍在运行，团队释放/结算 ack 存在秒级在途窗口；CLI 对「Δ 恰为 k × teamRoundRaw 且存在 SETTLING 轮次」明确标注在途，其余任何差额都会判 DIFF 并 exit 1。终态轮次（status 8/9/10）仍强制哈希/根数不可变校验。
+
+**待补**：技术终止（N_aborted>0）场景尚无实例证据（本实例与 v8.6 均未触发 TECHNICAL_ABORTED）；脚本逻辑已实现（N×7亿 / N×1.2亿 单列 + 终止轮标志必须全 false），下次回归出现终止轮即可验证。
+

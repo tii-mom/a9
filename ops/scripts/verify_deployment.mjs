@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flag } from './lib/cli.mjs';
-import { RECORDS_DIR, asBigInt, formatTokens, resolvePath } from './lib/config.mjs';
+import { RECORDS_DIR, asBigInt, formatTokens, networkName, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress, resolveWalletAddress } from './lib/step.mjs';
 import { addressEquals, addressFromStackItem, findJettonWallet, getAddressInformation, getJettonData, getJettonMasterMetadata, getTonBalance, parseAddress, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { expectedProtocolConfig } from './lib/verify.mjs';
@@ -65,7 +65,7 @@ function hexFromCodeHashField(info) {
 }
 
 function codeHashViaActon(address) {
-  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton rpc info ' + address + ' --net testnet';
+  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton rpc info ' + address + ' --net ' + networkName();
   const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
   const match = String(result.stdout || '').match(/Code Hash:\s+0x([0-9a-fA-F]{64})/);
   return match ? match[1].toLowerCase() : null;
@@ -73,7 +73,7 @@ function codeHashViaActon(address) {
 
 function canonicalViaActon(masterAddress, ownerAddress) {
   const scriptPath = resolvePath('ops/scripts/tolk/query_one_wallet.tolk');
-  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton script --manifest-path Acton.toml --net testnet ' + scriptPath + ' ' + masterAddress + ' ' + ownerAddress;
+  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + scriptPath + ' ' + masterAddress + ' ' + ownerAddress;
   const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
   const match = String(result.stdout || '').match(/JETTON_WALLET=(\S+)/);
   return match ? match[1] : null;

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { str } from './lib/cli.mjs';
-import { BAM_ROOT, RECORDS_DIR, resolvePath } from './lib/config.mjs';
+import { BAM_ROOT, RECORDS_DIR, networkName, resolvePath } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveContractAddress } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { setContract, writeRegistry } from './lib/registry.mjs';
@@ -101,7 +101,7 @@ function loadBuildHash(contractName) {
 }
 
 function codeHashViaActon(address) {
-  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton rpc info ' + address + ' --net testnet';
+  const command = 'export PATH=$HOME/.acton/bin:$PATH; cd ' + params.toolchain.contractsDir + ' && acton rpc info ' + address + ' --net ' + networkName();
   const result = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
   const match = String(result.stdout || '').match(/Code Hash:\s+0x([0-9a-fA-F]{64})/);
   return match ? match[1].toLowerCase() : null;

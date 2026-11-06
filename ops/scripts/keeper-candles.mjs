@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
 import { flag, parseArgs, str } from './lib/cli.mjs';
-import { RECORDS_DIR, asBigInt, loadParams, resolvePath } from './lib/config.mjs';
+import { RECORDS_DIR, asBigInt, loadParams, networkName, resolvePath } from './lib/config.mjs';
 import { runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 
 const args = parseArgs(process.argv.slice(2));
@@ -88,7 +88,7 @@ async function execWithRetry(base, label, env) {
 
 async function runAdmin(op, extraArgs = [], envExtra = {}, label) {
   const script = resolvePath('ops/scripts/tolk/fast_admin.tolk');
-  const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' acton script --manifest-path Acton.toml --net testnet ' + script + ' ' + op + ' ' + extraArgs.join(' ');
+  const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + script + ' ' + op + ' ' + extraArgs.join(' ');
   if (!execute) { log({ action: label, dryRun: true, command: base }); return true; }
   const { ok, result } = await execWithRetry(base, label, { ...process.env, ...envExtra });
   const tx = String(result.stdout || '').split(String.fromCharCode(10)).filter((l) => l.includes('tx[')).join(' | ');
@@ -101,7 +101,7 @@ function digestFor(roundId, index, twap) { return createHash('sha256').update(ro
 
 async function runCandle(roundId, index, periodStart, periodEnd, twap) {
   const script = resolvePath('ops/scripts/tolk/fast_candle.tolk');
-  const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' A9_PERIOD_START=' + periodStart + ' A9_PERIOD_END=' + periodEnd + ' A9_TWAP_E8=' + twap + ' acton script --manifest-path Acton.toml --net testnet ' + script + ' ' + roundId + ' ' + index;
+  const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' A9_PERIOD_START=' + periodStart + ' A9_PERIOD_END=' + periodEnd + ' A9_TWAP_E8=' + twap + ' acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + script + ' ' + roundId + ' ' + index;
   if (!execute) { log({ action: 'candle', dryRun: true, command: base }); return; }
   // Do not throw on broadcast failure: wallet-level rejections (seqno race /
   // external not accepted) are retryable infra errors, not contract errors.

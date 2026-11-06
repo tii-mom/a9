@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { flag, parseArgs, str } from './lib/cli.mjs';
-import { BAM_ROOT, RECORDS_DIR, loadParams, resolvePath } from './lib/config.mjs';
+import { BAM_ROOT, RECORDS_DIR, loadParams, networkName, resolvePath } from './lib/config.mjs';
 import { runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 
 const args = parseArgs(process.argv.slice(2));
@@ -39,7 +39,7 @@ function classify(text) {
   return 'CONTRACT';
 }
 async function runUser(key, cmd, a = 0, b = 0, c = 0, addr) {
-  const command = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + users[key].wallet + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' JETTON_MASTER_ADDRESS=' + master + ' acton script --manifest-path Acton.toml --net testnet ' + script + ' ' + cmd + ' ' + a + ' ' + b + ' ' + c + ' ' + (addr || users[key].address);
+  const command = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + users[key].wallet + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' JETTON_MASTER_ADDRESS=' + master + ' acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + script + ' ' + cmd + ' ' + a + ' ' + b + ' ' + c + ' ' + (addr || users[key].address);
   if (!execute) { log({ dryRun: true, key, cmd, command }); return { ok: true, stdout: '' }; }
   const delays = [1000, 2000, 4000, 8000, 16000];
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -70,14 +70,14 @@ async function walletA9(address) {
 }
 async function queryUser(cmd, owner, roundId) {
   const qs = resolvePath('ops/scripts/tolk/query_user.tolk');
-  const command = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && ROUND_CONTROLLER_ADDRESS=' + rc + ' acton script --manifest-path Acton.toml --net testnet ' + qs + ' ' + cmd + ' ' + owner + ' ' + roundId;
+  const command = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && ROUND_CONTROLLER_ADDRESS=' + rc + ' acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + qs + ' ' + cmd + ' ' + owner + ' ' + roundId;
   const r = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 120000 });
   return String(r.stdout || '') + String(r.stderr || '');
 }
 async function userWalletAddress(owner) {
   // derive via Acton query script for reliability
   const s = resolvePath('ops/scripts/tolk/query_one_wallet.tolk');
-  const command = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && acton script --manifest-path Acton.toml --net testnet ' + s + ' ' + master + ' ' + owner;
+  const command = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + s + ' ' + master + ' ' + owner;
   const r = spawnSync('bash', ['-lc', command], { encoding: 'utf8', timeout: 60000 });
   const m = String(r.stdout || '').match(/JETTON_WALLET=(\S+)/); return m ? m[1] : null;
 }
