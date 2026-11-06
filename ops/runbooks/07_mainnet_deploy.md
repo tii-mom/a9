@@ -8,7 +8,7 @@
 
 1. 冻结 v8.6 tag，核对 5 个 build code hash（见 §3.1）。
 2. 新建主网 D1 库，只 apply 0001–0009 迁移，**绝不执行 seed.sql**。
-3. 生成全新主网密钥（**严禁复用测试网密钥**），完成离线备份；admin 采用多签或书面接受单钥风险（TODO：lead 决定，见 §10）。
+3. 生成全新主网密钥（**严禁复用测试网密钥**），完成离线备份；**admin = 单一冷钱包（D-36 已定案，方案 B）**，见 §3.3 的强制要求。
 4. 全新部署 JettonMaster → RC/TV/OracleAdapter → wiring → 注资 70 亿/12 亿/8 亿/5 亿/5 亿。
 5. verify_deployment **STRICT 全 PASS** 后才允许开 R1（默认即是 STRICT；--lenient 输出不得作为上线依据）。
 6. 部署 Worker（chain 模式、真实地址、关闭 demo 写接口）→ health/version/rounds 验证。
@@ -23,7 +23,7 @@
 | 3 | 测试网权威 10 轮验收通过 | ops/records/fasttest-v86-rounds.md，含 C-1、R10 解锁、总量守恒 | testnet-ops |
 | 4 | 索引器对账 diff=0 | `node worker/src/indexer/tools/chain-reconcile.mjs --network testnet --rc <addr> --tv <addr> --jm <addr>`，diff 计数必须为 0（任何 getter 失败 CLI 直接 exit 1） | testnet-ops |
 | 5 | verify_deployment STRICT 全 PASS（测试网实例） | node ops/scripts/verify_deployment.mjs --online，严格模式 ON、requiredFail=0 | testnet-ops |
-| 6 | 主网 admin 方案已定 | 多签地址已生成，或书面接受单钥风险 | lead + 项目方 |
+| 6 | 主网 admin 方案已定 | **D-36：方案 B 单一冷钱包**；硬件钱包地址已生成、助记词离线备份、双人核对；风险已书面接受 | lead + 项目方 |
 | 7 | TONCENTER_API_KEY 已申请 | 主网 key 写入 secret，1 RPS 限制解除 | lead |
 | 8 | 演示数据不会进主网 D1 | CI guard 已生效（migrations 只允许 NNNN_*.sql） | app-dev |
 | 9 | 域名/证书可用 | a9.lat / www.a9.lat DNS 指向 Cloudflare，证书 Active | 项目方 |
@@ -90,10 +90,26 @@ node -e "for (const n of ['JettonMaster','JettonWallet','TeamVault','RoundContro
 - 备份：助记词离线纸质/金属，分地点保存；密码管理器只存地址与标签，不存助记词。
 - 记录：写入 ops/records/mainnet-addresses.md（**不提交私钥**），包含角色、地址、生成日期、备份位置编号。
 
-### 3.3 admin 方案（TODO：lead 决定）
-- 方案 A：TON Multisig v2（2-of-3/3-of-5）作为 RC/TV/OA admin；wiring 与资金注入打包成多签交易。
-- 方案 B：单一冷钱包 admin + 书面接受单钥风险；必须额外做 §8 的止血预案。
-- 详见 runbooks/06_mainnet_admin.md；未拍板前不得部署主网合约（admin 写入不可逆）。
+### 3.3 admin 方案：**已定案 = 方案 B（单一冷钱包）**（D-36，2026-11-06）
+
+项目方明确选择 **B：单一冷钱包（硬件钱包离线保管）**，不做多签。**这是已书面记录的永久风险，部署前必须再确认一次**：
+
+| 风险 | 说明 | 是否有补救 |
+| --- | --- | --- |
+| RC / TeamVault admin 永久不可改 | 无 `SetAdmin` / `ChangeAdmin`，`InitController` 只写一次 | **无** |
+| TV admin 可改 `teamWalletJettonWallet` | 即重定向团队 12% 额度的收款地址 | **无** |
+| OA admin 可 `SetOracleAdmin` 换人 | 单钥泄露 = 可换掉全部 3/5 预言机签名人 = 伪造结果 | **无** |
+| 单密钥丢失 | 无法执行 admin 操作 | 仅依赖合约逃生舱（到期任何人可关窗、SETTLING_* 任何人可推、观察超时可技术中止） |
+| 单密钥泄露 | 可持续 grief（判断不构成直接盗币路径，但足以毁掉项目） | **无** |
+
+**因此本节强制要求：**
+1. admin 私钥必须生成在**硬件钱包**上，助记词离线抄写、异地存放 ≥2 份，**绝不进入任何联网设备、绝不复用测试网密钥**；
+2. admin 地址的生成过程需**双人在场**，生成后立刻离线核对地址（首尾各 6 字符 + CRC）；
+3. 部署完成后，`verify_deployment` 必须核对 `RC.get_protocol_config().admin` == 该冷钱包地址，且该地址在链上**从未发出过任何交易**（证明是全新冷钱包）；
+4. 主网上线后 admin 私钥**永久离线保存**，仅在需要执行 admin 操作时使用，每次使用后重新归零；
+5. 多签方案（Multisig v2，实测 7.5–9.5 人天、gas 可忽略）技术验证已完成，工具保留在 `ops/scripts/91_deploy_multisig.mjs` / `92_multisig_order.mjs`，**供未来版本升级时启用**（需重新部署合约）。
+
+详见 `runbooks/06_mainnet_admin.md`。
 
 ## 4. 合约部署（全新，禁止 resume）
 
@@ -262,7 +278,7 @@ RC 的 `OpenRound(roundId, twap24hUsdE8)` 会用该值锁定目标价：`target 
 
 | # | 事项 | 决策人 | 阻塞级别 |
 | --- | --- | --- | --- |
-| 1 | admin 方案（多签 A / 单钥 B / 混合 C） | lead + 项目方 | 阻塞合约部署 |
+| 1 | ~~admin 方案~~ **已定案 D-36 = B 单一冷钱包**（风险已书面接受） | 项目方 | 已解除 |
 | 2 | 主网参数**复核确认**（默认值见 docs/00 V7：P0=116000 USD_E8、roundReward=7e17 raw、teamRound=1.2e17 raw、minStake=1e13 raw、maxTotalStake=2e17 raw、maxStakePerAddressBps=1000、preview 12h / stake 36h / candle 1h×24 / minQualified 16 / observation 24h、riskDisclosureVersion=1、configVersion=1） | lead + 项目方 双人复核 | 阻塞 preflight |
 | 3 | 主网 TON 预算（部署、wiring、RC/TV gas、用户 gas 补贴） | lead | 阻塞部署 |
 | 4 | TONCENTER_API_KEY 申请/付费 RPC | 项目方 | 阻塞 Worker/keeper |
