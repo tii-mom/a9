@@ -61,6 +61,9 @@ fun onBouncedMessage(in: InMessageBounced) {
             dest: storage.ownerAddress,
             body: TransferBounced { queryId: bouncedQueryId },
         });
+        // SAFETY: reserveToncoinsOnBalance() above keeps storage + 0.015 TON; the rest
+        // is the bounce value that belongs to the owner. IGNORE_ERRORS keeps the
+        // balance rollback committed if the notice cannot be delivered.
         notice.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_IGNORE_ERRORS);
     }
 }
