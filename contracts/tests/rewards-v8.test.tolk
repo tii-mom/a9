@@ -651,3 +651,21 @@ get fun `test C-1 roll into an expired open round is rejected`() {
     expect(rcUserStake(f.rc, 2, alice.address).amountRaw).toEqual(0 as uint128);
     expect(rcRewardState(f.rc, alice.address, 1).state).toEqual(REWARD_STATE_PENDING);
 }
+
+
+// A9-F10: a roll below minStakeRaw must not be accepted (no streak farming).
+get fun `test F10 roll amount below minStakeRaw is rejected`() {
+    val f = setupProtocol();
+    val alice = testing.treasury("f10-alice");
+    openF(f, 0);
+    stakeAccount(f, 1, alice.address, 100000000000000 as coins, 1);
+    finishSuccess(f, 1, f.keeper.address, 16);
+    openNext(f);
+    // fill R2 to cap-1 so only 1 raw unit of room remains
+    stakeAccount(f, 2, alice.address, (MAX_PER_ADDR - 1) as coins, 1);
+    expect(rollReward(f.rc, alice.address, 1)).toHaveFailedTx<RollReward>({
+        from: alice.address, to: f.rc.address, exitCode: Errors.RollNotAvailable,
+    });
+    expect(rcUserStake(f.rc, 2, alice.address).amountRaw).toEqual((MAX_PER_ADDR - 1) as uint128);
+    expect(rcRewardState(f.rc, alice.address, 1).state).toEqual(REWARD_STATE_PENDING);
+}

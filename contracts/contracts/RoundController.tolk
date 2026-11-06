@@ -1595,8 +1595,9 @@ fun handleRollReward(sender: address, msg: RollReward) {
         rollAmount = roomTotal;
     }
     val excess: uint128 = reward - rollAmount;
-    // F-05: no room means no roll; keep PENDING (early claim / unlock rights intact).
+    // F-05/A9-F10: no room OR below minStakeRaw means no roll; keep PENDING.
     assert (rollAmount > 0) throw Errors.RollNotAvailable;
+    assert (rollAmount >= e.minStakeRaw) throw Errors.RollNotAvailable;
 
     pos.rewardState = REWARD_STATE_ROLLED;
     pos.rewardClaimed = true;
