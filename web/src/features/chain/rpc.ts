@@ -255,12 +255,10 @@ export interface UserActionMatch {
   roundId?: number | null;
   /** undefined/null = 不比较（快速重试时必须传本次 queryId） */
   queryId?: bigint | null;
-  /** 仅 SetReferrer：被邀请人 raw 地址 */
-  referrerRaw?: string | null;
 }
 
 /**
- * 统一 matcher：inSource + op + roundId + queryId (+ referrer)。
+ * 统一 matcher：inSource + op + roundId + queryId。
  * 不包含 aborted/exit_code 判断——waitForTransaction 会用 isSuccessfulTx 把「身份命中但执行失败」的 tx
  * 判为 stage='failed' 并带回 exit_code，供 UI 展示失败原因。
  */
@@ -271,16 +269,6 @@ export function matchesUserAction(tx: OnchainTx, expected: UserActionMatch): boo
   if (expected.roundId !== undefined && expected.roundId !== null && message.roundId !== expected.roundId) return false;
   if (expected.queryId !== undefined && expected.queryId !== null) {
     if (message.queryId === null || message.queryId !== expected.queryId) return false;
-  }
-  if (expected.referrerRaw !== undefined && expected.referrerRaw !== null) {
-    if (!message.referrer) return false;
-    let raw: string | null = null;
-    try {
-      raw = toRawAddress(message.referrer);
-    } catch {
-      raw = null;
-    }
-    if (raw !== expected.referrerRaw) return false;
   }
   return true;
 }
@@ -445,7 +433,7 @@ const refundLedgerCache = new Map<string, { at: number; view: RefundLedgerView }
 const REFUND_LEDGER_CACHE_MS = 15_000;
 
 /**
- * v8.7：读取退款账本可领金额（ClaimPrincipal{roundId:0}）。
+ * 读取退款账本可领金额（Claim{roundId:0}）。
  *
  * 走 toncenter runGetMethod: RC.get_user_stake(0, owner)。
  * **读取失败必须抛错**——「读不到」和「真的是 0」必须区分，UI 不得把 RPC 失败显示成 0。

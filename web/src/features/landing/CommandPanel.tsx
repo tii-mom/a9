@@ -11,6 +11,10 @@ import type { LandingWallet } from './wallet';
 import { formatCompactToken, intFmt, shortAddr, toRawUnits, tokenNum, usdNum } from './utils';
 import { BUY_ENTRY_OPEN } from './flags';
 import { LiveCountdown } from './LiveCountdown';
+import { DEFAULT_MIN_STAKE_TOKENS } from '../chain/protocol';
+
+/** v10：单笔最低 100,000 A9。 */
+const MIN_STAKE_A9 = Number(DEFAULT_MIN_STAKE_TOKENS);
 
 interface Props {
   cfg: ProtocolConfig | null;
@@ -75,7 +79,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
   const stakeVal = Math.max(0, Number(stakeAmount) || 0);
   const amountRaw = toRawUnits(stakeAmount, decimals);
 
-  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < 10000 || amountRaw === '0' || stakeVal + myStake > 20000000 || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || !burnAck || submitting || roundId === null;
+  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < MIN_STAKE_A9 || amountRaw === '0' || stakeVal + myStake > 20000000 || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || !burnAck || submitting || roundId === null;
   const stakeLabel = submitting
     ? copy.cmd.btnSubmitting
     : !stakeOpen
@@ -101,7 +105,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
       toast(copy.cmd.toastContractPending);
       return;
     }
-    if (!Number.isFinite(stakeVal) || stakeVal < 10000 || amountRaw === '0' || stakeVal + myStake > 20000000) {
+    if (!Number.isFinite(stakeVal) || stakeVal < MIN_STAKE_A9 || amountRaw === '0' || stakeVal + myStake > 20000000) {
       toast(copy.cmd.toastEnterAmount);
       return;
     }
@@ -376,11 +380,11 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
                 </div>
                 <div>
                   <dt>{copy.cmd.rewardEst}</dt>
-                  <dd className="ok">{lang === 'zh' ? '待权重与结算确认' : 'Pending weights and settlement'}</dd>
+                  <dd className="ok">{lang === 'zh' ? '按质押比例，结算后确认' : 'Pro rata to stake, confirmed at settlement'}</dd>
                 </div>
                 <div>
                   <dt>{copy.cmd.share}</dt>
-                  <dd>{lang === 'zh' ? '本金 × 连续参与加成 + 邀请权重' : 'Stake × streak multiplier + referral weight'}</dd>
+                  <dd>{lang === 'zh' ? '我的质押 / 本轮总质押' : 'My stake / round total stake'}</dd>
                 </div>
               </dl>
               <label className="risk" htmlFor="riskOk">
@@ -391,7 +395,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
                 <input id="burnOk" type="checkbox" checked={burnAck} onChange={(event) => setBurnAck(event.target.checked)} />
                 <span>{copy.cmd.burnText}</span>
               </label>
-              <p className="note">{lang === 'zh' ? '单笔最低 10,000 A9；单地址本轮最多 20,000,000 A9。成功奖励按最终权重分配，早领仅得 50%，其余进入解锁池。' : 'Minimum 10,000 A9; up to 20,000,000 A9 per address per round. Success rewards use final participation weights. Early claims pay 50%; the remainder enters the unlock pool.'}</p>
+              <p className="note">{lang === 'zh' ? '单笔最低 100,000 A9；单地址本轮最多 20,000,000 A9。成功后本金 + 奖励一次全额领取，奖励按质押比例分配。' : 'Minimum 100,000 A9; up to 20,000,000 A9 per address per round. On success, principal plus a pro-rata reward is claimed in full at once.'}</p>
               {!dataReady ? <p className="note" role="status">{lang === 'zh' ? '等待数据恢复后可提交' : 'Submission waits for fresh data'}</p> : null}
               {stakeVal > fuseBalance && wallet.connected ? <p className="note bad">{copy.cmd.toastInsufficientFuse}</p> : null}
               {realWallet ? (

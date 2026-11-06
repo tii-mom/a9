@@ -17,30 +17,17 @@ import { saveChainTx, type StoredChainTx } from './storage';
 import {
   prepareClaimRefundTransaction,
   prepareClaimTransaction,
-  prepareClaimUnlockedTransaction,
-  prepareRewardActionTransaction,
-  prepareSetReferrerTransaction,
   prepareStakeTransaction,
   validateClaim,
-  validateRewardAction,
   validateStake,
+  type ChainTxKind,
   type ClaimKind,
   type PreparedTx,
-  type RewardActionKind,
   type TonConnectTxRequest,
   type WalletContext,
 } from './transactions';
 
-export type ChainTxKind =
-  | 'stake'
-  | 'claimPrincipal'
-  | 'claimReward'
-  | 'claimAll'
-  | 'claimRewardEarly'
-  | 'rollReward'
-  | 'setReferrer'
-  | 'claimUnlocked'
-  | 'claimRefund';
+export type { ChainTxKind } from './transactions';
 
 export type ChainTxPhase =
   | 'idle'
@@ -107,7 +94,7 @@ interface RunContext {
   match: (tx: import('./rpc').OnchainTx) => boolean;
 }
 
-/** PreparedTx.meta.queryId（十进制字符串）→ bigint；'0'/空值表示该消息没有 queryId（如 SetReferrer）。 */
+/** PreparedTx.meta.queryId（十进制字符串）→ bigint；'0'/空值表示该消息没有 queryId（如质押）。 */
 function queryIdOf(prepared: PreparedTx): bigint | null {
   try {
     const text = String(prepared.meta.queryId ?? '').trim();
@@ -117,27 +104,12 @@ function queryIdOf(prepared: PreparedTx): bigint | null {
   }
 }
 
-export interface SubmitRewardActionParams {
-  kind: RewardActionKind;
-  roundId: number;
-}
-
-export interface SubmitReferrerParams {
-  referrer: string;
-}
-
 export interface UseChainTx {
   state: ChainTxState;
   busy: boolean;
   submitStake: (params: SubmitStakeParams) => Promise<ChainTxResult | null>;
   submitClaim: (params: SubmitClaimParams) => Promise<ChainTxResult | null>;
-  /** V8：早领 50% / 滚存 */
-  submitRewardAction: (params: SubmitRewardActionParams) => Promise<ChainTxResult | null>;
-  /** V8：首次质押前绑定邀请人（一次性） */
-  submitSetReferrer: (params: SubmitReferrerParams) => Promise<ChainTxResult | null>;
-  /** V8：R10 终态后领取解锁池 */
-  submitClaimUnlocked: () => Promise<ChainTxResult | null>;
-  /** v8.7：领取退款账本（ClaimPrincipal{roundId:0}） */
+  /** 领取退款账本（Claim{roundId:0}） */
   submitClaimRefund: () => Promise<ChainTxResult | null>;
   recheck: () => Promise<ChainTxResult | null>;
   reset: () => void;
@@ -145,13 +117,8 @@ export interface UseChainTx {
 
 const KIND_LABEL: Record<ChainTxKind, string> = {
   stake: '质押',
-  claimPrincipal: '领取本金',
-  claimReward: '领取奖励',
+  claim: '领取本金 + 奖励',
   claimAll: '合并领取',
-  claimRewardEarly: '早领 50%',
-  rollReward: '滚存奖励',
-  setReferrer: '绑定邀请人',
-  claimUnlocked: '领取解锁',
   claimRefund: '取回 A9',
 };
 
@@ -385,54 +352,6 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     [begin],
   );
 
-  const submitRewardAction = useCallback(
-    async (params: SubmitRewardActionParams) => {
-      const { chain, wallet } = optionsRef.current;
-      return begin(params.kind, { roundId: params.roundId }, async () => {
-        validateRewardAction({ chain, wallet });
-        const prepared = prepareRewardActionTransaction({
-          chain,
-          wallet,
-          kind: params.kind,
-          roundId: params.roundId,
-        });
-        const expectedOp = prepared.meta.opcode;
-        const expectedRound = params.roundId;
-        const userRaw = toRawAddress(parseTonAddress(wallet.address));
-        const match = (tx: import('./rpc').OnchainTx): boolean =>
-          matchesUserAction(tx, {
-            sourceRaw: userRaw,
-            op: expectedOp,
-            roundId: expectedRound,
-            queryId: queryIdOf(prepared),
-          });
-        return { kind: params.kind, prepared, match } satisfies RunContext;
-      });
-    },
-    [begin],
-  );
-
-  const submitSetReferrer = useCallback(
-    async (params: SubmitReferrerParams) => {
-      const { chain, wallet } = optionsRef.current;
-      return begin('setReferrer', {}, async () => {
-        validateRewardAction({ chain, wallet });
-        const prepared = prepareSetReferrerTransaction({ chain, wallet, referrer: params.referrer });
-        const userRaw = toRawAddress(parseTonAddress(wallet.address));
-        const referrerRaw = prepared.meta.referrer;
-        const match = (tx: import('./rpc').OnchainTx): boolean =>
-          matchesUserAction(tx, {
-            sourceRaw: userRaw,
-            op: prepared.meta.opcode,
-            // SetReferrer payload 本身没有 queryId，用 referrer 地址区分身份
-            referrerRaw,
-          });
-        return { kind: 'setReferrer', prepared, match } satisfies RunContext;
-      });
-    },
-    [begin],
-  );
-
   const submitClaimRefund = useCallback(async () => {
     const { chain, wallet } = optionsRef.current;
     return begin('claimRefund', { roundId: REFUND_ROUND_ID }, async () => {
@@ -448,22 +367,6 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
           queryId: queryIdOf(prepared),
         });
       return { kind: 'claimRefund', prepared, match } satisfies RunContext;
-    });
-  }, [begin]);
-
-  const submitClaimUnlocked = useCallback(async () => {
-    const { chain, wallet } = optionsRef.current;
-    return begin('claimUnlocked', {}, async () => {
-      validateRewardAction({ chain, wallet });
-      const prepared = prepareClaimUnlockedTransaction({ chain, wallet });
-      const userRaw = toRawAddress(parseTonAddress(wallet.address));
-      const match = (tx: import('./rpc').OnchainTx): boolean =>
-        matchesUserAction(tx, {
-          sourceRaw: userRaw,
-          op: prepared.meta.opcode,
-          queryId: queryIdOf(prepared),
-        });
-      return { kind: 'claimUnlocked', prepared, match } satisfies RunContext;
     });
   }, [begin]);
 
@@ -489,9 +392,6 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     busy,
     submitStake,
     submitClaim,
-    submitRewardAction,
-    submitSetReferrer,
-    submitClaimUnlocked,
     submitClaimRefund,
     recheck,
     reset,

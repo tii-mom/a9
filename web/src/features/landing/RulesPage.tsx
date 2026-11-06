@@ -25,7 +25,7 @@ export default function RulesPage() {
         <header className="wrap rules-head">
           <Link className="rules-back" to="/">{zh ? '← 返回战场' : '← Back to the battlefield'}</Link>
           <h1>{zh ? '规则与风险' : 'Rules and risk'}</h1>
-          <p>{zh ? '规则写进合约。管理员不能修改已开始轮次的目标价、K 线阈值和预言机配置。' : 'Rules are enforced by the contract. Admins cannot change the target price, candle threshold or oracle configuration of a round that has started.'}</p>
+          <p>{zh ? '规则写进合约：没有管理员、不可升级。价格由单一 keeper 提交；keeper 不能修改已开始轮次的目标价和 K 线阈值。' : 'Rules are enforced by the contract: no admin, no upgrades. Prices are submitted by a single keeper, which cannot change the target price or candle threshold of a round that has started.'}</p>
         </header>
         <RoundLadder cfg={cfg} rounds={rounds} copy={copy} />
         <RulesSandbox cfg={cfg} board={board} copy={copy} />

@@ -77,18 +77,18 @@ function RulesSandboxView({ cfg, board, copy }: Props) {
                   `报名期 ${cfg ? cfg.stakeDurationSeconds / 3600 : '—'} 小时。参与前确认最大损失；结束后不可追加或提前退出。`,
                   `观察期 ${cfg ? cfg.observationSeconds / 3600 : '—'} 小时，${candleCount} 根 × ${cfg ? cfg.candleSeconds / 3600 : '—'} 小时 K 线。每根按多源 TWAP 考核。`,
                   `至少 ${need}/${candleCount} 根 TWAP 达到锁定目标价即通过，无需连续，恰好等于目标也达标。`,
-                  '成功退还本金，奖励按参与权重分配。早领仅得 50%，也可按条件滚存或等待 R10 后解锁；失败销毁本轮奖励与全部质押本金。'
+                  '成功后本金 + 奖励一次全额领取，奖励按质押比例分配；失败销毁本轮奖励与全部质押本金。'
                 ][index] : [
                   `Stake during the ${cfg ? cfg.stakeDurationSeconds / 3600 : '—'}h window. Confirm the full loss risk. No additions or early exits after closing.`,
                   `Observe ${candleCount} × ${cfg ? cfg.candleSeconds / 3600 : '—'}h candles over ${cfg ? cfg.observationSeconds / 3600 : '—'}h, scored by multi-source TWAP.`,
                   `At least ${need}/${candleCount} TWAP candles must reach the locked target. They need not be consecutive. Equality qualifies.`,
-                  'Success returns principal and allocates rewards by weight. Early claims pay 50%; eligible rollover and unlock after R10 are separate. Failure burns the round reward and all staked principal.'
+                  'On success, principal plus a pro-rata reward is claimed in full at once. Failure burns the round reward and all staked principal.'
                 ][index]}</p>
               <span className="k">{lang === 'zh' ? ['本金 100% 风险', '每根独立考核', `≥ ${need} 根通过`, '领取额度见账户页'][index] : ['100% principal at risk', 'Each candle scored independently', `≥ ${need} passes`, 'Review claims in your account'][index]}</span>
             </div>
           ))}
         </div>
-        <p className="note">{lang === 'zh' ? '目标 = max(P0 × 2^tier, 2 × 开窗 24h TWAP)；tier = 1 + 已成功轮数。奖励 = 本轮预算 × 个人有效权重 / 总有效权重，含连续参与与邀请加成。' : 'Target = max(P0 × 2^tier, 2 × opening 24h TWAP); tier = 1 + successful rounds. Reward = round budget × individual effective weight / total effective weight, including streak and referral bonuses.'}</p>
+        <p className="note">{lang === 'zh' ? '目标 = max(P0 × 2^tier, 2 × 开窗 24h TWAP)；tier = 1 + 已成功轮数。奖励 = 本轮预算 × 我的质押 / 本轮总质押。' : 'Target = max(P0 × 2^tier, 2 × opening 24h TWAP); tier = 1 + successful rounds. Reward = round budget × my stake / round total stake.'}</p>
 
         <div className="sec-h" style={{ marginTop: 44 }}>
           <span className="lbl">{copy.rules.sandLbl}</span>
@@ -162,7 +162,7 @@ function RulesSandboxView({ cfg, board, copy }: Props) {
                 </div>
                 <div>
                   <dt>{copy.rules.outWinReward}</dt>
-                  <dd className="ok">{lang === 'zh' ? '由最终权重决定' : 'Determined by final weights'}</dd>
+                  <dd className="ok">{lang === 'zh' ? '按质押比例' : 'Pro rata to stake'}</dd>
                 </div>
                 <div>
                   <dt>{copy.rules.outWinTotal}</dt>

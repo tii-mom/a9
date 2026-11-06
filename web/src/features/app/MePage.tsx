@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ApiError } from '../../lib/api';
 import { api, useQuery } from '../../lib/api';
@@ -7,7 +7,7 @@ import { useDict, useLang } from '../../lib/lang';
 import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, DEMO_WALLET_ENABLED, useWallet } from '../wallet';
-import { ChainMePanel, RefundClaimPanel, RewardReferralPanel, captureInviteFromLocation } from '../chain';
+import { ChainMePanel, RefundClaimPanel } from '../chain';
 import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
 import {
   apiErrorText,
@@ -57,8 +57,7 @@ interface MeDict extends Record<string, unknown> {
   claimDesc: string;
   claimEmpty: string;
   claimEmptyDesc: string;
-  claimPrincipal: string;
-  claimReward: string;
+  claimBoth: string;
   claimNote: string;
   historyTitle: string;
   historyDesc: string;
@@ -111,11 +110,10 @@ const ZH: MeDict = {
   noStakeThisRound: '本轮你还没有质押。',
   goStake: '前往交易台质押',
   claimTitle: '可领取',
-  claimDesc: '领取前请核对奖励选择',
+  claimDesc: '成功轮：本金 + 奖励一次全额领取',
   claimEmpty: '暂无可领取',
   claimEmptyDesc: '成功结算后，本金与奖励会出现在这里；失败轮次会直接销毁，不可领取。',
-  claimPrincipal: '领取本金',
-  claimReward: '领取奖励',
+  claimBoth: '领取本金 + 奖励',
   claimNote: '这些按钮仅更新演示记录，不发送链上交易。',
   historyTitle: '历史轮次',
   historyDesc: '你参与过的全部轮次与资金状态',
@@ -137,7 +135,9 @@ const ZH: MeDict = {
     '单轮 72 小时：{previewHours} 小时预告 → {stakeHours} 小时报名 → {observationHours} 小时观察（{candleCount} 根 {candleHours} 小时 K 线，至少 {need} 根 TWAP ≥ 目标价才算通过）。',
     '本轮价格考核失败时，本轮 7 亿枚奖励额度全部销毁。',
     '本轮价格考核失败时，本轮全部已接受质押本金 100% 销毁。',
-    '预言机技术故障不按市场失败处理，不销毁质押本金。',
+    '价格由单一 keeper 热钱包提交（无多签、无独立预言机）；keeper 密钥被盗可提交伪造价格，导致本轮被判失败并销毁本金。',
+    '价格提交出现技术故障（超时 7 天）时本轮技术终止，全额退回本金，不按市场失败处理。',
+    '单笔最低 100,000 A9。直接转账且低于 100,000 A9、又没有附带足够 GRAM（forward < 0.1）的 A9 不退回。',
     '失败轮次永久关闭：不重开、不补发、不回滚。',
     '你的最大本金损失 = 本轮质押数量（可能为 100%）。',
   ],
@@ -176,11 +176,10 @@ const EN: MeDict = {
   noStakeThisRound: 'You have no stake in this round yet.',
   goStake: 'Stake from the trade desk',
   claimTitle: 'Claimable',
-  claimDesc: 'Review reward choices before claiming',
+  claimDesc: 'Successful round: principal + reward claimed in full at once',
   claimEmpty: 'Nothing to claim',
   claimEmptyDesc: 'After a successful settlement, principal and reward appear here. A failed round burns them permanently.',
-  claimPrincipal: 'Claim principal',
-  claimReward: 'Claim reward',
+  claimBoth: 'Claim principal + reward',
   claimNote: 'These buttons update demo records only and do not send on-chain transactions.',
   historyTitle: 'Round history',
   historyDesc: 'Every round you joined and the status of your funds',
@@ -202,7 +201,9 @@ const EN: MeDict = {
     'Each round is 72 hours: {previewHours}h preview → {stakeHours}h staking → {observationHours}h observation ({candleCount} × {candleHours}-hour candles; at least {need} must have TWAP ≥ target to pass).',
     'If this round fails the price test, its 700M reward budget is fully burned.',
     'If this round fails the price test, 100% of the principal accepted for this round is burned.',
-    'Oracle technical failures are not treated as a market failure and never burn principal.',
+    'Prices are submitted by a single keeper hot wallet (no multisig, no independent oracle); a stolen keeper key could submit fake prices, failing the round and burning principal.',
+    'If price submission stalls (7-day timeout) the round is technically aborted and principal is returned in full; this is not treated as a market failure.',
+    'Minimum stake is 100,000 A9. A direct transfer below 100,000 A9 sent without enough GRAM attached (forward < 0.1) is not refunded.',
     'A failed round is permanently closed: no reopen, no reissue, no rollback.',
     'Your maximum principal loss equals the amount you staked in this round (up to 100%).',
   ],
@@ -302,16 +303,20 @@ function MeDashboard({
     [meQuery.data],
   );
 
+  // v10：一次领取本金 + 全额奖励（演示 API 仍按 principal / reward 两次记账）
   const claim = useCallback(
-    async (roundId: number, kind: 'principal' | 'reward') => {
+    async (roundId: number) => {
       if (!demo || chainMode || claiming !== null || !meQuery.data || meQuery.error) return;
-      const key = `${roundId}:${kind}`;
-      setClaiming(key);
+      const item = (meQuery.data.claimable ?? []).find((entry) => entry.roundId === roundId);
+      if (!item) return;
+      setClaiming(String(roundId));
       try {
-        const result = await api.claim({ address, roundId, kind });
+        let total = 0n;
+        if (item.principalRaw !== '0') total += BigInt((await api.claim({ address, roundId, kind: 'principal' })).amountRaw || '0');
+        if (item.rewardRaw !== '0') total += BigInt((await api.claim({ address, roundId, kind: 'reward' })).amountRaw || '0');
         meQuery.refresh();
         roundsQuery.refresh();
-        show(`${d.toastClaimOk}${formatToken(result.amountRaw, decimals)} A9`, 'ok');
+        show(`${d.toastClaimOk}${formatToken(total.toString(), decimals)} A9`, 'ok');
       } catch (error) {
         show(`${d.toastClaimFail}${apiErrorText(error as ApiError, lang)}`, 'bad');
       } finally {
@@ -351,7 +356,6 @@ function MeDashboard({
       )}
       {chainMode ? <ChainMePanel address={address} demo={demo} /> : null}
       <RefundClaimPanel address={address} demo={demo} />
-      <RewardReferralPanel address={address} demo={demo} />
 
       <QueryNotice query={meQuery} lang={lang} label={lang === 'zh' ? '账户' : 'Account'} />
       <QueryNotice query={roundsQuery} lang={lang} label={lang === 'zh' ? '轮次' : 'Rounds'} />
@@ -372,7 +376,7 @@ function MeDashboard({
         <Stat
           label={d.statClaimReward}
           value={meQuery.data ? `${formatToken(claimableReward, decimals)} A9` : '—'}
-          hint={lang === 'zh' ? '奖励选择前请查看50%早领规则' : 'Review 50% early-claim rules'}
+          hint={lang === 'zh' ? '成功轮与本金一起全额领取' : 'Claimed in full with principal'}
         />
         <Stat label={d.statTotalStaked} value={meQuery.data ? `${formatToken(totals.stakedRaw, decimals)} A9` : '—'} />
         <Stat label={d.statTotalReward} value={meQuery.data ? `${formatToken(totals.rewardRaw, decimals)} A9` : '—'} />
@@ -534,10 +538,6 @@ function MeDashboard({
               ) : (
                 <div className="ap-claim">
                   {claimable.map((item) => {
-                    const principalKey = `${item.roundId}:principal`;
-                    const rewardKey = `${item.roundId}:reward`;
-                    const hasPrincipal = item.principalRaw !== '0';
-                    const hasReward = item.rewardRaw !== '0';
                     return (
                       <div className="ap-claim-item" key={item.roundId}>
                         <div className="ap-claim-main">
@@ -560,28 +560,14 @@ function MeDashboard({
                         </div>
                         <div className="spacer" />
                         <div className="ap-claim-actions">
-                          {hasPrincipal ? (
-                            <button
-                              className="btn fire sm"
-                              type="button"
-                              disabled={claiming !== null || !demo || !!meQuery.error}
-                              onClick={() => void claim(item.roundId, 'principal')}
-                            >
-                              {claiming === principalKey ? c.loading : d.claimPrincipal}
-                            </button>
-                          ) : (
-                            <span className="ap-claim-done">{c.claimed}</span>
-                          )}
-                          {hasReward ? (
-                            <button
-                              className="btn ghost sm"
-                              type="button"
-                              disabled={claiming !== null || !demo || !!meQuery.error}
-                              onClick={() => void claim(item.roundId, 'reward')}
-                            >
-                              {claiming === rewardKey ? c.loading : d.claimReward}
-                            </button>
-                          ) : null}
+                          <button
+                            className="btn fire sm"
+                            type="button"
+                            disabled={claiming !== null || !demo || !!meQuery.error}
+                            onClick={() => void claim(item.roundId)}
+                          >
+                            {claiming === String(item.roundId) ? c.loading : d.claimBoth}
+                          </button>
                         </div>
                       </div>
                     );
@@ -645,10 +631,6 @@ export default function MePage() {
   const d = useDict(ZH, EN);
   const c = COMMON[lang];
   const wallet = useWallet();
-  // V8 邀请：进入 /me 时捕获 ?ref= 邀请码（幂等，存 localStorage，供首次质押前 SetReferrer）
-  useEffect(() => {
-    captureInviteFromLocation();
-  }, []);
   // 未连接钱包时也探测后端，保证「无后端」有明确错误态而不是空白引导
   const healthQuery = useQuery(() => api.health(), [], { enabled: !wallet.connected, intervalMs: 8000 });
   // 链上模式：/api/config 下发了 roundController 合约地址（为空则保持演示模式）
