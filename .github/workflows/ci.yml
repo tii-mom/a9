@@ -201,9 +201,9 @@ jobs:
 
   deploy:
     name: deploy (production)
-    # E2E（含链上负向逻辑）是发布必需前置：缺 secret 会失败，除非 workflow_dispatch 显式 allow_e2e_skip。
+    # 手动 deploy（workflow_dispatch）与 main push 都可触发；门禁默认仍然 fail，只有显式 allow_demo_deploy 才放行并在 summary 留痕。
     needs: [verify, contracts, ops-selftest, worker-smoke, qa-logic, e2e]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -233,10 +233,31 @@ jobs:
           if [ "$bad" != "0" ]; then exit 1; fi
           echo "migrations OK:"
           ls worker/migrations
+      - name: "Inject production D1 database id"
+        # 审查 P0：生产 D1 与演示 D1 必须分离。仓库只有占位符；部署前从 GitHub Variable 注入工作副本。
+        working-directory: worker
+        env:
+          PROD_D1_DATABASE_ID: ${{ vars.PROD_D1_DATABASE_ID }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          path = 'wrangler.toml'
+          text = open(path).read()
+          value = os.environ.get('PROD_D1_DATABASE_ID', '').strip()
+          if not value:
+              print('::warning::PROD_D1_DATABASE_ID 未配置，保留占位符（门禁会 FAIL）')
+          else:
+              block = re.search(r'\[\[env\.production\.d1_databases\]\].*?(?=\n\[|\Z)', text, re.S)
+              if not block:
+                  raise SystemExit('wrangler.toml 缺少 [[env.production.d1_databases]]')
+              updated = re.sub(r'database_id\s*=\s*"[^"]*"', 'database_id = "' + value + '"', block.group(0), count=1)
+              text = text[:block.start()] + updated + text[block.end():]
+              open(path, 'w').write(text)
+              print('✅ 已注入生产 D1 ID（值不打印）')
+          PY
       - name: "Gate: production config (chain / mainnet / no unsigned writes)"
         # P0 门禁：默认 [vars] 是 demo，绝不能直接部署到生产。
-        # 读取 wrangler.toml 的 [env.production.vars]（叠加 GitHub Variables 注入的地址），
-        # 非 chain/mainnet/关闭无签名写 一律 fail；地址/哈希仍是占位符也 fail。
+        # 读取 [env.production.vars]（叠加 GitHub Variables 注入的地址），并检查生产 D1 != demo D1。
         working-directory: worker
         env:
           ALLOW_DEMO_DEPLOY: ${{ inputs.allow_demo_deploy }}
@@ -244,9 +265,10 @@ jobs:
           PROD_TEAM_VAULT_ADDRESS: ${{ vars.PROD_TEAM_VAULT_ADDRESS }}
           PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
           PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
+          PROD_D1_DATABASE_ID: ${{ vars.PROD_D1_DATABASE_ID }}
         run: |
           python3 - <<'PY'
-          import os, sys, tomllib
+          import os, re, sys, tomllib
 
           allow_demo = os.environ.get('ALLOW_DEMO_DEPLOY', '').strip().lower() == 'true'
           with open('wrangler.toml', 'rb') as f:
@@ -284,6 +306,19 @@ jobs:
               if not got or '__' in got or 'PLACEHOLDER' in got.upper():
                   errors.append(f'{key} 未注入真实值（当前 {got!r}；用 GitHub Variables PROD_* 注入，禁止把主网地址提交进仓库 D-38）')
 
+          demo_d1 = (cfg.get('d1_databases') or [{}])[0].get('database_id', '')
+          rows = prod.get('d1_databases') or []
+          prod_d1 = str(rows[0].get('database_id', '') if rows else '').strip()
+          override_d1 = os.environ.get('PROD_D1_DATABASE_ID', '').strip()
+          if override_d1:
+              prod_d1 = override_d1
+          if not prod_d1:
+              errors.append('env.production.d1_databases.database_id 为空')
+          elif re.fullmatch(r'0{8}-0{4}-0{4}-0{4}-0{12}', prod_d1) or '__' in prod_d1 or 'PLACEHOLDER' in prod_d1.upper():
+              errors.append(f'生产 D1 database_id 仍是占位符（{prod_d1}）；用 GitHub Variable PROD_D1_DATABASE_ID 注入')
+          elif demo_d1 and prod_d1 == demo_d1:
+              errors.append('生产 D1 database_id 与顶层 demo 相同（' + prod_d1 + '）：主网迁移/索引器会写进演示库')
+
           if errors and not allow_demo:
               print('::error::生产部署门禁失败：即将部署的 env.production 不是 chain 主网配置。')
               for err in errors:
@@ -294,8 +329,12 @@ jobs:
               print('::warning::allow_demo_deploy=true，已显式绕过生产门禁：')
               for err in errors:
                   print(' - ' + err)
+              summary = os.environ.get('GITHUB_STEP_SUMMARY', '')
+              if summary:
+                  with open(summary, 'a') as f:
+                      f.write('## ⚠️ allow_demo_deploy=true：本次部署绕过生产门禁\n\n')
           else:
-              print('✅ 生产配置门禁通过：DATA_SOURCE=chain / CHAIN_NETWORK=mainnet / DEMO_ALLOW_UNSIGNED_WRITES=false，地址与配置哈希已注入')
+              print('✅ 生产配置门禁通过：DATA_SOURCE=chain / CHAIN_NETWORK=mainnet / DEMO_ALLOW_UNSIGNED_WRITES=false / 生产 D1 独立')
           PY
       - name: Apply D1 migrations
         working-directory: worker
@@ -304,7 +343,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: ./node_modules/.bin/wrangler d1 migrations apply fuse-protocol --remote
       - name: Deploy Worker (env production)
-        # 必须 --env production；真实主网地址由 GitHub Variables 通过 --var 注入，仓库内只有占位符（D-38）
+        # 必须 --env production；生产 D1 已在前面注入；真实地址由 GitHub Variables 经 --var 注入（D-38）
         working-directory: worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -1,20 +1,20 @@
 {
   "network": "testnet",
   "chainId": -3,
-  "status": "not_deployed",
+  "status": "deployed_unfunded",
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-05T14:13:41.427Z",
-  "updatedAt": "2026-11-05T14:13:41.432Z",
+  "updatedAt": "2026-11-06T09:20:59.674Z",
   "contracts": {
     "jettonMaster": {
-      "address": null,
-      "raw": null,
+      "address": "kQAdRbHk6_ma1eLmtJjMi2zyoQKQYFmv1fAZz5YPGBdvjom5",
+      "raw": "0:1d45b1e4ebf99ad5e2e6b498cc8b6cf2a102906059afd5f019cf960f18176f8e",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T09:20:59.674Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "jettonMasterTreasuryWallet": {
       "address": null,
@@ -25,36 +25,36 @@
       "note": null
     },
     "teamVault": {
-      "address": null,
-      "raw": null,
+      "address": "kQDvVcH6E9O1RKa6tA8xx6_qOFhTYb07Q6vO-ydpuejQzvz3",
+      "raw": "0:ef55c1fa13d3b544a6bab40f31c7afea38585361bd3b43abcefb2769b9e8d0ce",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T09:20:59.674Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "teamVaultJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQDvZVFQQ1d4ZLWhyu3G3Qprv-H-8iRja5g5JB2XsNvySbE2",
+      "raw": "0:ef65515043577864b5a1caedc6dd0a6bbfe1fef224636b9839241d97b0dbf249",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T09:20:59.674Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "roundController": {
-      "address": null,
-      "raw": null,
+      "address": "kQDvMloffAiVnuZ3UxWXwB558RoXBy4oP_KiGSQjWysO0xPS",
+      "raw": "0:ef325a1f7c08959ee677531597c01e79f11a17072e283ff2a21924235b2b0ed3",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T09:20:59.674Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "roundControllerJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQDvWYM4JT3q-bG4j9Uh_xMqzqYlgpdBuzOAeTlkXVU42lHs",
+      "raw": "0:ef598338253deaf9b1b88fd521ff132acea625829741bb33807939645d5538da",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T09:20:59.674Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "teamWalletJettonWallet": {
       "address": null,
@@ -65,12 +65,12 @@
       "note": null
     },
     "oracleAdapter": {
-      "address": null,
-      "raw": null,
+      "address": "kQDghdLEC2uBn_kwYBxqQCrNJS7wW9tktdr804vs1462FPHs",
+      "raw": "0:e085d2c40b6b819ff930601c6a402acd252ef05bdb64b5dafcd38becd78eb614",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-06T09:20:59.674Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     }
   },
   "wallets": {
@@ -104,7 +104,9 @@
       "updatedAt": "2026-11-05T15:05:56.823Z"
     }
   },
-  "bindings": {},
+  "bindings": {
+    "teamVaultAcceptsOnly": "kQDvMloffAiVnuZ3UxWXwB558RoXBy4oP_KiGSQjWysO0xPS"
+  },
   "funding": [],
   "verification": {
     "lastRunAt": null,

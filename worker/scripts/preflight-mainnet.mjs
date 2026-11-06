@@ -21,6 +21,7 @@
  *   - 源码冻结：tag v8.8-audit-fixed 必须存在，且 contracts/{contracts,build,tests,scripts}
  *     与 tag 完全一致（文档可以在 tag 之后继续提交；合约/测试/构建产物/部署脚本改动会被拦住）。
  *   - 检查 7：ops/scripts 内禁止写死 `--net testnet`（主网部署脚本必须显式指定网络）。
+ *   - 检查 8：生产 D1 必须独立于演示库（database_id 不同且非全 0 占位符）。
  *   - tag 可用 --tag=<expected> 覆盖（演练/回归用）。
  */
 import { spawnSync } from "node:child_process";
@@ -404,6 +405,38 @@ function checkOpsNoTestnetNetFlag() {
   );
 }
 
+/* ------------------------------ 8. 生产 D1 与演示库分离 ------------------------------ */
+
+function checkD1Separation() {
+  const details = [];
+  const text = readText(join(WORKER, "wrangler.toml"));
+
+  function d1Id(sectionName) {
+    const header = "[[ " + sectionName + " ]]".replace(/ /g, "");
+    const pattern = new RegExp("\\[\\[" + sectionName.replace(/\./g, "\\.") + "\\]\\]([\\s\\S]*?)(?=\\n\\[|$)");
+    const block = text.match(pattern);
+    if (!block) fail("wrangler.toml 缺少 " + header + " 段");
+    const id = block[1].match(/database_id\s*=\s*"([^"]*)"/);
+    if (!id) fail(header + " 缺少 database_id");
+    return id[1].trim();
+  }
+
+  const demoId = d1Id("d1_databases");
+  const tomlProdId = d1Id("env.production.d1_databases");
+  const override = process.env.PROD_D1_DATABASE_ID;
+  const prodId = override && override.trim() ? override.trim() : tomlProdId;
+
+  if (!prodId) fail("生产 D1 database_id 为空");
+  if (/^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(prodId) || prodId.indexOf("__") >= 0 || prodId.toUpperCase().indexOf("PLACEHOLDER") >= 0) {
+    fail("生产 D1 database_id 仍是占位符（" + prodId + "）；部署时由 GitHub Variable PROD_D1_DATABASE_ID 注入");
+  }
+  if (demoId && prodId === demoId) {
+    fail("生产 D1 database_id 与顶层 demo 相同（" + prodId + "）：主网迁移/索引器会写进演示库");
+  }
+  details.push("demo D1=" + demoId.slice(0, 8) + "… / prod D1=" + prodId.slice(0, 8) + "…（不同）✓");
+  return details;
+}
+
 /* ------------------------------ 执行 ------------------------------ */
 
 console.log("A9 主网部署前自检（preflight-mainnet）");
@@ -417,6 +450,7 @@ runCheck(4, "迁移目录：只允许 NNNN_*.sql 且不含 seed", checkMigration
 runCheck(5, "源码冻结：tag 必须存在，且合约/测试/构建产物/部署脚本与 tag 完全一致", checkGitTag);
 runCheck(6, "secrets 占位：ADMIN_TOKEN / TONCENTER_API_KEY 存在（不打印值）", checkSecrets);
 runCheck(7, "ops 脚本：禁止写死 --net testnet（主网必须显式网络）", checkOpsNoTestnetNetFlag);
+runCheck(8, "生产 D1：database_id 必须与 demo 不同且非占位符", checkD1Separation);
 
 let failed = 0;
 for (const result of results) {

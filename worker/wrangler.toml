@@ -116,7 +116,9 @@ TONCONNECT_MANIFEST_URL = "/tonconnect-manifest.json"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "fuse-protocol"
-database_id = "b5945609-374e-4eaa-add2-80460ebcb680"
+# 审查 P0：生产 D1 必须与演示库分离，绝不能复用顶层 demo 的 database_id。
+# 仓库内只放占位符；部署前由 CI 用 GitHub Variable PROD_D1_DATABASE_ID 注入真实主网 D1 ID。
+database_id = "00000000-0000-0000-0000-000000000000"
 
 # 自定义域名（env 会继承顶层 routes，但显式声明可避免 wrangler 的
 # "environment inherits custom domains" 警告，并保证生产路由不被默认环境抢占）
