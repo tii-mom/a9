@@ -1910,17 +1910,8 @@ get fun get_claimable_all(owner: address): Claimable {
     var principal: uint128 = 0;
     var reward: uint128 = 0;
     var mask: uint16 = 0;
-    // A9-CRIT-02: round 0 refund ledger is not a real round; include it explicitly.
-    val refundInnerRes = s.stakes.get(0);
-    if (refundInnerRes.isFound) {
-        val refundPosRes = refundInnerRes.loadValue().get(owner);
-        if (refundPosRes.isFound) {
-            val refundPos = refundPosRes.loadValue();
-            if (!refundPos.principalClaimed && refundPos.amountRaw > 0) {
-                principal += refundPos.amountRaw;
-            }
-        }
-    }
+    // A9-M4-02: round 0 refunds intentionally excluded — they are claimed only via
+    // ClaimPrincipal(0), matching handleClaimAll which scans rounds 1..MAX.
     var roundId: uint8 = 1;
     while (roundId <= MAX_CLAIM_SCAN_ROUNDS) {
         val rr = s.rounds.get(roundId);
