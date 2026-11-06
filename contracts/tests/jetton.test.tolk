@@ -596,3 +596,20 @@ get fun `test change_admin + claim_admin handover before mint`() {
     }))).toHaveSuccessfulTx<ClaimMinterAdmin>({ from: nextAdmin.address, to: master.address });
     expect(masterData(master).adminAddress).toEqual(nextAdmin.address);
 }
+
+
+get fun `test F8 MintOnce rejects underfunded wallet deploy without clearing admin`() {
+    val admin = testing.treasury("jetton-admin");
+    val master = deployMaster(admin.address);
+    val bad = mintOnce(master, admin.address, admin.address, TOTAL_SUPPLY_RAW, ton("0.05"), ton("0.2"), emptyForwardPayload());
+    expect(bad).toHaveFailedTx<MintOnce>({
+        from: admin.address, to: master.address, exitCode: JettonErrors.InvalidMintMessage,
+    });
+    val data = masterData(master);
+    expect(data.totalSupply).toEqual(0);
+    expect(data.adminAddress).toEqual(admin.address);
+    // a correctly funded mint still works
+    expect(defaultMint(master, admin.address, admin.address)).toHaveSuccessfulTx<MintOnce>({
+        from: admin.address, to: master.address,
+    });
+}

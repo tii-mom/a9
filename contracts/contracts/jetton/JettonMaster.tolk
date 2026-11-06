@@ -69,6 +69,10 @@ fun onInternalMessage(in: InMessage) {
             assert (msg.recipient.getWorkchain() == MY_WORKCHAIN) throw JettonErrors.WrongWorkchain;
             assert (msg.totalTonAmount >= msg.tonAmount) throw JettonErrors.InvalidMintMessage;
             assert (in.valueCoins >= msg.totalTonAmount) throw JettonErrors.InvalidMintMessage;
+            // A9-F8: never clear admin/totalSupply unless the mint wallet deploy can
+            // definitely be funded; otherwise a later action bounce permanently bricks mint.
+            assert (msg.tonAmount >= ton("0.1")) throw JettonErrors.InvalidMintMessage;
+            assert (in.valueCoins >= msg.tonAmount + ton("0.05")) throw JettonErrors.InvalidMintMessage;
             msg.forwardPayload.checkIsCorrectTlbEither();
             checkAmountIsEnoughToTransfer(msg.tonAmount, 0, in.originalForwardFee);
 
