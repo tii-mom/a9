@@ -91,19 +91,20 @@ try {
       await context.close();
     }
   });
-  await test('Stake deep link, keyboard tabs, cross-route navigation and fixed-header anchors', async () => {
+  await test('Stake deep link with the buy entry closed, cross-route navigation and fixed-header anchors', async () => {
     const { context, page, errors } = await session({ state: 'STAKING_OPEN' });
     await ready(page, '/?action=stake#cmd');
-    await expect(page.locator('#tab-stake')).toHaveAttribute('aria-selected', 'true');
-    await page.locator('#tab-stake').focus(); await page.keyboard.press('ArrowLeft');
-    await expect(page.locator('#tab-buy')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#paneStake')).toBeVisible();
+    await expect(page.locator('#tab-buy')).toHaveCount(0);
     await page.goto(base + '/me');
     await page.locator('.header-join').click();
-    await expect(page.locator('#tab-stake')).toHaveAttribute('aria-selected', 'true');
-    await page.locator('.links a[href="/#rules"]').click();
-    await expect(page).toHaveURL(/#rules$/);
-    await expect(page.locator('#rules')).toBeFocused();
-    const positions = await page.evaluate(() => ({ header: document.querySelector('.top').getBoundingClientRect().bottom, section: document.querySelector('#rules').getBoundingClientRect().top }));
+    await expect(page.locator('#paneStake')).toBeVisible();
+    await page.locator('.links a[href="/rules"]').click();
+    await expect(page).toHaveURL(/\/rules$/);
+    await expect(page.locator('#ladder')).toBeVisible();
+    await page.goto(base + '/rules#risk');
+    await expect(page.locator('#risk')).toBeFocused();
+    const positions = await page.evaluate(() => ({ header: document.querySelector('.top').getBoundingClientRect().bottom, section: document.querySelector('#risk').getBoundingClientRect().top }));
     assert(positions.section >= positions.header - 1, JSON.stringify(positions));
     assert.deepEqual(errors, []); await context.close();
   });
@@ -126,6 +127,7 @@ try {
     await page.locator('.twap-data summary').click();
     await expect(page.locator('.twap-data tbody tr')).toHaveCount(9);
     await expect(page.locator('.twap-caption')).toContainText(/实线/);
+    await ready(page, '/rules');
     await expect(page.locator('.sand-cells .sc[aria-pressed="true"]')).toHaveCount(16);
     await expect(page.locator('.out')).toHaveClass(/win/);
     await page.locator('.sand-cells .sc').first().click();
@@ -137,31 +139,47 @@ try {
     const { context, page } = await session({ empty: true, config: { candleCount: 12, minQualifiedCandles: 8, observationSeconds: 43200 } });
     await ready(page);
     await expect(page.locator('.board.empty')).toBeVisible();
+    await ready(page, '/rules');
     await expect(page.locator('.sand-cells .sc')).toHaveCount(12);
     await expect(page.locator('.sand-cells .sc[aria-pressed="true"]')).toHaveCount(8);
     await page.locator('.sand-cells .sc').first().click();
     await expect(page.locator('.out')).toHaveClass(/lose/);
     await context.close();
   });
-  await test('Demo wallet requires explicit choice and mobile popup stays in viewport', async () => {
-    const { context, page, writes, errors } = await session({ width: 360 }); await ready(page);
+  await test('Production hides the demo wallet and clears a stale demo session', async () => {
+    const { context, page, writes, errors } = await session({ width: 360 });
+    await context.addInitScript(() => { try { localStorage.setItem('fuse.wallet.mode', 'demo'); } catch { /* storage blocked */ } });
+    await ready(page);
     await expect(page.locator('.wl-trigger')).toContainText('连接钱包');
     await page.locator('.wl-trigger').click();
     await expect(page.locator('.wl-pop')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.wl-trigger')).toContainText('连接钱包');
-    await page.locator('.wl-trigger').click();
-    await page.getByRole('button', { name: /使用演示钱包/ }).click();
-    await expect(page.locator('.wl-trigger')).toContainText(/DEMO/i);
-    await page.locator('.wl-trigger').click();
-    await expect(page.locator('.wl-pop')).toBeVisible(); await noOverflow(page);
+    await expect(page.getByRole('button', { name: /使用演示钱包/ })).toHaveCount(0);
+    await noOverflow(page);
     await page.screenshot({ path: new URL('wallet-mobile.png', out).pathname, fullPage: false });
     await page.keyboard.press('Escape');
     await page.goto(base + '/me');
-    await expect(page.locator('.ap-account')).toBeVisible(); await noOverflow(page);
-    await page.screenshot({ path: new URL('demo-account-mobile.png', out).pathname, fullPage: true });
+    await expect(page.locator('.lock').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /使用演示钱包|Use demo wallet/ })).toHaveCount(0);
+    await noOverflow(page);
     assert.deepEqual(writes, []); assert.deepEqual(errors, []); await context.close();
   });
+  if (process.env.DEMO_BUILD === '1') {
+    await test('Demo build: demo wallet is an explicit choice; stake needs both acknowledgements', async () => {
+      const { context, page, writes, errors } = await session({ state: 'STAKING_OPEN', width: 360 });
+      await ready(page);
+      await page.locator('.wl-trigger').click();
+      await page.getByRole('button', { name: /使用演示钱包/ }).click();
+      await expect(page.locator('.wl-trigger')).toContainText(/DEMO/i);
+      await page.locator('#riskOk').scrollIntoViewIfNeeded();
+      const submit = page.locator('#paneStake button.btn.fire.full');
+      await expect(submit).toBeDisabled();
+      await page.locator('#riskOk').check();
+      await expect(submit).toBeDisabled();
+      await page.locator('#burnOk').check();
+      await expect(submit).toBeEnabled();
+      assert.deepEqual(writes, []); assert.deepEqual(errors, []); await context.close();
+    });
+  }
   await test('Settlement in progress does not offer completed-round claim', async () => {
     const { context, page } = await session({ state: 'SETTLING_SUCCESS' }); await ready(page);
     await expect(page.locator('.board')).toContainText(/结算中/);
