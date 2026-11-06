@@ -95,6 +95,14 @@ fun deployTon(envName: string, defaultTon: int): coins {
     return parseTonString(raw!, envName);
 }
 
+fun tonSetting(envName: string, defaultTon: string): coins {
+    val raw = env<string>(envName);
+    if (raw == null) {
+        return parseTonString(defaultTon, envName);
+    }
+    return parseTonString(raw!, envName);
+}
+
 fun tonSource(envName: string): string {
     return env<string>(envName) == null ? "default" : "env";
 }
@@ -175,6 +183,10 @@ fun main() {
     val adapterTon = deployTon("A9_DEPLOY_TON_ORACLE_ADAPTER", 5);
     val tvTon = deployTon("A9_DEPLOY_TON_TEAM_VAULT", 1);
     val rcTon = deployTon("A9_DEPLOY_TON_ROUND_CONTROLLER", 5);
+    val mintTon = tonSetting("A9_DEPLOY_MINT_TON", "0.55");
+    val mintForwardTon = tonSetting("A9_DEPLOY_MINT_FORWARD_TON", "0.4");
+    val wiringTon = tonSetting("A9_DEPLOY_WIRING_TON", "0.2");
+    val fundTon = tonSetting("A9_DEPLOY_FUND_TON", "0.3");
     println(
         "Deploy TON: JettonMaster={} nano [{}] OracleAdapter={} nano [{}]",
         masterTon, tonSource("A9_DEPLOY_TON_JETTON_MASTER"),
@@ -184,6 +196,16 @@ fun main() {
         "Deploy TON: TeamVault={} nano [{}] RoundController={} nano [{}]",
         tvTon, tonSource("A9_DEPLOY_TON_TEAM_VAULT"),
         rcTon, tonSource("A9_DEPLOY_TON_ROUND_CONTROLLER"),
+    );
+    println(
+        "Deploy TON extras: mint={} nano [{}] mintForward={} nano [{}]",
+        mintTon, tonSource("A9_DEPLOY_MINT_TON"),
+        mintForwardTon, tonSource("A9_DEPLOY_MINT_FORWARD_TON"),
+    );
+    println(
+        "Deploy TON extras: wiring={} nano [{}] fund={} nano [{}]",
+        wiringTon, tonSource("A9_DEPLOY_WIRING_TON"),
+        fundTon, tonSource("A9_DEPLOY_FUND_TON"),
     );
     val previewSeconds = intSetting("A9_TIMING_PREVIEW_SECONDS", 43200);
     val stakeSeconds = intSetting("A9_TIMING_STAKE_SECONDS", 129600);
@@ -261,14 +283,14 @@ fun main() {
         .storeUint(0x00000015, 32) // MintOnce
         .storeUint(0, 64)
         .storeAddress(admin.address)
-        .storeCoins(ton("0.4")) // ton_amount forwarded to the new wallet
+        .storeCoins(mintForwardTon) // ton_amount forwarded to the new wallet
         .storeCoins(PARAM_TOTAL_SUPPLY) // jetton_amount
         .storeCoins(ton("0.5")) // total_ton_amount attached to mint
         .storeUint(0, 1) // forward_payload: inline empty
         .endCell();
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.55"),
+        value: mintTon,
         dest: masterAddress,
         body: mintBody,
     })).waitForTrace();
@@ -414,7 +436,7 @@ fun main() {
     // wire the adapter to this RC (one-time)
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: wiringTon,
         dest: adapterAddress,
         body: SetOracleController { controller: rcAddress },
     })).waitForTrace();
@@ -432,26 +454,26 @@ fun main() {
 
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: wiringTon,
         dest: rcAddress,
         body: SetJettonWallet { wallet: rcJettonWallet },
     })).waitForTrace();
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: wiringTon,
         dest: rcAddress,
         body: SetJettonWalletCode { code: build("JettonWallet") },
     })).waitForTrace();
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: wiringTon,
         dest: tvAddress,
         body: SetJettonWallet { wallet: tvJettonWallet },
     })).waitForTrace();
     val teamWalletJettonWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [teamWallet.address]);
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: wiringTon,
         dest: tvAddress,
         body: SetTeamWalletJettonWallet { wallet: teamWalletJettonWallet },
     })).waitForTrace();
@@ -477,7 +499,7 @@ fun main() {
     // --- 6. TeamVault controller (one-time) ---------------------------------
     net.send(admin.address, createMessage({
         bounce: true,
-        value: ton("0.2"),
+        value: wiringTon,
         dest: tvAddress,
         body: InitController { controller: rcAddress },
     })).waitForTrace();
@@ -498,7 +520,7 @@ fun main() {
         }
         net.send(admin.address, createMessage({
             bounce: true,
-            value: ton("0.3"),
+            value: fundTon,
             dest: adminWallet,
             body: AskToTransfer {
                 queryId: 1,
@@ -512,7 +534,7 @@ fun main() {
         })).waitForTrace();
         net.send(admin.address, createMessage({
             bounce: true,
-            value: ton("0.3"),
+            value: fundTon,
             dest: adminWallet,
             body: AskToTransfer {
                 queryId: 2,
