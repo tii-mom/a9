@@ -1,6 +1,7 @@
 # 07 — 主网部署全流程手册（MAINNET-RUNBOOK）
 
-> 状态：DRAFT，待 lead review。目标：从「测试网 v8.6 验收通过」到「主网可交易」。
+> 状态：**REVIEWED（lead，2026-11-06）**。目标：从「测试网 v8.6 验收通过」到「主网可交易」。
+> 已并入：索引器引导步骤（§6.4）、开轮 twap 来源规则（§9.1）、FIX-5 失败回执现场验收（§7.5）、主网参数默认值（§10）。
 > 主网三件不可逆的事：**合约部署、admin 写入（InitController / SetJettonWallet*）、资金注入**。每一步必须先做前置检查、先小额验证、失败立即停。
 
 ## 0. TL;DR
@@ -20,7 +21,7 @@
 | 1 | 合约 tag v8.6 已冻结 | git rev-parse + tag 指向 commit 由 lead 书面确认 | lead/contract-dev |
 | 2 | 5 个 code hash 与冻结基线一致 | §3.1 的 build 产物 hash 截图/日志 | contract-dev |
 | 3 | 测试网权威 10 轮验收通过 | ops/records/fasttest-v86-rounds.md，含 C-1、R10 解锁、总量守恒 | testnet-ops |
-| 4 | 索引器对账 diff=0 | node ops/scripts/reconcile.mjs --chain，supply.chain_drift=0 | testnet-ops |
+| 4 | 索引器对账 diff=0 | `node worker/src/indexer/tools/chain-reconcile.mjs --network testnet --rc <addr> --tv <addr> --jm <addr>`，diff 计数必须为 0（任何 getter 失败 CLI 直接 exit 1） | testnet-ops |
 | 5 | verify_deployment STRICT 全 PASS（测试网实例） | node ops/scripts/verify_deployment.mjs --online，严格模式 ON、requiredFail=0 | testnet-ops |
 | 6 | 主网 admin 方案已定 | 多签地址已生成，或书面接受单钥风险 | lead + 项目方 |
 | 7 | TONCENTER_API_KEY 已申请 | 主网 key 写入 secret，1 RPS 限制解除 | lead |
@@ -191,13 +192,36 @@ curl -s https://a9.lat/api/rounds | head
 期望：health ok；version 与部署 sha 一致；rounds 返回链上真数据（roundId/status/target 与 RC getter 一致），不是 demo 数据。
 失败：若看到 demo 数据/假余额 → 立即停止，检查 DATA_SOURCE 与地址，禁止公告。
 
+### 6.4 引导索引器（**这一步不做，全站会 503**）
+
+chain 模式下有 **11 个关键配置键**必须由索引器从链上 `get_protocol_config` 落进 D1：
+`p0_usd_e8` / `round_reward_raw` / `total_supply_raw` / `min_stake_raw` / `max_total_stake_raw` / `candle_count` / `candle_seconds` / `min_qualified_candles` / `observation_seconds` / `stake_duration_seconds` / `risk_disclosure_version`。
+
+缺任何一个，worker 都会返回 `ORACLE_PAUSED`（health 200 但 `oracle.reason` 列出缺键，其余 API 503）——**这是设计如此，不是故障**。
+
+~~~bash
+# 1) 手动触发一次索引（B6 门对 /api/admin/indexer/* 豁免，否则无法首启）
+curl -s -X POST https://a9.lat/api/admin/indexer/tick \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+# 2) 确认缺键已清空（reason 字段应为空）
+curl -s https://a9.lat/api/health | jq '.data.oracle'
+# 3) 确认数据已经是链上真值
+curl -s https://a9.lat/api/rounds | jq '.[0]'
+curl -s https://a9.lat/api/config | jq
+~~~
+
+期望：health 的 `oracle.paused=false`（或 reason 为空）；`/api/rounds` 的 roundId/status/target 与 RC `get_round` 逐字段一致；`/api/config` 的 14 个参数与 `get_protocol_config` 一致。
+失败：仍报缺键 → 看 `admin_events` 里的 `INDEXER_TICK_WARN/ERROR`；确认 `ROUND_CONTROLLER_ADDRESS` 等环境变量正确、`TONCENTER_API_KEY` 有效。
+**顺序不能反**：必须先让索引器落库，再对外公告。否则用户进来会看到 503 或空数据。
+
 ## 7. 冒烟（必须用真实小额资金）
 
 1. 准备一个新的真实钱包（非 admin），充值少量 TON + A9。
 2. 质押 ≥ minStake（主网 10,000 A9）→ 等/触发关窗 → keeper 提交 24 根 K 线 → 结算。
 3. 领取：ClaimRewardEarly / ClaimPrincipal / ClaimAll；核对 pendingQueryId 归零、余额变化与 getter 一致。
 4. R10 后 ClaimUnlocked 连续两次（第二次 claimedRaw 增加）。
-5. e2e 指向主网 URL：node qa/e2e.mjs --base https://a9.lat（TODO app-dev 确认命令）。
+5. **故意发一笔必然失败的交易**（例如重复领取已领过的轮次），确认前端显示**失败**并带错误码，而不是显示成功。这是审查报告第 5 项（前端把失败回执当成功）的现场验收，单测覆盖不了。
+6. e2e 指向主网 URL：`node qa/e2e.mjs https://a9.lat`（缺 `ADMIN_TOKEN` 时后台用例会跳过，必须带）。
 失败：任一失败 → 停止并回滚 Worker；合约问题不可回滚，需评估应急公告。
 
 ## 8. 回滚与应急
@@ -218,7 +242,19 @@ curl -s https://a9.lat/api/rounds | head
 1. 合约 + wiring + 注资 + verify STRICT 全 PASS。
 2. Worker chain 模式部署 + health/version/rounds 验证。
 3. 小额真实资金全链路冒烟通过。
-4. 公告（H1 必须是「押多少你定，赌 72 小时内至少翻倍。」），开 R1（admin OpenRound，twap 来源 TODO）。
+4. 公告（H1 必须是「押多少你定，赌 72 小时内至少翻倍。」），开 R1。
+
+### 9.1 开 R1 的 twap24hUsdE8 来源（**必须事先定死，不能临时决定**）
+
+RC 的 `OpenRound(roundId, twap24hUsdE8)` 会用该值锁定目标价：`target = max(2 × twap, ladderFloor[tier])`。我们没有接预言机，因此这个输入必须由人工按固定规则产生并双人复核：
+
+1. 取主网流动性池开盘后 **连续 24 个整点的 TWAP 中位数**（不足 24 小时则用开盘以来的全部整点）；
+2. 若开盘不足 1 小时、样本不足，**不允许开轮** —— 等够数据再说，不要用单一价格顶替；
+3. 双人独立计算，结果必须一致；不一致则停止并排查；
+4. 把 twap 值、采样区间、数据来源、计算人、复核人写入部署记录，作为 R1 开轮的审批附件；
+5. 开轮后立刻用 `get_round(1)` 回读 `target`，确认等于 `max(2 × twap, floor)`。
+
+**为什么不留 TODO**：这个数字直接决定 R1 是成功还是失败，也决定第一批用户的输赢。留成 TODO 就等于上线当天临时拍脑袋。
 5. R1 稳定运行 ≥ 一个完整观察窗后，再开放内盘/流动性（TODO 项目方决定时间）。
 6. 首日值班：monitor_check + reconcile 每 10 分钟；P0 立即停轮。
 
@@ -227,7 +263,7 @@ curl -s https://a9.lat/api/rounds | head
 | # | 事项 | 决策人 | 阻塞级别 |
 | --- | --- | --- | --- |
 | 1 | admin 方案（多签 A / 单钥 B / 混合 C） | lead + 项目方 | 阻塞合约部署 |
-| 2 | 主网参数（P0、timing、奖励/团队额度、限额） | lead | 阻塞 preflight |
+| 2 | 主网参数**复核确认**（默认值见 docs/00 V7：P0=116000 USD_E8、roundReward=7e17 raw、teamRound=1.2e17 raw、minStake=1e13 raw、maxTotalStake=2e17 raw、maxStakePerAddressBps=1000、preview 12h / stake 36h / candle 1h×24 / minQualified 16 / observation 24h、riskDisclosureVersion=1、configVersion=1） | lead + 项目方 双人复核 | 阻塞 preflight |
 | 3 | 主网 TON 预算（部署、wiring、RC/TV gas、用户 gas 补贴） | lead | 阻塞部署 |
 | 4 | TONCENTER_API_KEY 申请/付费 RPC | 项目方 | 阻塞 Worker/keeper |
 | 5 | 域名/证书与公告审批 | 项目方 | 阻塞上线 |
