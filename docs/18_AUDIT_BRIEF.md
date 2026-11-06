@@ -310,3 +310,29 @@ TEP-74 的主体逻辑（transfer 的 gas 计算、sharding 前缀、fee 管理�
 
 > **运维要点（部署）**：`deploy-emulation.tolk` 现支持**全新空链一条命令完整部署**（JettonMaster → mint 100 亿并永久关闭 → OracleAdapter / TeamVault / RoundController → 全套 wiring → RC 7e18 / TV 1.2e18 raw A9 注入 + 回读校验）。
 > **JettonWallet 代码变更会导致所有 jetton wallet 地址变化，必须干净重部署，不能 resume。**
+
+
+---
+
+## 15. R10 线性解锁的链上验收限制（ClaimUnlocked）
+
+> 面向审计方与验收方：说明「为什么不能在链上快速验证 R10 线性解锁」，以及哪些项**可以**在链上验证。本节不是缺陷记录。
+
+### 15.1 限制
+
+- `UNLOCK_DURATION_SECONDS = 31,104,000`（12 × 30 天）是**编译期常量**，快测/测试网**无法压缩**。
+- 因此主网/测试网在 R10 终态后**立即**调用 `ClaimUnlocked` 会正确返回 `NothingUnlocked`（t≈0 时 nothing vested）——**这是预期行为，不是缺陷**。
+
+### 15.2 链上可验证的项
+
+- `get_unlock_info(owner).unlockStart > 0`（R10 任一终态后解锁起点已设置；实现为显式 owner 参数，见 docs/17 §4.3）。
+- `totalLockedRaw` 与「未领取奖励」一致（10 轮成功则 = 7 亿 × 10）。
+- 未 vest 时 `ClaimUnlocked` 被正确拒绝（`NothingUnlocked`），不会误发。
+- vesting 数学（含时间推进、多次部分领取、每次 1/12 线性释放）由**时间跳跃单测**覆盖：`contracts/tests/rewards-v8.test.tolk:405-431`（`test round 10 unlock releases 1/12 per month linearly`）。
+
+### 15.3 配套：worker 侧多次部分领取（累加式 UPSERT）
+
+- worker 的 `claims(kind='unlock')` 已改为**累加式 UPSERT**：线性解锁支持**多次部分领取**，每次返回**本次增量** `amountRaw`，`claimed_raw` 累加（不再是「只能领一次」）。
+- 验收实证（testnet worker）：`/api/claim kind=unlock` 在 t1 / t2 两次部分领取**都成功**，两次 `amountRaw` 均为增量（各 `87,280,222,426,001,063`），DB 累计 `claimed_raw = 174,560,444,852,002,126`，与 `/api/stats.unlock.claimedRaw` 三者一致。
+
+> 审计建议：链上只验收 15.2 的「起点/锁定总额/未 vest 拒绝」三项；完整 vesting 曲线以 15.2 的时间跳跃单测 + worker 15.3 的增量领取测试为准，**不要**以「R10 后立即 ClaimUnlocked 失败」判定为缺陷。
