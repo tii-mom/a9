@@ -109,3 +109,47 @@ git checkout v8.9-audit-fixed
 cd contracts && acton build --clear-cache && acton check && acton test   # 期望 179 passed / 18 files
 git diff v8.8-audit-fixed v8.9-audit-fixed -- contracts/contracts/RoundController.tolk
 ```
+---
+
+## 8. v8.9 链上定向回归结果（已执行）
+
+> 实例：v8.9 干净部署，RC `kQD9TXvfEbAAIEW-Oyj58V4TO7b5HGALQgmPh-Ja1tRRcYAK`
+> RC code hash 链上读回 `0xFE7088ED…50AE` ✓；JM/TV/OA 与 v8.8 相同；4 合约 active。
+> `TV.get_config().controller == RC` ✓；RC wallet 70 亿 / TV wallet 12 亿 ✓。
+> 以下由 Lead 用链上 getter 独立复核。
+
+### 8.1 M4-01 退款回归（确认 v8.9 未破坏 v8.8 的修复）
+
+| 步骤 | 结果 |
+| --- | --- |
+| 攻击前 A9（R1 质押后） | 900,000 |
+| 低 gas 无效质押 X = 100,000 | `get_user_stake(0).amountRaw = 100,000` |
+| `ClaimPrincipal(0)` | 800,000 → 900,000（+100,000） |
+| 再低 gas 无效质押 Y = 200,000 | **`amountRaw = 200,000`（不是 300,000）** ✓ |
+| `ClaimPrincipal(0)` | 700,000 → 900,000（+200,000） |
+| 最终 | 900,000 = 攻击前，**净收益 0** ✓ |
+| `get_claimable_all.principalRaw` | 领取前后均 0 ✓ |
+
+### 8.2 正常路径（成功轮 / 失败轮 / 普通领取）
+
+| 项 | 值 |
+| --- | --- |
+| R1 | `SUCCEEDED`，24 根 / 16 达标，300,000 A9，`teamReleaseConfirmed=true` |
+| R1 团队释放 | TV 12 亿 → 10.8 亿，team 钱包 0 → 1.2 亿 |
+| R2 | `FAILED`，24 / 0，**200,000 A9（PARTIAL：C 因 TON 不足未参与）**，三笔销毁全 `true` |
+| R3 | `FAILED`，24 / 0，**300,000 A9（3 staker 干净失败样本）**，三笔销毁全 `true` |
+| 普通领取 | 用户 A 领取 R1 本金：900,000 → 1,000,000，`principalClaimed=true`，RC wallet 相应 −100,000 A9 |
+
+### 8.3 最终余额（与销毁复算一致）
+
+```
+RC wallet   56.002 亿 A9   （70 亿 − R2/R3 各 7 亿奖励销毁 − 本金销毁 − 已领取本金）
+TV wallet    8.4 亿 A9     （12 亿 − R1 释放 1.2 亿 − R2/R3 各 1.2 亿销毁）
+team wallet  1.2 亿 A9     （R1 释放，未被后续销毁影响）
+```
+
+### 8.4 仍未取得链上证据的部分（重申）
+
+**交错 bounce 场景**：链上无法强制 bounce（需构造必然失败的收款钱包），该场景仅由单元测试覆盖。本节链上结果只证明「正常路径未被 7 行改动影响」。
+
+**R2 为 PARTIAL**（2 staker），R3 作为 3-staker 失败样本补足；两者都记录在案，不做美化。
