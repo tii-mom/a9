@@ -128,6 +128,13 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
     let inFlight = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
+    // Arm the next poll only while the tab is visible. A hidden tab stops polling and resumes on return.
+    const schedule = (delay: number) => {
+      if (!alive || intervalMs <= 0 || document.visibilityState !== 'visible') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(run, delay);
+    };
+
     const run = async () => {
       if (!alive || inFlight) return;
       inFlight = true;
@@ -143,16 +150,11 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
       } finally {
         inFlight = false;
       }
-      if (alive && intervalMs > 0) timer = setTimeout(run, intervalMs);
+      schedule(intervalMs);
     };
 
     run();
-    const onVisible = () => {
-      if (document.visibilityState === 'visible' && intervalMs > 0) {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(run, 250);
-      }
-    };
+    const onVisible = () => schedule(250);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       alive = false;

@@ -16,7 +16,7 @@ import { OrderFlow } from './OrderFlow';
 export default function LandingPage() {
   const copy = useCopy();
   const data = useLandingData();
-  const { board, cfg, stats, trades, book, me, wallet, rounds, secondsRemaining, nextStakeSeconds, candleMs, refreshAll } = data;
+  const { board, cfg, stats, trades, book, me, wallet, rounds, clockTargetMs, nextStakeTargetMs, candleMs, refreshAll } = data;
 
   const [tab, setTab] = useState<'buy' | 'stake'>(BUY_ENTRY_OPEN ? 'buy' : 'stake');
   const navigate = useNavigate();
@@ -66,8 +66,8 @@ export default function LandingPage() {
             cfg={cfg}
             stats={stats}
             board={board}
-            secondsRemaining={secondsRemaining}
-            nextStakeSeconds={nextStakeSeconds}
+            clockTargetMs={clockTargetMs}
+            nextStakeTargetMs={nextStakeTargetMs}
             me={me}
             connected={wallet.connected}
             copy={copy}
@@ -80,7 +80,7 @@ export default function LandingPage() {
             stats={stats}
             board={board}
             dataReady={!data.loading && !data.error && !data.stale}
-            secondsRemaining={secondsRemaining}
+            clockTargetMs={clockTargetMs}
             me={me}
             wallet={wallet}
             copy={copy}

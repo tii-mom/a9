@@ -16,8 +16,10 @@ export interface LandingData {
   trades: Trade[];
   book: OrderBook | null;
   me: MeResponse | null;
-  secondsRemaining: number | null;
-  nextStakeSeconds: number | null;
+  /** Absolute deadline (ms) for the current staking or observation phase. Leaves tick it; this hook does not. */
+  clockTargetMs: number | null;
+  /** Absolute time (ms) when the next staking window opens. */
+  nextStakeTargetMs: number | null;
   candleMs: number;
   loading: boolean;
   error: Error | null;
@@ -56,9 +58,10 @@ export function useLandingData(): LandingData {
     [configQ.data, focus, detailQ.data, roundsQ.data],
   );
 
+  // Coarse clock for freshness flags only (stale / feed health). The per-second countdown lives in leaf components.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -67,31 +70,21 @@ export function useLandingData(): LandingData {
     if (detailQ.data) setDetailAt(Date.now());
   }, [detailQ.data]);
 
-  const secondsRemaining = useMemo(() => {
-    // Staking window → "time until staking ends" (absolute close timestamp).
-    if (board.phase === 'stake' && board.stakeCloseAt) {
-      return Math.max(0, (board.stakeCloseAt - now) / 1000);
-    }
-    // Observation window → "time until verdict" (API observationEnd, fallback to secondsRemaining).
-    if (board.phase === 'observe') {
-      if (board.observationEnd) return Math.max(0, (board.observationEnd - now) / 1000);
-      if (board.secondsRemaining !== null) {
-        const elapsed = detailAt > 0 ? (now - detailAt) / 1000 : 0;
-        return Math.max(0, board.secondsRemaining - elapsed);
-      }
-      return null;
-    }
+  /**
+   * Convert server-relative remaining time to an absolute deadline once, so the countdown
+   * does not need the page to re-render every second.
+   */
+  const clockTargetMs = useMemo(() => {
+    // Staking window → absolute close timestamp.
+    if (board.phase === 'stake' && board.stakeCloseAt) return board.stakeCloseAt;
+    // Observation window → API observationEnd, fallback to server-relative secondsRemaining.
+    if (board.phase === 'observe' && board.observationEnd) return board.observationEnd;
     if (board.secondsRemaining === null) return null;
-    const elapsed = detailAt > 0 ? (now - detailAt) / 1000 : 0;
-    return Math.max(0, board.secondsRemaining - elapsed);
-  }, [board.phase, board.stakeCloseAt, board.observationEnd, board.secondsRemaining, now, detailAt]);
+    return (detailAt > 0 ? detailAt : Date.now()) + board.secondsRemaining * 1000;
+  }, [board.phase, board.stakeCloseAt, board.observationEnd, board.secondsRemaining, detailAt]);
 
-  /** Pre-announcement window → "time until next staking opens" (stats.nextStakeOpenAt). */
-  const nextStakeSeconds = useMemo(() => {
-    const next = statsQ.data?.nextStakeOpenAt ?? null;
-    if (next === null) return null;
-    return Math.max(0, (next - now) / 1000);
-  }, [statsQ.data?.nextStakeOpenAt, now]);
+  /** Pre-announcement window → absolute opening time (stats.nextStakeOpenAt). */
+  const nextStakeTargetMs = statsQ.data?.nextStakeOpenAt ?? null;
 
   /** Nominal spacing of the 4h candle grid, used for the printed hour labels (not the demo speed). */
   const candleMs = useMemo(() => {
@@ -131,8 +124,8 @@ export function useLandingData(): LandingData {
     trades: tradesQ.data ?? [],
     book: bookQ.data,
     me: address && meQ.data?.address === address ? meQ.data : null,
-    secondsRemaining,
-    nextStakeSeconds,
+    clockTargetMs,
+    nextStakeTargetMs,
     candleMs,
     loading,
     error: error instanceof Error ? error : null,

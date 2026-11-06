@@ -7,14 +7,15 @@ import { FuseCells } from './FuseCells';
 import { IcoNo, IcoOk } from './icons';
 import { fill, type LandingCopy } from './landing.i18n';
 import { PriceChart } from './PriceChart';
+import { LiveCountdown } from './LiveCountdown';
 import { formatCompactToken, formatCountdown, intFmt, tokenNum, usdNum } from './utils';
 
 interface Props {
   cfg: ProtocolConfig | null;
   stats: ProtocolStats | null;
   board: BoardView;
-  secondsRemaining: number | null;
-  nextStakeSeconds: number | null;
+  clockTargetMs: number | null;
+  nextStakeTargetMs: number | null;
   me: MeResponse | null;
   connected: boolean;
   copy: LandingCopy;
@@ -55,8 +56,8 @@ export function BattleBoard({
   cfg,
   stats,
   board,
-  secondsRemaining,
-  nextStakeSeconds,
+  clockTargetMs,
+  nextStakeTargetMs,
   me,
   connected,
   copy,
@@ -99,7 +100,7 @@ export function BattleBoard({
         : 'pending';
 
   // Three countdowns: pre-announcement → staking → observation.
-  const showNextStake = (phase === 'done' || phase === 'unopened') && nextStakeSeconds !== null;
+  const showNextStake = (phase === 'done' || phase === 'unopened') && nextStakeTargetMs !== null;
   const clockLabel = showNextStake
     ? copy.board.nextStakeStarts
     : phase === 'stake'
@@ -107,15 +108,18 @@ export function BattleBoard({
       : phase === 'observe' || phase === 'paused'
         ? copy.board.verdictIn + (cfg?.dataSource === 'demo' ? copy.board.demoAccel : '')
         : copy.board.roundLabel;
-  const clockValue = showNextStake
-    ? formatCountdown(nextStakeSeconds, lang)
-    : phase === 'stake' || phase === 'observe' || phase === 'paused'
-      ? formatCountdown(secondsRemaining, lang)
-      : board.result === 'win'
-        ? copy.board.settled
-        : board.result === 'lose'
-          ? copy.board.closed
-          : '—';
+  const timedPhase = phase === 'stake' || phase === 'observe' || phase === 'paused';
+  const liveTargetMs = showNextStake ? nextStakeTargetMs : timedPhase ? clockTargetMs : null;
+  const formatClock = (seconds: number) => formatCountdown(seconds, lang);
+  const clockValue = showNextStake || timedPhase
+    ? liveTargetMs === null
+      ? formatCountdown(null, lang)
+      : <LiveCountdown targetMs={liveTargetMs} format={formatClock} />
+    : board.result === 'win'
+      ? copy.board.settled
+      : board.result === 'lose'
+        ? copy.board.closed
+        : '—';
 
   // verdict
   let verdictKey = 'open';

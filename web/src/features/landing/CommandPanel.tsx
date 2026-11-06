@@ -10,13 +10,14 @@ import { fill, type LandingCopy } from './landing.i18n';
 import type { LandingWallet } from './wallet';
 import { formatCompactToken, intFmt, shortAddr, toRawUnits, tokenNum, usdNum } from './utils';
 import { BUY_ENTRY_OPEN } from './flags';
+import { LiveCountdown } from './LiveCountdown';
 
 interface Props {
   cfg: ProtocolConfig | null;
   stats: ProtocolStats | null;
   dataReady: boolean;
   board: BoardView;
-  secondsRemaining: number | null;
+  clockTargetMs: number | null;
   me: MeResponse | null;
   wallet: LandingWallet;
   copy: LandingCopy;
@@ -26,7 +27,7 @@ interface Props {
   onRefresh: () => void;
 }
 
-export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wallet, copy, tab, setTab, toast, onRefresh }: Props) {
+export function CommandPanel({ cfg, board, dataReady, clockTargetMs, me, wallet, copy, tab, setTab, toast, onRefresh }: Props) {
   const { lang } = useLang();
   const decimals = cfg?.token.decimals ?? 9;
   const price = usdNum(board.priceUsdE8);
@@ -318,7 +319,7 @@ export function CommandPanel({ cfg, board, dataReady, secondsRemaining, me, wall
                 </div>
                 <div>
                   <dt>{copy.cmd.stakeDeadline}</dt>
-                  <dd>{clockText(secondsRemaining)}</dd>
+                  <dd>{clockTargetMs === null ? clockText(null) : <LiveCountdown targetMs={clockTargetMs} format={clockText} />}</dd>
                 </div>
                 <div>
                   <dt>{copy.cmd.stakeTotal}</dt>
