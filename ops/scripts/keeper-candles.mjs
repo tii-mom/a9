@@ -144,9 +144,14 @@ async function submitCandles(roundId) {
       await sleep(sent ? 2500 : 10000);
       rd = await round(roundId);
       if (rd.candlesSeen > index) { landed = true; break; }
+      if (rd.candlesSeen < index) {
+        log({ event: 'candle-reset-detected', roundId, index, candlesSeen: rd.candlesSeen });
+        break;
+      }
       log({ event: 'candle-resend', roundId, index, attempt: attempt + 1, sent, candlesSeen: rd.candlesSeen });
       await sleep(waits[attempt] || 8000);
     }
+    if (!landed && rd.candlesSeen < index) continue;
     if (!landed) {
       throw new Error('candle #' + index + ' 连续 5 次未落地（当前 candlesSeen=' + rd.candlesSeen + '）');
     }
