@@ -507,16 +507,33 @@ get fun `test CRIT-02 real wallet sufficient-gas refund round-trips and does not
 
 get fun `test CRIT-02 first-hop refund bounce lands in ledger`() {
     val r = setupReal();
+    // dedicated zero-balance real JettonWallet owned by RC: refund transfer first hop
+    // rejects with BalanceError and bounces back to RC.
+    val zeroWalletStorage = WalletStorage {
+        jettonBalance: 0,
+        ownerAddress: r.rc.address,
+        minterAddress: r.master,
+    };
+    val zeroWalletInit = ContractState { code: build("JettonWallet"), data: zeroWalletStorage.toCell() };
+    val zeroWallet = AutoDeployAddress { stateInit: zeroWalletInit }.calculateAddress();
+    expect(net.send(testing.treasury("crit02-firsthop-deployer").address, createMessage({
+        bounce: false, value: ton("2"), dest: { stateInit: zeroWalletInit }, body: TopUpTons {},
+    }))).toHaveSuccessfulDeploy({ to: zeroWallet });
+    expect(setRcWallet(r.rc, r.admin, zeroWallet)).toHaveSuccessfulTx<SetJettonWallet>({
+        from: r.admin, to: r.rc.address,
+    });
     openRoundReal(r, 300000);
-    val q = createPendingRefund(r, r.user);
-    // simulated wallet bounce (first hop): RC only needs op+queryId
-    val bounceBody = beginCell()
-        .storeUint(0xFFFFFFFF, 32)
-        .storeUint(0x0f8a7ea5, 32) // AskToTransfer
-        .storeUint(q, 64)
-        .endCell();
-    val bounced = createMessage({ bounce: false, value: ton("0.1"), dest: r.rc.address, body: bounceBody }).bounced();
-    net.send(r.rcWallet, bounced);
+    val counter = net.runGetMethod<uint64>(r.rc.address, "get_claim_counter");
+    val q = refundQueryId(counter);
+    // real wallet notification path: sender = zero wallet, value 0.2 -> RC refunds,
+    // wallet rejects (0 token balance), bounce returns to RC and rollback REFUND runs.
+    net.send(zeroWallet, createMessage({
+        bounce: false,
+        value: ton("0.2"),
+        dest: r.rc.address,
+        body: notificationBody(r.user, 1000),
+    }));
+    expect(net.runGetMethod<bool>(r.rc.address, "has_pending_claim", [q])).toBeFalse();
     expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(1000 as uint128);
 }
 
