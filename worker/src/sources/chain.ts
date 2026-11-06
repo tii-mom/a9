@@ -1,70 +1,99 @@
 /**
- * 真实链上数据源 —— 适配器桩（TODO）。
+ * 真实链上数据源（只读适配器）—— **纯同步、零网络**。
  *
- * 设计原则（见 docs/03、docs/04）：
- *  - 链上状态是唯一权威；Worker 只做只读镜像 + 缓存，不能把链下推算当成链上终态。
- *  - K 线必须来自 OracleAdapter 已验证的签名数据，不能由前端/后台自行推导。
- *  - 失败销毁必须等待 Jetton Master 的 total_supply 实际减少（BurnAck），
- *    不能仅凭 keeper 声明把轮次改成 FAILED_PERMANENT。
- *  - 预言机故障期间禁止推进达标计数，恢复后必须重新收集完整 12 根窗口。
+ * 分工（Lead 明确定死）：
+ *  - 所有 toncenter 请求都在 worker/src/indexer/sync.ts 的 tick 里完成；
+ *  - 本文件只读 D1 已落库的链上快照（rounds 行 + metrics 健康键），供 views/state 同步调用；
+ *  - K 线由索引器从链上 SubmitCandle 消息落进 candles 表，因此 derivesCandles=false。
  *
- * TODO（按优先级）：
- *  1. TON RPC：toncenter v3 / v4 读取 Jetton Master total_supply、decimals 与 RoundController 状态；
- *  2. Get methods：get_protocol_config / get_round / get_round_status / get_round_target_price /
- *     get_round_candle / get_user_stake / get_round_total_stake / get_user_reward_estimate /
- *     get_round_burn_status / get_total_burned_by_round；
- *  3. OracleAdapter：拉取 4h TWAP、coverageBps、validSourceCount、dataDigest，
- *     校验 feedId / oracleConfigVersion / validUntil / dataDigest 重放；
- *  4. 同步器：把已验证 Candle 写入 candles 表（derivesCandles=false），并把链上事件写 admin_events；
- *  5. BurnAck：核对 burn_ledger.burn_ref 与链上 burnId/amount，写入 confirmed/chain_tx_hash；
- *  6. P0 冻结校验：比较 ORACLE_CONFIG_HASH 与链上配置哈希，不一致时拒绝返回协议数据；
- *  7. 质押/领取：链上模式下 POST /api/stake、/api/claim 必须返回 501/409（只读 Worker），
- *     由前端构造 Jetton Transfer 由用户钱包签名，Worker 不做任何签名或代扣；
- *  8. 观测：为 RPC 失败、数据过期、来源不足接 ORACLE_PAUSED 状态机（已由 state.ts 实现）。
+ * 价格口径（"宁可空，不可假"）：
+ *  - 现价 = 最近一根已上链 K 线 TWAP；观察期开始前回退到开窗锁定的 24h TWAP；
+ *  - 两者都没有 → 返回 0n，并且 oracleStatus 报 paused（前端显示数据不可用），
+ *    **绝不插值、不做正弦抖动、绝不回退 demo 值**。
  */
 import type { DataSource, OracleStatus } from '@shared/types';
 import type { Params } from '../protocol';
 import type { BookRow, CandleRow, RoundRow, TradeRow } from '../store';
 import { ApiError } from '../http';
 import { toBigInt } from '../util';
+import { readChainHealth } from '../indexer/health';
 import type { MarketSource } from './types';
 
-function notImplemented(feature: string): never {
-  throw new ApiError('INTERNAL', `链上数据源尚未接入（${feature}），请配置 DATA_SOURCE=demo`);
+interface ChainRoundRow extends RoundRow {
+  last_candle_twap_usd_e8?: string | null;
+  last_candle_at?: number | null;
+  target_twap24h_usd_e8?: string | null;
+  chain_status?: number | null;
+}
+
+/** 链上快照里最后一根已上链 K 线 TWAP；观察期前回退到开窗 24h TWAP；都没有返回 0n。 */
+function snapshotPrice(round: RoundRow): bigint {
+  const row = round as ChainRoundRow;
+  const last = toBigInt(row.last_candle_twap_usd_e8 ?? '0');
+  if (last > 0n) return last;
+  return toBigInt(row.target_twap24h_usd_e8 ?? '0');
+}
+
+function notImplementedInChainSource(feature: string): never {
+  // 这些方法只在 demo 数据源（derivesCandles=true）被调用；chain 模式调到这里说明有代码路径写错了
+  throw new ApiError('INTERNAL', '链上数据源不提供「' + feature + '」：K 线/价格由链上索引器落库后读取');
 }
 
 export const chainSource: MarketSource = {
   kind: 'chain' as DataSource,
   derivesCandles: false,
+
   buildCandle(_params: Params, _round: RoundRow, _candleIndex: number): CandleRow {
-    return notImplemented('buildCandle / OracleAdapter 同步');
+    return notImplementedInChainSource('buildCandle');
   },
-  candleTwap(_params: Params, _round: RoundRow, _candleIndex: number): bigint {
-    return notImplemented('candleTwap / OracleAdapter 查询');
+
+  candleTwap(_params: Params, round: RoundRow, _candleIndex: number): bigint {
+    void _candleIndex;
+    return snapshotPrice(round);
   },
-  currentPrice(_params: Params, _round: RoundRow, _now: number): bigint {
-    return notImplemented('currentPrice / DEX 行情');
+
+  /** 现价：最近一根已上链 K 线 TWAP（无数据返回 0n + ORACLE_PAUSED）。 */
+  currentPrice(_params: Params, round: RoundRow, _now: number): bigint {
+    return snapshotPrice(round);
   },
-  liveTwap(_params: Params, _round: RoundRow, _candleIndex: number, _progressBps: number): bigint {
-    return notImplemented('liveTwap / OracleAdapter 查询');
+
+  /** 进行中 K 线：链上无「未收盘 TWAP」，这里返回最近一根已上链 K 线 TWAP，不插值。 */
+  liveTwap(_params: Params, round: RoundRow, _candleIndex: number, _progressBps: number): bigint {
+    return snapshotPrice(round);
   },
-  terminalPrice(_params: Params, _round: RoundRow): bigint {
-    return notImplemented('terminalPrice / 链上结算快照');
+
+  /** 终态轮次展示价：最后一根已上链 K 线 TWAP。 */
+  terminalPrice(_params: Params, round: RoundRow): bigint {
+    return snapshotPrice(round);
   },
-  oracleStatus(_params: Params, kv: Map<string, string>, now: number): OracleStatus {
+
+  /** 预言机健康：完全由索引器写入的 D1 健康键决定（同步读，无网络）。 */
+  oracleStatus(params: Params, kv: Map<string, string>, now: number): OracleStatus {
+    const health = readChainHealth(kv);
+    const age = health.lastOkAt > 0 ? now - health.lastOkAt : Number.POSITIVE_INFINITY;
+    const staleAfterMs = Math.max(2 * params.candleMs, 10 * 60 * 1000);
+    const paused = params.paused || !health.healthy || health.configMismatch || age > staleAfterMs;
+    const online = !paused && health.lastOkAt > 0;
     return {
-      online: false,
-      validSources: 0,
-      totalSources: Number(kv.get('oracle_total_sources') ?? '0') || 0,
-      coverageBps: 0,
-      configVersion: kv.get('oracle_config_version') ?? 'unconfigured',
-      lastUpdate: now,
-      paused: true,
+      online,
+      // 链上模式只有一个「链上提交者」（测试网手动 keeper）；不谎称多源
+      validSources: online ? 1 : 0,
+      totalSources: 1,
+      coverageBps: online ? 10_000 : 0,
+      configVersion: health.configHash
+        ? 'chain:v' + health.configVersion + (health.configMismatch ? ':mismatch' : '')
+        : 'chain:v' + health.configVersion,
+      lastUpdate: health.lastOkAt > 0 ? health.lastOkAt : now,
+      paused,
     };
   },
+
+  /** 链上模式不生成成交（没有可验证的二级市场时留空，绝不用假数据填充）。 */
   buildTrades(_params: Params, _round: RoundRow, _count: number, _fromTs: number, _now: number): TradeRow[] {
     return [];
   },
+
+  /** 链上模式不生成盘口（同上）。 */
   bookRows(_params: Params, _midUsdE8: bigint, _levels: number): BookRow[] {
     return [];
   },

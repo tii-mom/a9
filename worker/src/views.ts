@@ -40,18 +40,24 @@ function totals(row: RoundRow, state: ReconcileResult): { totalAcceptedStakeRaw:
 
 export function buildRoundSummary(row: RoundRow, state: ReconcileResult): RoundSummary {
   const aggregate = totals(row, state);
-  // D-28：档位随轮次落库（target_tier），禁止用 roundId 推导；旧数据才走兜底。
-  const tier =
-    row.target_tier > 0
-      ? row.target_tier
+  const chainMode = state.params.dataSource === 'chain';
+  // D-28：档位随轮次落库（target_tier），禁止用 roundId 推导；只有 demo 旧数据才走兜底。
+  const tierKnown = row.target_tier > 0;
+  // B7：chain 模式未开轮且索引器还没写 target_tier/target_price 时，不投影、不猜档位；
+  // 返回 0 并用 targetLocked=false 明确标注「目标未锁定」（demo 行为保持不变）。
+  const targetLocked = !chainMode || (tierKnown && toBigInt(row.target_price_usd_e8) > 0n);
+  const tier = tierKnown
+    ? row.target_tier
+    : chainMode
+      ? 0
       : row.state === 'UNOPENED'
         ? projectedTierForRound(row.round_id, state.rounds)
         : tierForRound(row.round_id, state.rounds);
   return {
     roundId: row.round_id,
     state: row.state,
-    priceMultiplier: priceMultiplierFor(tier),
-    targetPriceUsdE8: row.target_price_usd_e8,
+    priceMultiplier: targetLocked ? priceMultiplierFor(tier) : 0,
+    targetPriceUsdE8: targetLocked ? row.target_price_usd_e8 : '0',
     rewardBudgetRaw: row.reward_budget_raw,
     stakeOpenAt: row.stake_open_at,
     stakeCloseAt: row.stake_close_at,
@@ -66,7 +72,9 @@ export function buildRoundSummary(row: RoundRow, state: ReconcileResult): RoundS
     result: row.result,
     burnedRaw: row.burned_raw,
     updatedAt: row.updated_at,
-  };
+    // 额外字段（shared/types 暂未声明）：chain 未锁定目标时前端应显示「待链上开轮」
+    targetLocked,
+  } as RoundSummary & { targetLocked: boolean };
 }
 
 export function buildCandles(rows: CandleRow[]): Candle[] {
@@ -331,6 +339,8 @@ export function buildLeaderboard(state: ReconcileResult, roundId: number): Leade
   const round = state.rounds.find((item) => item.round_id === roundId);
   const rewarded = round ? round.result !== 'FAILURE' : true;
   const rewardBudget = rewarded && round ? toBigInt(round.reward_budget_raw) : 0n;
+  // B4：chain 模式 rewardEstimateRaw 是本地 V8 权重估算（非链上可领取额），带 estimate:true 供前端标注
+  const estimate = state.params.dataSource === 'chain';
   // P1-C：预计奖励按 V8 权重（own weight + 邀请加成）/ 总权重，而不是本金比例
   const weights = v8.computeRoundWeights(
     state.params,
@@ -350,6 +360,7 @@ export function buildLeaderboard(state: ReconcileResult, roundId: number): Leade
         shareBps: Number((entry.amountRaw * 10000n) / aggregate.totalRaw),
         rewardEstimateRaw: estimate.toString(),
         acceptedAt: entry.acceptedAt,
+        estimate: state.params.dataSource === 'chain',
       };
     });
 }

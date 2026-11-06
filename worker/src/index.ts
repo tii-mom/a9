@@ -209,9 +209,10 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
       amountRaw: claimAmount,
       claimedAt: st.now,
     });
+    // unlock 为累加式（多次部分领取），recordClaim 只会因数据库异常失败；
+    // 返回值必须是**本次实际领取额**（claimAmount），不是累计已领额。
     if (!recordedUnlock) {
-      const raced = await store.getClaim(env, st.params.roundCount, address, 'unlock');
-      return okResponse({ claimed: false, amountRaw: raced?.amount_raw ?? '0', alreadyClaimed: true });
+      return okResponse({ claimed: false, amountRaw: '0', alreadyClaimed: true });
     }
     await store.updateUnlockPool(
       env,
@@ -343,6 +344,9 @@ async function handleAdmin(
   }
   if (parts.length === 3 && parts[1] === 'oracle' && (parts[2] === 'pause' || parts[2] === 'resume')) {
     assertMethod(method, 'POST');
+    if (st.params.dataSource === 'chain') {
+      throw notImplemented('链上模式无法本地暂停/恢复预言机：暂停由链上 status=5 驱动，请在合约执行');
+    }
     if (parts[2] === 'pause') {
       const body = await readJsonBody(request);
       const reason = optionalString(body, 'reason') ?? '管理员手动暂停';
@@ -356,6 +360,9 @@ async function handleAdmin(
   }
   if (parts.length === 3 && parts[1] === 'rounds' && parts[2] === 'advance') {
     assertMethod(method, 'POST');
+    if (st.params.dataSource === 'chain') {
+      throw notImplemented('链上模式无法本地推进轮次：开轮由合约 RoundController 决定，请在链上执行');
+    }
     const next = await state.advanceRound(env, actor);
     bustCache();
     return okResponse(await views.buildAdminOverview(env, next));
@@ -395,6 +402,8 @@ interface RoutePlan {
   cacheable: boolean;
   cheap: 'none' | 'nonce' | 'health' | 'version';
   badRequestMessage?: string;
+  /** B1：chain 模式必须返回 501 的本地写接口（链上状态只能由合约/索引器决定） */
+  chainForbiddenMessage?: string;
 }
 
 function routePlan(partial: Partial<RoutePlan>): RoutePlan {
@@ -474,10 +483,22 @@ function classifyRoute(method: string, url: URL): RoutePlan | null {
       return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
     }
     if (parts.length === 3 && parts[1] === 'oracle' && (parts[2] === 'pause' || parts[2] === 'resume')) {
-      return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+      return isPost
+        ? routePlan({
+            requiresAdmin: true,
+            d1Scope: 'admin',
+            chainForbiddenMessage: '链上模式无法本地暂停/恢复预言机：暂停由链上 status=5 驱动，请在合约执行',
+          })
+        : null;
     }
     if (parts.length === 3 && parts[1] === 'rounds' && parts[2] === 'advance') {
-      return isPost ? routePlan({ requiresAdmin: true, d1Scope: 'admin' }) : null;
+      return isPost
+        ? routePlan({
+            requiresAdmin: true,
+            d1Scope: 'admin',
+            chainForbiddenMessage: '链上模式无法本地推进轮次：开轮由合约 RoundController 决定，请在链上执行',
+          })
+        : null;
     }
     if (parts.length === 3 && parts[1] === 'indexer' && (parts[2] === 'tick' || parts[2] === 'reconcile')) {
       // H-4 补充：运维手动触发索引器（tick）/ 全量对账（reconcile）
@@ -631,6 +652,11 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     return withReconciled(apiErrorResponse(badRequest(plan.badRequestMessage)), false);
   }
 
+  // B1：chain 模式禁止本地写 admin 状态（暂停/推进），必须在链上执行；overview 与 indexer/* 保留
+  if (plan.chainForbiddenMessage && (env.DATA_SOURCE ?? 'demo') === 'chain') {
+    return withReconciled(apiErrorResponse(notImplemented(plan.chainForbiddenMessage)), false);
+  }
+
   // ② 敏感路径 D1 限流（admin/stake/claim/nonce；nonce 单独更低配额）
   if (plan.d1Scope) {
     const limitOverride =
@@ -649,7 +675,9 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (plan.cheap === 'health') {
     const db = await store.dbPing(env);
     const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
-    return withReconciled(okResponse(views.buildHealth(env, db, dataSource, chainError)), false);
+    // B6：health 额外读一次 kv，把「缺少链上配置键」也作为 oracle.paused 原因暴露（仍 200）
+    const healthError = dataSource === 'chain' ? chainConfigError(env, await store.getKeyValues(env)) : chainError;
+    return withReconciled(okResponse(views.buildHealth(env, db, dataSource, healthError)), false);
   }
   if (plan.cheap === 'version') {
     const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
@@ -666,6 +694,18 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
 
   const st = await state.reconcile(env);
   if (st.changed) bustCache();
+
+  // B6：chain 模式关键链上配置缺失 → 禁止回退本地常量对外服务（cron 仍会跑索引器把配置写入 kv）。
+  // H-8：/api/admin/indexer/tick|reconcile 是「运维救援入口」，必须豁免——干净库首启时这些配置键
+  // 只有索引器自己会写，否则会死锁（admin 手动 tick 永远被 503 挡住）。鉴权/限流已在前面完成。
+  if (st.params.dataSource === 'chain') {
+    const isIndexerOps = url.pathname.startsWith('/api/admin/indexer/');
+    const configError = chainConfigError(env, st.kv);
+    if (configError && !isIndexerOps) {
+      return withReconciled(apiErrorResponse(oraclePaused(configError)), false);
+    }
+  }
+
   const response = await route(request, env, url, method, st);
 
   if (plan.cacheable && ttl > 0) {

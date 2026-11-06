@@ -206,5 +206,7 @@ export interface Params {
   maxTotalStakeRaw: bigint;
   /** 演示模式「解锁中」展示时长（秒） */
   demoUnlockSeconds: number;
+  /** B6：chain 模式缺失的关键链上配置键（非空时 API 必须 ORACLE_PAUSED，不得回退本地常量） */
+  chainConfigMissing: string[];
   now: number;
 }

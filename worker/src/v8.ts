@@ -136,9 +136,17 @@ export async function syncV8Rounds(
     const stakes = allStakes.filter((stake) => stake.round_id === round.round_id);
     if (!stakes.length) continue;
 
+    // B3：chain 模式的 total_weight_raw / K 线哈希 / round_rewards 全部由索引器按链上 get_round 写入，
+    // 本地不得用 stakes 重算覆盖（与 H-7 candle_hash 同类问题）。
+    // 单一写者约定：chain 模式这些字段的唯一写者是 worker/src/indexer（indexer-dev）；
+    // 本函数未来若要在 chain 下恢复部分逻辑，必须先与索引器侧确认，不能再出现双写。
+    if (params.dataSource === 'chain') continue;
+
     const weights = computeRoundWeights(params, stakes);
     const totalWeightRaw = weights.totalWeight.toString();
-    if (round.total_weight_raw !== totalWeightRaw) {
+    // 注意：必须在修改 round.total_weight_raw 之前记录差异，否则下面的落库条件永远为 false
+    const weightChanged = round.total_weight_raw !== totalWeightRaw;
+    if (weightChanged) {
       round.total_weight_raw = totalWeightRaw;
       changed = true;
     }
@@ -160,23 +168,19 @@ export async function syncV8Rounds(
       }
     }
 
-    // V8 链上只存滚动哈希：这里按已收盘 K 线重算并落库
+    // H-7：demo 模式仍由本地重算 V8 字符串滚动哈希（sha256(prev|index|twap|digest)）并落库；
+    // chain 模式已在函数开头 return，保留链上 TON cell 滚动哈希。
     const candles = candlesByRound.get(round.round_id) ?? [];
-    if (candles.length > 0) {
-      const hash = await computeCandleHash(candles);
-      if (round.candle_hash !== hash) {
-        round.candle_hash = hash;
-        changed = true;
-      }
+    const hash = candles.length > 0 ? await computeCandleHash(candles) : null;
+    let hashChanged = false;
+    if (round.candle_hash !== hash) {
+      round.candle_hash = hash;
+      hashChanged = true;
+      changed = true;
     }
 
-    const currentHash = candles.length > 0 ? await computeCandleHash(candles) : null;
-    if (round.total_weight_raw === totalWeightRaw && round.candle_hash === currentHash) continue;
-    if (round.total_weight_raw !== totalWeightRaw || round.candle_hash !== currentHash) {
-      round.total_weight_raw = totalWeightRaw;
-      round.candle_hash = currentHash;
-      await store.updateRoundWeightHash(env, round.round_id, totalWeightRaw, currentHash, now);
-      changed = true;
+    if (weightChanged || hashChanged) {
+      await store.updateRoundWeightHash(env, round.round_id, totalWeightRaw, round.candle_hash ?? null, now);
     }
   }
   return changed;
@@ -308,6 +312,17 @@ export function lockedRewardFor(
   return locked;
 }
 
+/**
+ * V8 ClaimUnlocked 线性解锁视图。
+ *
+ * 注意（链上验收口径，已写入审计简报）：`UNLOCK_DURATION_SECONDS = 31,104,000`（12×30 天）是
+ * 编译期常量，快测无法压缩。主网/测试网 R10 后立刻 ClaimUnlocked 会正确返回 NothingUnlocked
+ * （t≈0 时 nothing vested），这是预期行为、不是 bug。链上只能验证：
+ *   - get_unlock_info().unlockStart > 0（R10 终态后已设置起点）；
+ *   - totalLockedRaw 与未领奖励一致；
+ *   - ClaimUnlocked 在未 vest 时被正确拒绝。
+ * vesting 数学由 contracts/tests/rewards-v8.test.tolk 的时间跳跃单测覆盖。
+ */
 export async function buildUnlockInfo(
   env: Env,
   params: Params,

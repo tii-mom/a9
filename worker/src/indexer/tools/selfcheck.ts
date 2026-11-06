@@ -83,13 +83,20 @@ async function main(): Promise<void> {
   add('config.slotCount', true, '22 槽解析成功，configVersion=' + cfg.configVersion + ' hash=' + digest.slice(0, 23) + '…');
   add('config.p0', cfg.p0UsdE8 === '116000', 'p0UsdE8=' + cfg.p0UsdE8);
   add('config.multiplier', cfg.priceMultiplier === '2', 'priceMultiplier=' + cfg.priceMultiplier);
-  add('config.candles', cfg.candleCount === '24' && cfg.candleSeconds === '3600' && cfg.minQualifiedCandles === '16', 'count=' + cfg.candleCount + ' seconds=' + cfg.candleSeconds + ' threshold=' + cfg.minQualifiedCandles);
-  add('config.timeline', cfg.previewSeconds === '43200' && cfg.stakeDurationSeconds === '129600' && cfg.observationSeconds === '86400', 'preview=' + cfg.previewSeconds + ' stake=' + cfg.stakeDurationSeconds + ' obs=' + cfg.observationSeconds);
+  // 时间参数按「代数不变量」校验（生产是 24×3600/16/43200/129600/86400；fast-test 实例会压缩时间，不能用生产常量卡死）
+  const candleCount = Number(cfg.candleCount);
+  const candleSeconds = Number(cfg.candleSeconds);
+  const threshold = Number(cfg.minQualifiedCandles);
+  add('config.candles', candleCount > 0 && candleSeconds > 0 && threshold > 0 && threshold <= candleCount, 'count=' + candleCount + ' seconds=' + candleSeconds + ' threshold=' + threshold);
+  add('config.observation', Number(cfg.observationSeconds) === candleSeconds * candleCount, 'obs=' + cfg.observationSeconds + ' = ' + candleSeconds + '×' + candleCount);
+  add('config.timeline', Number(cfg.previewSeconds) >= 0 && Number(cfg.stakeDurationSeconds) > 0, 'preview=' + cfg.previewSeconds + ' stake=' + cfg.stakeDurationSeconds);
 
   const currentRound = await getCurrentRound(client, rc.raw);
   add('round.current', currentRound >= 0 && currentRound <= 10, 'currentRound=' + currentRound);
   const jetton = await getJettonData(client, jm.raw);
-  add('jetton.supply', jetton.totalSupplyRaw === 10_000_000_000n * 1_000_000_000n, 'totalSupply=' + jetton.totalSupplyRaw.toString());
+  const expectedFull = process.argv.includes('--expect-full-supply');
+  const initialSupply = 10_000_000_000n * 1_000_000_000n;
+  add('jetton.supply', jetton.totalSupplyRaw > 0n && jetton.totalSupplyRaw <= initialSupply && (!expectedFull || jetton.totalSupplyRaw === initialSupply), 'totalSupply=' + jetton.totalSupplyRaw.toString() + (expectedFull ? '（期望初始 1e19）' : ''));
   add('jetton.mintable', jetton.mintable === false, 'mintable=' + String(jetton.mintable));
 
   const tvState = await getTeamVaultState(client, tv.raw);
@@ -175,11 +182,13 @@ async function main(): Promise<void> {
       }
     }
 
-    if (round.status === 8 || round.status === 9) {
+    if (round.status === 9) {
       const burnStatus = await getRoundBurnStatus(client, rc.raw, roundId);
       const expectedBurnId = '0x' + bytesToHex(await failureBurnId(roundId, Number(cfg.configVersion)));
       add('round' + roundId + '.burnId', burnStatus.failureBurnId === expectedBurnId, 'chain=' + burnStatus.failureBurnId.slice(0, 18) + '… computed=' + expectedBurnId.slice(0, 18) + '…');
       add('round' + roundId + '.burntFlags', true, 'reward=' + Number(burnStatus.rewardBurnConfirmed) + ' team=' + Number(burnStatus.teamBurnConfirmed) + ' principal=' + Number(burnStatus.principalBurnConfirmed));
+    } else if (round.status === 8) {
+      add('round' + roundId + '.successBurnFlags', true, 'reward=' + Number(round.rewardBurnConfirmed) + '（0 质押轮 D-18b 才为 1）');
     }
     add('round' + roundId + '.status', true, 'status=' + round.status + ' seen=' + num(round.candlesSeen) + ' qualified=' + num(round.qualifiedCandles) + ' settledAt=' + num(round.settledAt));
   }

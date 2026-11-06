@@ -85,12 +85,42 @@ export function uptimeSeconds(now = Date.now()): number {
  * H-6：chain 模式启动前置校验。缺失 TONCENTER_API_KEY（且未显式 TONCENTER_ALLOW_PUBLIC=1）
  * 时不允许降级运行——调用方应返回 ORACLE_PAUSED / 跳过 indexer tick。
  */
-export function chainConfigError(env: Env): string | null {
+/**
+ * chain 模式必须由链上/索引器写入的关键配置键（B6）。
+ * 缺失时不允许回退本地常量对外服务，调用方应返回 ORACLE_PAUSED。
+ */
+export const CHAIN_REQUIRED_CONFIG_KEYS = [
+  'p0_usd_e8',
+  'round_reward_raw',
+  'total_supply_raw',
+  'min_stake_raw',
+  'max_total_stake_raw',
+  'candle_count',
+  'candle_seconds',
+  'min_qualified_candles',
+  'observation_seconds',
+  'stake_duration_seconds',
+  'risk_disclosure_version',
+] as const;
+
+export function missingChainConfigKeys(kv: Map<string, string>): string[] {
+  return CHAIN_REQUIRED_CONFIG_KEYS.filter((key) => {
+    const value = kv.get(key);
+    return value === undefined || value.trim() === '';
+  });
+}
+
+export function chainConfigError(env: Env, kv?: Map<string, string>): string | null {
   const dataSource = (env.DATA_SOURCE ?? 'demo').trim();
   if (dataSource !== 'chain') return null;
-  if (env.TONCENTER_ALLOW_PUBLIC === '1') return null;
-  if (!env.TONCENTER_API_KEY || !env.TONCENTER_API_KEY.trim()) {
+  if (env.TONCENTER_ALLOW_PUBLIC !== '1' && (!env.TONCENTER_API_KEY || !env.TONCENTER_API_KEY.trim())) {
     return 'chain 模式缺少 TONCENTER_API_KEY（本地调试可显式 TONCENTER_ALLOW_PUBLIC=1）';
+  }
+  if (kv) {
+    const missing = missingChainConfigKeys(kv);
+    if (missing.length > 0) {
+      return 'chain 模式缺少链上配置：' + missing.join(', ') + '（禁止回退本地常量）';
+    }
   }
   return null;
 }

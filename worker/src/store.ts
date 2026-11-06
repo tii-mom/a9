@@ -1091,11 +1091,38 @@ export async function getClaim(
   return first<ClaimRow>(env, 'SELECT * FROM claims WHERE round_id = ? AND address = ? AND kind = ?', roundId, address, kind);
 }
 
-/** 幂等领取：claims 唯一键兜底，并同步 stake 的领取标记。 */
+/**
+ * 记录领取。
+ *  - principal / reward：一次性领取，claims 唯一键兜底（重复返回 false）。
+ *  - unlock：线性解锁允许多次部分领取，必须**累加**已有记录（claimed_raw += 本次份额）。
+ *    金额是 raw units 字符串，A9 总供应 1e19 > SQLite INTEGER 上限（2^63≈9.2e18），
+ *    因此不能写 SQL 加法；这里读出旧值、用 BigInt 相加后写回（D1 无事务 API，靠单写者/限流兜底）。
+ */
 export async function recordClaim(
   env: Env,
   input: { roundId: number; address: string; kind: 'principal' | 'reward' | 'unlock'; amountRaw: bigint; claimedAt: number },
 ): Promise<boolean> {
+  if (input.kind === 'unlock') {
+    const existing = await first<{ amount_raw: string }>(
+      env,
+      "SELECT amount_raw FROM claims WHERE round_id = ? AND address = ? AND kind = 'unlock'",
+      input.roundId,
+      input.address,
+    );
+    const total = (existing ? toBigInt(existing.amount_raw) : 0n) + input.amountRaw;
+    await run(
+      env,
+      `INSERT INTO claims (round_id, address, kind, amount_raw, claimed_at) VALUES (?, ?, 'unlock', ?, ?)
+       ON CONFLICT(round_id, address, kind) DO UPDATE SET
+         amount_raw = excluded.amount_raw,
+         claimed_at = excluded.claimed_at`,
+      input.roundId,
+      input.address,
+      total.toString(),
+      input.claimedAt,
+    );
+    return true;
+  }
   const results = await env.DB.batch([
     env.DB.prepare(
       `INSERT OR IGNORE INTO claims (round_id, address, kind, amount_raw, claimed_at)

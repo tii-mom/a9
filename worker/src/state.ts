@@ -9,7 +9,7 @@
  *  - 所有推进都用 CAS（UPDATE ... WHERE state = 期望值）+ INSERT OR IGNORE，cron 与手动 tick 并发安全。
  *  - 轮次聚合（总质押 / 地址数 / 每地址明细）只从 stakes 表派生，一次查询聚合，四处接口共用。
  */
-import type { Env } from './env';
+import { missingChainConfigKeys, type Env } from './env';
 import {
   CANDLE_COUNT,
   DEFAULT_DEMO_CANDLE_SECONDS,
@@ -157,6 +157,8 @@ export function buildParams(env: Env, now: number, kv: Map<string, string>): Par
     minStakeRaw: bigintFrom(kv, 'min_stake_raw', MIN_STAKE_RAW),
     maxTotalStakeRaw: bigintFrom(kv, 'max_total_stake_raw', MAX_TOTAL_STAKE_RAW),
     demoUnlockSeconds: clampInt(Number(env.DEMO_UNLOCK_SECONDS ?? kv.get('demo_unlock_seconds') ?? DEFAULT_DEMO_UNLOCK_SECONDS), 30, 86_400),
+    // B6：chain 模式缺失关键链上配置时标记（API 层直接 ORACLE_PAUSED，禁止回退本地常量对外服务）
+    chainConfigMissing: dataSource === 'chain' ? missingChainConfigKeys(kv) : [],
     previewSeconds:
       dataSource === 'demo'
         ? clampInt(Number(env.DEMO_PREVIEW_SECONDS ?? kv.get('demo_preview_seconds') ?? DEFAULT_DEMO_PREVIEW_SECONDS), 5, 86_400)
@@ -347,26 +349,31 @@ export async function reconcile(env: Env, now = Date.now()): Promise<ReconcileRe
   let changed = state.changed;
 
   // 0) 轮次聚合列与 stakes 事实源对齐（只在漂移时写库）
-  for (const round of rounds) {
-    const aggregate = state.stakeAgg.get(round.round_id);
-    if (!aggregate) continue;
-    const totalRaw = aggregate.totalRaw.toString();
-    if (round.total_accepted_stake_raw !== totalRaw || round.staker_count !== aggregate.stakerCount) {
-      round.total_accepted_stake_raw = totalRaw;
-      round.staker_count = aggregate.stakerCount;
-      await store.updateRoundAggregate(env, round.round_id, totalRaw, aggregate.stakerCount, now);
-      changed = true;
+  //    B3b：chain 模式的轮次聚合由索引器按链上 get_round 写入，本地不得用本地 stakes 覆盖。
+  if (params.dataSource !== 'chain') {
+    for (const round of rounds) {
+      const aggregate = state.stakeAgg.get(round.round_id);
+      if (!aggregate) continue;
+      const totalRaw = aggregate.totalRaw.toString();
+      if (round.total_accepted_stake_raw !== totalRaw || round.staker_count !== aggregate.stakerCount) {
+        round.total_accepted_stake_raw = totalRaw;
+        round.staker_count = aggregate.stakerCount;
+        await store.updateRoundAggregate(env, round.round_id, totalRaw, aggregate.stakerCount, now);
+        changed = true;
+      }
     }
   }
 
   // 1) 按时间推进状态（不含 K 线）
+  //    B2：chain 模式的状态迁移（含 STAKING_OPEN→CLOSED→OBSERVING、暂停）完全由索引器按链上
+  //    chain_status 写入；本地宁可页面晚几秒，也不能领先链上（领先会让用户对着已关窗的轮次发交易）。
+  const chainMode = params.dataSource === 'chain';
   for (const round of rounds) {
     if (round.state === 'UNOPENED') continue;
     if (isTerminal(round.state)) continue;
+    if (chainMode) continue;
 
     if (params.paused && round.state === 'OBSERVING') {
-      // H-3：chain 模式暂停由链上 status=5 驱动（索引器映射），本地不推进
-      if (params.dataSource === 'chain') continue;
       if (await store.casRoundState(env, round.round_id, 'OBSERVING', 'ORACLE_PAUSED', now)) {
         round.state = 'ORACLE_PAUSED';
         round.updated_at = now;
