@@ -123,6 +123,8 @@ fun onInternalMessage(in: InMessage) {
         }
 
         AskToTransfer => {
+            // A9-CRIT-01: zero-amount transfers are never needed and enable spoofing.
+            assert (msg.jettonAmount > 0) throw JettonErrors.BalanceError;
             msg.forwardPayload.checkIsCorrectTlbEither();
             assert (
                 msg.transferRecipient.getWorkchain() == MY_WORKCHAIN
@@ -135,6 +137,11 @@ fun onInternalMessage(in: InMessage) {
 
             var storage = lazy WalletStorage.load();
             assert (in.senderAddress == storage.ownerAddress) throw JettonErrors.NotOwner;
+            // A9-CRIT-01: only the owner may receive excesses; prevents a third party
+            // from using this wallet as a confused deputy to spoof ReturnExcessesBack.
+            assert (
+                msg.sendExcessesTo == null || msg.sendExcessesTo! == storage.ownerAddress
+            ) throw JettonErrors.NotOwner;
             assert (storage.jettonBalance >= msg.jettonAmount) throw JettonErrors.BalanceError;
             storage.jettonBalance -= msg.jettonAmount;
             storage.save();
@@ -162,10 +169,15 @@ fun onInternalMessage(in: InMessage) {
         }
 
         AskToBurn => {
+            // A9-CRIT-01: zero amount and third-party excess destinations are forbidden.
+            assert (msg.jettonAmount > 0) throw JettonErrors.BalanceError;
             checkAmountIsEnoughToBurn(in.valueCoins);
 
             var storage = lazy WalletStorage.load();
             assert (in.senderAddress == storage.ownerAddress) throw JettonErrors.NotOwner;
+            assert (
+                msg.sendExcessesTo == null || msg.sendExcessesTo! == storage.ownerAddress
+            ) throw JettonErrors.NotOwner;
             assert (storage.jettonBalance >= msg.jettonAmount) throw JettonErrors.BalanceError;
             storage.jettonBalance -= msg.jettonAmount;
             storage.save();

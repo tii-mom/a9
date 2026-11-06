@@ -1110,12 +1110,15 @@ fun confirmBurn(roundId: uint8, kind: uint8, amountRaw: uint128, checkAmount: bo
     }
     if (kind == BURN_QUERY_REWARD) {
         assert (rd.status == STATUS_SETTLING_FAILURE || (rd.status == STATUS_SETTLING_SUCCESS && rd.totalAcceptedStakeRaw == 0)) throw Errors.BadRoundStatus;
+        // A9-CRIT-01: a confirmation without a dispatched burn is a spoof.
+        assert (rd.rewardBurnDispatched) throw Errors.BadRoundStatus;
         if (checkAmount) {
             assert (amountRaw == rd.rewardBudgetRaw) throw Errors.BurnAmountMismatch;
         }
         rd.rewardBurnConfirmed = true;
     } else if (kind == BURN_QUERY_PRINCIPAL) {
         assert (rd.status == STATUS_SETTLING_FAILURE) throw Errors.BadRoundStatus;
+        assert (rd.principalBurnDispatched) throw Errors.BadRoundStatus;
         if (checkAmount) {
             assert (amountRaw == rd.totalAcceptedStakeRaw) throw Errors.BurnAmountMismatch;
         }

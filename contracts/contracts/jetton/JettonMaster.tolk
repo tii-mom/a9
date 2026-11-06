@@ -198,6 +198,10 @@ fun handleBurnNotification(
         sender ==
         calcAddressOfJettonWallet(burnInitiator, contract.getAddress(), jettonWalletCompiledCode())
     ) throw JettonErrors.NotValidWallet;
+    // A9-CRIT-01: a real burn notification must have positive amount and may only
+    // return excesses to the initiator itself (defence in depth on top of wallet).
+    assert (jettonAmount > 0) throw JettonErrors.BalanceError;
+    assert (sendExcessesTo == null || sendExcessesTo! == burnInitiator) throw JettonErrors.NotOwner;
     assert (storage.totalSupply >= jettonAmount) throw JettonErrors.BalanceError;
     storage.totalSupply -= jettonAmount;
     storage.save();

@@ -162,3 +162,35 @@ get fun `test C-4 low-TON wallet keeps jetton rollback when owner notice fails`(
     expect(wd.jettonBalance).toEqual(1000 as coins);
     expect(net.runGetMethod<MockBounceOwnerState>(ownerAddr, "get_state").count).toEqual(0);
 }
+
+
+// A9-CRIT-01: forged master ReturnExcesses must not confirm an un-dispatched burn.
+get fun `test CRIT-01 forged burn confirmation after bounce is rejected`() {
+    val f = setupProtocol();
+    val alice = testing.treasury("crit01-alice");
+    openRound(f.rc, f.admin, 0);
+    expect(sendStake(f.rc, f.rcWallet.address, alice.address, AMOUNT, buildStakePayload(1, 1, 1, 1)))
+        .toHaveSuccessfulTx<TransferNotification>({ from: f.rcWallet.address, to: f.rc.address });
+    advance(STAKE_DURATION_SECONDS as int);
+    expect(closeStaking(f.rc, f.admin, 0)).toHaveSuccessfulTx<CloseStaking>({ from: f.admin, to: f.rc.address });
+    expect(startObservation(f.rc, f.keeper.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: f.keeper.address, to: f.rc.address });
+    submitAllCandles(f.rc, f.keeper.address, 1, 15, rcRound(f.rc, 1).targetPriceUsdE8);
+    confirmTeamBurn(f, 1);
+    expect(rcStatus(f.rc, 1)).toEqual(STATUS_SETTLING_FAILURE);
+
+    // bounce the reward burn: onBouncedMessage clears rewardBurnDispatched
+    val q: uint64 = ((1 as uint64) << 16) | ((BURN_QUERY_REWARD as uint64) << 8);
+    val body = beginCell().storeUint(0xFFFFFFFF, 32).storeUint(OP_JETTON_BURN, 32).storeUint(q, 64).endCell();
+    val bounced = createMessage({ bounce: false, value: ton("0.1"), dest: f.rc.address, body }).bounced();
+    testing.processSingleTraceStep(f.rcWallet.address, bounced);
+
+    // forged master confirmation for the un-dispatched burn
+    val forged = net.send(f.jettonMaster, createMessage({
+        bounce: true, value: ton("0.1"), dest: f.rc.address,
+        body: ReturnExcessesBack { queryId: q },
+    }));
+    expect(forged).toHaveFailedTx<ReturnExcessesBack>({
+        from: f.jettonMaster, to: f.rc.address, exitCode: Errors.BadRoundStatus,
+    });
+    expect(burnStatus(f.rc, 1).rewardBurnConfirmed).toBeFalse();
+}

@@ -14,6 +14,13 @@ import "test-utils"
 
 // Local copy of the TEP-74 mint message (jetton/messages.tolk duplicates symbols
 // already defined in @contracts/types).
+struct (0x7bdd97de) BurnNotificationForMinterLocal {
+    queryId: uint64
+    jettonAmount: coins
+    burnInitiator: address
+    sendExcessesTo: address?
+}
+
 struct (0x00000015) MintOnce {
     queryId: uint64
     recipient: address
@@ -313,3 +320,121 @@ get fun `test REAL jetton: ClaimUnlocked after 10 rounds settles pending`() {
     expect(hasPendingClaim(r.rc, q)).toBeFalse();
     expect(rcUnlockInfo(r.rc, r.user).claimedRaw > 0).toBeTrue();
 }
+
+
+// ===========================================================================
+// A9-CRIT-01: ReturnExcessesBack confused-deputy prevention (real wallets)
+// ===========================================================================
+
+get fun `test CRIT-01 real wallet rejects foreign excess destination`() {
+    val r = setupReal();
+    val badTransfer = net.send(r.user, createMessage({
+        bounce: true,
+        value: ton("0.5"),
+        dest: r.userWallet,
+        body: AskToTransfer {
+            queryId: 11,
+            jettonAmount: 1000,
+            transferRecipient: r.rc.address,
+            sendExcessesTo: r.rc.address,
+            customPayload: null,
+            forwardTonAmount: 0,
+            forwardPayload: emptyPayload(),
+        },
+    }));
+    expect(badTransfer).toHaveFailedTx<AskToTransfer>({
+        from: r.user, to: r.userWallet, exitCode: 73,
+    });
+    val badBurn = net.send(r.user, createMessage({
+        bounce: true,
+        value: ton("0.3"),
+        dest: r.userWallet,
+        body: AskToBurn {
+            queryId: ((1 as uint64) << 16) | ((BURN_QUERY_REWARD as uint64) << 8),
+            jettonAmount: 1000,
+            sendExcessesTo: r.rc.address,
+            customPayload: null,
+        },
+    }));
+    expect(badBurn).toHaveFailedTx<AskToBurn>({
+        from: r.user, to: r.userWallet, exitCode: 73,
+    });
+    // zero amount is rejected too
+    val zeroTransfer = net.send(r.user, createMessage({
+        bounce: true, value: ton("0.3"), dest: r.userWallet,
+        body: AskToTransfer {
+            queryId: 12, jettonAmount: 0, transferRecipient: r.rc.address,
+            sendExcessesTo: null, customPayload: null, forwardTonAmount: 0,
+            forwardPayload: emptyPayload(),
+        },
+    }));
+    expect(zeroTransfer).toHaveFailedTx<AskToTransfer>({
+        from: r.user, to: r.userWallet, exitCode: 47,
+    });
+    val zeroBurn = net.send(r.user, createMessage({
+        bounce: true, value: ton("0.3"), dest: r.userWallet,
+        body: AskToBurn {
+            queryId: 13, jettonAmount: 0, sendExcessesTo: null, customPayload: null,
+        },
+    }));
+    expect(zeroBurn).toHaveFailedTx<AskToBurn>({
+        from: r.user, to: r.userWallet, exitCode: 47,
+    });
+}
+
+get fun `test CRIT-01 owner/null excess destinations still work`() {
+    val r = setupReal();
+    // response_destination = owner (the normal frontend body shape)
+    expect(net.send(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.userWallet,
+        body: AskToTransfer {
+            queryId: 21, jettonAmount: 1000, transferRecipient: r.admin,
+            sendExcessesTo: r.user, customPayload: null, forwardTonAmount: 0,
+            forwardPayload: emptyPayload(),
+        },
+    }))).toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    // sendExcessesTo = null is also allowed
+    expect(net.send(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.userWallet,
+        body: AskToTransfer {
+            queryId: 22, jettonAmount: 1000, transferRecipient: r.admin,
+            sendExcessesTo: null, customPayload: null, forwardTonAmount: 0,
+            forwardPayload: emptyPayload(),
+        },
+    }))).toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+}
+
+get fun `test CRIT-01 master rejects forged burn excess destination and zero amount`() {
+    val r = setupReal();
+    val q: uint64 = ((1 as uint64) << 16) | ((BURN_QUERY_REWARD as uint64) << 8);
+    val forged = net.send(r.userWallet, createMessage({
+        bounce: true,
+        value: ton("0.3"),
+        dest: r.master,
+        body: BurnNotificationForMinterLocal {
+            queryId: q,
+            jettonAmount: 1,
+            burnInitiator: r.user,
+            sendExcessesTo: r.rc.address,
+        },
+    }));
+    expect(forged).toHaveFailedTx<BurnNotificationForMinterLocal>({
+        from: r.userWallet, to: r.master, exitCode: 73,
+    });
+    val zero = net.send(r.userWallet, createMessage({
+        bounce: true,
+        value: ton("0.3"),
+        dest: r.master,
+        body: BurnNotificationForMinterLocal {
+            queryId: q,
+            jettonAmount: 0,
+            burnInitiator: r.user,
+            sendExcessesTo: null,
+        },
+    }));
+    expect(zero).toHaveFailedTx<BurnNotificationForMinterLocal>({
+        from: r.userWallet, to: r.master, exitCode: 47,
+    });
+}
+
+
