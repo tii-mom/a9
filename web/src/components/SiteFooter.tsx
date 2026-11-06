@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { useLang } from '../lib/lang';
-import { useChainConfig, explorerAddressUrl } from '../features/chain/config';
+import { contractExtra, useChainConfig, explorerAddressUrl } from '../features/chain/config';
 import { Logo } from './SiteHeader';
 
 export function SiteFooter() {
@@ -39,14 +39,12 @@ export function SiteFooter() {
           <h2>{zh ? '合约与网络' : 'Contracts & network'}</h2>
           {address('Jetton Master', raw?.contracts.jettonMaster)}
           {address('RoundController', raw?.contracts.roundController)}
-          {address('OracleAdapter', raw?.contracts.oracleAdapter)}
           <p>{zh ? '代码哈希' : 'Code hash'} · <span className="footer-hash mono" title={raw?.contracts.codeHash ?? ''}>{raw?.contracts.codeHash ?? pending}</span></p>
         </div>
         <div>
           <h2>{zh ? '透明度' : 'Transparency'}</h2>
           <p>{safeAuditUrl ? <a href={safeAuditUrl} target="_blank" rel="noopener noreferrer">{zh ? '第三方审计报告 ↗' : 'Audit report ↗'}</a> : <span className="pending">{zh ? '第三方审计报告 · 待发布' : 'Audit report · pending'}</span>}</p>
-          <p>{zh ? '预言机配置哈希' : 'Oracle config hash'} · <span className="footer-hash mono" title={raw?.contracts.oracleConfigHash ?? ''}>{raw?.contracts.oracleConfigHash ?? pending}</span></p>
-          {address(zh ? '管理员' : 'Admin', raw?.contracts.adminOwner)}
+          {address(zh ? 'Keeper（单一价格提交者）' : 'Keeper (single price submitter)', contractExtra(raw, 'keeper') ?? contractExtra(raw, 'adminOwner'))}
         </div>
       </div>
     </footer>

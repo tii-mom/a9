@@ -2,7 +2,7 @@
  * 链上交易模块（task-7）。
  * 对外职责：
  *   - 从 /api/config 读取测试网合约地址；未配置时整体降级（页面保持演示模式）
- *   - 构造 TON Connect 交易（Jetton transfer + StakePayload / ClaimPrincipal / ClaimReward / ClaimAll）
+ *   - 构造 TON Connect 交易（Jetton transfer + StakePayload / Claim(roundId) / ClaimAll / Claim(0) 退款账本）
  *   - 发送（复用 wallet 模块的 TonConnectUI 单实例）、回执轮询、状态机与错误提示
  *   - 「我的质押」页嵌入组件 <ChainMePanel />
  *
@@ -11,8 +11,6 @@
 
 export { ChainMePanel } from './ChainMePanel';
 export type { ChainMePanelProps } from './ChainMePanel';
-export { RewardReferralPanel } from './RewardReferralPanel';
-export type { RewardReferralPanelProps } from './RewardReferralPanel';
 export { RefundClaimPanel } from './RefundClaimPanel';
 export type { RefundClaimPanelProps } from './RefundClaimPanel';
 export { TxStatusView } from './TxStatus';
@@ -29,8 +27,6 @@ export type {
   ChainTxState,
   SubmitStakeParams,
   SubmitClaimParams,
-  SubmitRewardActionParams,
-  SubmitReferrerParams,
   UseChainTx,
 } from './useChainTx';
 
@@ -51,30 +47,13 @@ export {
   nextQueryId,
   EVENT_OPCODES,
   GET_METHODS,
-  REWARD_STATE,
-  EARLY_CLAIM_BPS,
-  STREAK_BONUS_BPS,
-  STREAK_CAP,
-  REFERRAL_BONUS_BPS,
-  UNLOCK_MONTHS,
-  UNLOCK_PERIOD_SECONDS,
   REFUND_ROUND_ID,
-  CLAIM_KIND_REFUND,
 } from './protocol';
 
 export {
   buildStakePayloadCell,
   buildJettonTransferCell,
   buildClaimPayloadCell,
-  buildClaimRewardEarlyCell,
-  buildRollRewardCell,
-  buildSetReferrerCell,
-  buildUnlockCell,
-  buildClaimRewardEarly,
-  buildRollReward,
-  buildSetReferrer,
-  buildClaimUnlocked,
-  buildClaimUnlockedCell,
 } from './payload';
 export type { StakePayloadParams, JettonTransferParams, ClaimPayloadParams } from './payload';
 export { beginCell, serializeCellToBoc, toBocBase64, parseBocBase64, CellSlice } from './cell';
@@ -89,18 +68,13 @@ export type { ChainErrorCode } from './errors';
 export {
   prepareStakeTransaction,
   prepareClaimTransaction,
-  prepareRewardActionTransaction,
-  prepareSetReferrerTransaction,
-  prepareClaimUnlockedTransaction,
   prepareClaimRefundTransaction,
   validateStake,
   validateClaim,
-  validateRewardAction,
   tonBalanceToNumber,
 } from './transactions';
 export type {
   ClaimKind,
-  RewardActionKind,
   PreparedTx,
   TonConnectMessage,
   TonConnectTxRequest,
@@ -117,22 +91,5 @@ export {
   decodeOpcode,
 } from './decode';
 export type { UserActionMessage } from './decode';
-export {
-  captureInviteFromLocation,
-  clearPendingReferrer,
-  currentWeightMultiplierBps,
-  displayAddress,
-  inviteCodeFor,
-  inviteLinkFor,
-  multiplierText,
-  parseInviteCode,
-  readPendingReferrer,
-  readReferralInfo,
-  readRewardRows,
-  readStreakInfo,
-  readUnlockInfo,
-  shortAddress,
-} from './rewards';
-export type { ReferralView, RewardRowView, RewardStateName, StreakView, UnlockView } from './rewards';
 export { loadLastChainTx, saveChainTx, clearChainTx } from './storage';
 export type { StoredChainTx } from './storage';

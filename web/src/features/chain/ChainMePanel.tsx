@@ -2,7 +2,7 @@
  * 「我的质押」页的链上交易面板（自包含）：
  *   - 合约/网络信息（来自 /api/config 下发）
  *   - 链上质押（Jetton transfer + StakePayload）
- *   - 链上领取（ClaimAll / ClaimPrincipal / ClaimReward）
+ *   - 链上领取（Claim(roundId) = 本金 + 全额奖励；ClaimAll = 全部轮次 + 退款账本）
  *   - 交易状态机、交易哈希浏览器链接、降级提示
  * 未配置合约地址时只展示降级说明，不阻塞原有演示流程。
  */
@@ -23,11 +23,16 @@ import { loadLastChainTx } from './storage';
 import { TxStatusView } from './TxStatus';
 import { useChainTx, type ChainTxKind } from './useChainTx';
 import type { WalletContext } from './transactions';
+import { DEFAULT_FORWARD_TON_NANO, DEFAULT_STAKE_MESSAGE_TON_NANO } from './protocol';
 import { ActionConfirm } from './ActionConfirm';
 import { QueryNotice } from './QueryNotice';
 import './chain.css';
 
-const QUICK_AMOUNTS = [10_000, 50_000, 100_000, 500_000];
+const QUICK_AMOUNTS = [100_000, 200_000, 500_000, 1_000_000];
+
+function nanoToTon(nano: bigint): string {
+  return (Number(nano) / 1e9).toString();
+}
 
 function sanitizeAmountInput(value: string): string {
   const cleaned = String(value ?? '').replace(/[^0-9.]/g, '');
@@ -104,7 +109,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
 
   const [amountText, setAmountText] = useState('');
   const [riskAccepted, setRiskAccepted] = useState(false);
-  const [pendingClaim, setPendingClaim] = useState<{ kind: 'claimAll' | 'claimPrincipal' | 'claimReward'; roundId?: number; principal: bigint; reward: bigint; paid: bigint; items: Claimable[] } | null>(null);
+  const [pendingClaim, setPendingClaim] = useState<{ kind: 'claimAll' | 'claim'; roundId?: number; principal: bigint; reward: bigint; items: Claimable[] } | null>(null);
 
   const decimals = chain.tokenDecimals;
   const amountRaw = parseAmountToRaw(amountText, decimals);
@@ -143,13 +148,12 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
   }, [canStake, amountRaw, myStakeRaw, openRound, submitStake]);
 
   const handleClaim = useCallback(
-    (kind: 'claimAll' | 'claimPrincipal' | 'claimReward', roundId?: number) => {
+    (kind: 'claimAll' | 'claim', roundId?: number) => {
       if (!canClaim) return;
       const selected = claimable.filter((item) => roundId === undefined || item.roundId === roundId);
-      const principal = kind === 'claimReward' ? 0n : selected.reduce((sum, item) => sum + BigInt(item.principalRaw), 0n);
-      const reward = kind === 'claimPrincipal' ? 0n : selected.reduce((sum, item) => sum + BigInt(item.rewardRaw), 0n);
-      const paid = kind === 'claimPrincipal' ? 0n : selected.reduce((sum, item) => sum + BigInt(item.rewardRaw) / 2n, 0n);
-      setPendingClaim({ kind, roundId, principal, reward, paid, items: selected });
+      const principal = selected.reduce((sum, item) => sum + BigInt(item.principalRaw), 0n);
+      const reward = selected.reduce((sum, item) => sum + BigInt(item.rewardRaw), 0n);
+      setPendingClaim({ kind, roundId, principal, reward, items: selected });
     },
     [canClaim, claimable],
   );
@@ -160,7 +164,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
       return;
     }
     const roundId = state.roundId ?? undefined;
-    if (state.kind === 'claimAll' || state.kind === 'claimPrincipal' || state.kind === 'claimReward') {
+    if (state.kind === 'claimAll' || state.kind === 'claim') {
       handleClaim(state.kind, state.kind === 'claimAll' ? undefined : roundId);
     }
   }, [amountRaw, handleClaim, myStakeRaw, openRound, state.kind, state.roundId, submitStake]);
@@ -357,7 +361,7 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
                   {busy && state.kind === 'stake' ? d.stakeSigning : d.stakeAction}
                 </button>
                 <span className="chain-gas">
-                  {d.previewGas}: 0.2 GRAM · forward 0.05 GRAM
+                  {d.previewGas}: {nanoToTon(DEFAULT_STAKE_MESSAGE_TON_NANO)} GRAM · forward {nanoToTon(DEFAULT_FORWARD_TON_NANO)} GRAM
                 </span>
               </div>
 
@@ -419,28 +423,20 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
                   </div>
                   <div className="chain-claim-amts">
                     <span>
-                      {d.claimPrincipal} <b>{formatRawAmount(item.principalRaw, decimals)} A9</b>
+                      {lang === 'zh' ? '本金' : 'Principal'} <b>{formatRawAmount(item.principalRaw, decimals)} A9</b>
                     </span>
                     <span>
-                      {d.claimReward} <b>{formatRawAmount(item.rewardRaw, decimals)} A9</b>
+                      {lang === 'zh' ? '奖励（全额）' : 'Reward (in full)'} <b>{formatRawAmount(item.rewardRaw, decimals)} A9</b>
                     </span>
                   </div>
                   <div className="chain-actions">
                     <button
                       className="btn ghost sm"
                       type="button"
-                      disabled={!canClaim || item.principalRaw === '0'}
-                      onClick={() => handleClaim('claimPrincipal', item.roundId)}
+                      disabled={!canClaim}
+                      onClick={() => handleClaim('claim', item.roundId)}
                     >
-                      {d.claimPrincipal}
-                    </button>
-                    <button
-                      className="btn ghost sm"
-                      type="button"
-                      disabled={!canClaim || item.rewardRaw === '0'}
-                      onClick={() => handleClaim('claimReward', item.roundId)}
-                    >
-                      {d.claimReward}
+                      {busy && state.kind === 'claim' && state.roundId === item.roundId ? d.stakeSigning : d.claimRoundAction}
                     </button>
                   </div>
                 </div>
@@ -450,16 +446,16 @@ export function ChainMePanel({ address, demo }: ChainMePanelProps) {
         </div>
 
         <TxStatusView state={state} lang={lang} onRetry={handleRetry} onRecheck={() => void recheck()} onDismiss={reset} />
-        {pendingClaim ? <ActionConfirm title={pendingClaim.kind === 'claimAll' ? d.claimAll : pendingClaim.kind === 'claimReward' ? d.claimReward : d.claimPrincipal} lang={lang} disabled={!canClaim} onCancel={() => setPendingClaim(null)} onConfirm={() => { if (!canClaim) return; const claim = pendingClaim; const latest = claimable.filter((item) => claim.roundId === undefined || item.roundId === claim.roundId); setPendingClaim(null); if (JSON.stringify(latest) !== JSON.stringify(claim.items)) return; void submitClaim({ kind: claim.kind, roundId: claim.roundId ?? null }); }}>
+        {pendingClaim ? <ActionConfirm title={pendingClaim.kind === 'claimAll' ? d.claimAll : d.claimRoundAction} lang={lang} disabled={!canClaim} onCancel={() => setPendingClaim(null)} onConfirm={() => { if (!canClaim) return; const claim = pendingClaim; const latest = claimable.filter((item) => claim.roundId === undefined || item.roundId === claim.roundId); setPendingClaim(null); if (JSON.stringify(latest) !== JSON.stringify(claim.items)) return; void submitClaim({ kind: claim.kind, roundId: claim.roundId ?? null }); }}>
           <p>{chain.network} · {pendingClaim.roundId === undefined ? (lang === 'zh' ? '全部已结算轮次' : 'All settled rounds') : `R#${pendingClaim.roundId}`}</p>
           <dl className="chain-confirm-values">
             <div><dt>{lang === 'zh' ? '本金领取' : 'Principal'}</dt><dd>{formatRawAmount(pendingClaim.principal, decimals, decimals)} A9</dd></div>
-            <div><dt>{lang === 'zh' ? '奖励立即到账（50%）' : 'Reward paid now (50%)'}</dt><dd>{formatRawAmount(pendingClaim.paid, decimals, decimals)} A9</dd></div>
-            <div><dt>{lang === 'zh' ? '奖励继续锁定' : 'Reward remains locked'}</dt><dd>{formatRawAmount(pendingClaim.reward - pendingClaim.paid, decimals, decimals)} A9</dd></div>
+            <div><dt>{lang === 'zh' ? '奖励（全额）' : 'Reward (in full)'}</dt><dd>{formatRawAmount(pendingClaim.reward, decimals, decimals)} A9</dd></div>
+            <div><dt>{lang === 'zh' ? '合计到账' : 'Total paid'}</dt><dd>{formatRawAmount(pendingClaim.principal + pendingClaim.reward, decimals, decimals)} A9</dd></div>
           </dl>
-          {pendingClaim.kind === 'claimAll' ? <ul>{pendingClaim.items.map((item) => <li key={item.roundId}>R#{item.roundId} · {lang === 'zh' ? '本金' : 'Principal'} {formatRawAmount(item.principalRaw, decimals, decimals)} A9 · {lang === 'zh' ? '奖励总额' : 'Total reward'} {formatRawAmount(item.rewardRaw, decimals, decimals)} A9 · {lang === 'zh' ? '立即领取奖励' : 'Reward paid now'} {formatRawAmount(BigInt(item.rewardRaw) / 2n, decimals, decimals)} A9</li>)}</ul> : null}
+          {pendingClaim.kind === 'claimAll' ? <ul>{pendingClaim.items.map((item) => <li key={item.roundId}>R#{item.roundId} · {lang === 'zh' ? '本金' : 'Principal'} {formatRawAmount(item.principalRaw, decimals, decimals)} A9 · {lang === 'zh' ? '奖励' : 'Reward'} {formatRawAmount(item.rewardRaw, decimals, decimals)} A9</li>)}</ul> : null}
           <p>{lang === 'zh' ? '金额为接口估算，以合约结算为准；gas以钱包确认为准。' : 'Amounts are API estimates; contract settlement is authoritative. Your wallet shows gas.'}</p>
-          {pendingClaim.reward > 0n ? <p>{lang === 'zh' ? '涉及奖励即选择 EARLY：不可改为滚存；其余50%进入R10结束后的12期解锁池，每期30天。R10结束后请使用解锁池领取入口。' : 'Claiming rewards chooses EARLY irreversibly: the remainder enters 12 unlock periods of 30 days after R10. Use the unlock-pool action after R10.'}</p> : null}
+          {pendingClaim.kind === 'claimAll' ? <p>{lang === 'zh' ? '合并领取同时取回退款账本中的 A9（如有）。' : 'Claim all also returns any A9 held in your refund ledger.'}</p> : null}
         </ActionConfirm> : null}
         <LastTxNote address={address} kind="stake" chain={chain} lang={lang} />
         <LastTxNote address={address} kind="claimAll" chain={chain} lang={lang} />

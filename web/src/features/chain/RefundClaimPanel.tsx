@@ -2,7 +2,7 @@
  * v8.7 退款账本领取入口（A9-CRIT-02）。
  *
  * 背景：审计修复后，若质押因附带 TON 不足（<0.12）或退款转账 bounce，A9 不再由合约倒贴退回，
- * 而是记入 round 0 退款账本；用户必须自己发起 ClaimPrincipal{roundId:0} 才能取回。
+ * 而是记入 round 0 退款账本；用户必须自己发起 Claim{roundId:0}（或 ClaimAll）才能取回。
  *
  * 数据源：直接读链上 RC.get_user_stake(0, owner)（rpc.fetchRefundLedger）——
  * 该账本是 storage map、不产生事件，后端 /api/me 暂时拿不到；若后续 worker 暴露 refund 字段，应迁移。

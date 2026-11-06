@@ -15,6 +15,7 @@ import {
   stateLabel,
 } from './common';
 import { ConfirmButton, Empty, ErrorState, Loading, PageHead, Stat, StatePill, ToastView, useToast } from './ui';
+import { contractExtra } from '../chain/config';
 import './pages.css';
 
 const TOKEN_KEY = 'fuse.admin.token';
@@ -476,12 +477,9 @@ export default function AdminPage() {
         { label: 'Round Controller', value: config.contracts.roundController },
         { label: 'Staking Vault', value: config.contracts.stakingVault },
         { label: 'Reward Vault', value: config.contracts.rewardVault },
-        { label: 'Oracle Adapter', value: config.contracts.oracleAdapter },
         { label: 'Code hash', value: config.contracts.codeHash },
-        { label: 'Oracle config hash', value: config.contracts.oracleConfigHash },
-        { label: 'Admin owner（单密钥）', value: config.contracts.adminOwner },
-        { label: 'Team Vault（12 亿托管）', value: config.contracts.teamVault },
-        { label: 'Team wallet（收款）', value: config.contracts.teamWallet },
+        { label: 'Keeper（单热钱包，开轮 / 提交价格）', value: contractExtra(config, 'keeper') ?? contractExtra(config, 'adminOwner') },
+        { label: 'Team wallet（收款，成功轮由 RC 直接转入）', value: contractExtra(config, 'teamWallet') },
         { label: 'Audit report', value: config.contracts.auditReportUrl },
       ]
     : [];

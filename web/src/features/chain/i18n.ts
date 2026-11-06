@@ -57,8 +57,7 @@ export interface ChainDict {
   claimDesc: string;
   claimAll: string;
   claimAllNote: string;
-  claimPrincipal: string;
-  claimReward: string;
+  claimRoundAction: string;
   claimEmpty: string;
   claimEmptyDesc: string;
   claimRound: string;
@@ -72,7 +71,7 @@ export interface ChainDict {
   refreshStatus: string;
   phases: Record<ChainTxPhase, string>;
   errors: Record<ChainErrorCode, string>;
-  // ---- v8.7 退款账本 ----
+  // ---- 退款账本 ----
   refundTitle: string;
   refundDesc: string;
   refundAmountLabel: string;
@@ -83,62 +82,6 @@ export interface ChainDict {
   refundWalletNote: string;
   refundDemoDone: string;
   refundRecovered: string;
-  // ---- V8 奖励三态 ----
-  rewardTitle: string;
-  rewardDesc: string;
-  rollWarning: string;
-  rewardEmpty: string;
-  rewardEmptyDesc: string;
-  statePending: string;
-  stateRolled: string;
-  stateEarly: string;
-  stateUnlocked: string;
-  statePendingHint: string;
-  stateRolledHint: string;
-  stateEarlyHint: string;
-  optRoll: string;
-  optRollHint: string;
-  optEarly: string;
-  optEarlyHint: string;
-  optHold: string;
-  optHoldHint: string;
-  rollableLabel: string;
-  earlyAmountLabel: string;
-  lockedLabel: string;
-  rewardDemoNote: string;
-  rewardWalletNote: string;
-  unlockTitle: string;
-  unlockInactive: string;
-  unlockActive: string;
-  unlockMeta: string;
-  unlockAction: string;
-  unlockNothing: string;
-  // ---- V8 邀请 ----
-  inviteTitle: string;
-  inviteDesc: string;
-  inviteCodeLabel: string;
-  inviteLinkLabel: string;
-  inviteCopy: string;
-  inviteCopied: string;
-  inviteNote: string;
-  boundLabel: string;
-  boundNote: string;
-  unboundLabel: string;
-  pendingLabel: string;
-  pendingNote: string;
-  bindAction: string;
-  bindInputPlaceholder: string;
-  bindInvalid: string;
-  bindSelf: string;
-  streakLabel: string;
-  streakValue: string;
-  weightLabel: string;
-  referralBonusLabel: string;
-  referralStakeLabel: string;
-  invitedCountLabel: string;
-  referralBonusValue: string;
-  rewardDemoBound: string;
-  claimUnlockedDemo: string;
 }
 
 const ZH: ChainDict = {
@@ -174,11 +117,11 @@ const ZH: ChainDict = {
   minStake: '单笔最低',
   maxStake: '本轮总上限',
   maxPerAddress: '单地址上限',
-  capRefundNote: '两个上限独立校验：单地址累计 ≤ 20,000,000 A9、本轮总质押 ≤ 200,000,000 A9。超出上限的交易会被合约整笔原路退款（本金不损失，但会消耗 gas），因此前端会提前拦截。',
+  capRefundNote: '单笔最低 100,000 A9；单地址累计 ≤ 20,000,000 A9、本轮总质押 ≤ 200,000,000 A9。无效质押（超限、窗口外）在附带足够 GRAM（forward ≥ 0.1）时整笔退回；GRAM 不足时记入退款账本，可在下方「质押退款」取回。直接转账且低于 100,000 A9、又没有附带足够 GRAM 的零头不退。前端会提前拦截这些情况。',
   failLoss: '失败损失',
   shareEst: '预计占比',
   myStake: '本轮已有质押',
-  riskAck: '我已阅读风险披露：质押不可取消；本轮考核失败时，本轮全部质押本金 100% 销毁；预言机技术故障不销毁本金。',
+  riskAck: '我已阅读风险披露：质押不可取消；本轮考核失败时，本轮全部质押本金 100% 销毁；价格由单一 keeper 提交；技术终止时全额退回本金。',
   riskAckShort: '已确认风险（acceptFullPrincipalBurn = 1）',
   previewTitle: '消息预览',
   previewOp: 'opcode',
@@ -192,11 +135,10 @@ const ZH: ChainDict = {
   stakeAction: '签名并发起质押',
   stakeSigning: '等待钱包签名…',
   claimTitle: '链上领取',
-  claimDesc: '本金可全领；奖励早领仅50%立即到账，剩余50%继续锁定。也可按轮只领本金。',
-  claimAll: '领本金＋奖励早领50%',
-  claimAllNote: 'ClaimAll会对未选择的奖励执行不可回退的EARLY选择；另外50%进入R10后解锁池。gas自付。',
-  claimPrincipal: '领取本金',
-  claimReward: '奖励早领50%',
+  claimDesc: '成功轮本金 + 奖励一次全额领取',
+  claimAll: '全部领取',
+  claimAllNote: '一笔交易领取所有已结算轮次的本金 + 奖励，并取回退款账本中的 A9。gas 自付（附带 0.2 GRAM）。',
+  claimRoundAction: '领取本金 + 奖励',
   claimEmpty: '暂无可领取',
   claimEmptyDesc: '请等待合约结算与索引器同步后再检查；暂无权益时不会发送付费领取交易。',
   claimRound: '轮次',
@@ -218,60 +160,6 @@ const ZH: ChainDict = {
   refundWalletNote: '连接真实 GRAM 钱包后可取回。',
   refundDemoDone: '演示模式：已模拟取回，未上链。',
   refundRecovered: '已取回',
-  rewardTitle: '奖励处理',
-  rewardDesc: '每轮奖励三态：滚存 / 早领 50% / 不动；三态互斥、不可回退',
-  rollWarning: '滚存 = 把赢来的再押一次，可能归零。想落袋就选早领（拿 50%）。',
-  rewardEmpty: '暂无可处理奖励',
-  rewardEmptyDesc: '本轮结算成功后，奖励会出现在这里；失败轮次没有奖励。',
-  statePending: '未处理',
-  stateRolled: '已滚存',
-  stateEarly: '已早领',
-  stateUnlocked: '已解锁',
-  statePendingHint: '默认不动：锁到 R10 结束后，12 个月线性解锁。',
-  stateRolledHint: '已滚存 {amount} A9 进入下一轮质押；若下一轮失败，这部分会随本金一起销毁。',
-  stateEarlyHint: '已早领 {paid} A9，另 {locked} A9 进入 R10 后的解锁池（不销毁）。',
-  optRoll: '滚存',
-  optRollHint: '全额进下一轮，可能归零',
-  optEarly: '早领 50%',
-  optEarlyHint: '立即拿 {amount} A9，另 {locked} A9 锁到 R10 后',
-  optHold: '不动',
-  optHoldHint: '默认：锁到 R10 后 12 个月线性',
-  rollableLabel: '可滚存',
-  earlyAmountLabel: '早领可得',
-  lockedLabel: '进入解锁池',
-  rewardDemoNote: '演示模式：按钮为模拟操作，不会发送链上交易。',
-  rewardWalletNote: '连接真实 GRAM 钱包后可发起链上交易（当前为只读/演示）。',
-  unlockTitle: '解锁进度',
-  unlockInactive: 'R10 结束后开始 12 个月线性解锁（当前锁定 {amount} A9）。',
-  unlockActive: '已解锁 {pct}% · 可领取 {amount} A9',
-  unlockMeta: '锁定 {locked} A9 · 已领 {claimed} A9 · 共 12 个月线性释放',
-  unlockAction: '领取解锁',
-  unlockNothing: '暂无可领取的解锁额度',
-  inviteTitle: '邀请关系',
-  inviteDesc: '邀请码与邀请链接；被邀请人首次质押前绑定邀请人，绑定后不可修改。',
-  inviteCodeLabel: '我的邀请码',
-  inviteLinkLabel: '邀请链接',
-  inviteCopy: '复制',
-  inviteCopied: '已复制',
-  inviteNote: '邀请加成 = 被邀请人质押 × {bonusPct}%，封顶自己质押；只算直接邀请（一层）。',
-  boundLabel: '已绑定邀请人',
-  boundNote: '已绑定，不可修改',
-  unboundLabel: '未绑定邀请人',
-  pendingLabel: '待绑定邀请人',
-  pendingNote: '检测到邀请链接：请在首次质押前绑定（绑定后不可修改）。',
-  bindAction: '绑定邀请人',
-  bindInputPlaceholder: '粘贴邀请码或邀请人地址',
-  bindInvalid: '邀请码/地址无效',
-  bindSelf: '不能绑定自己',
-  streakLabel: '连续参与',
-  streakValue: '{count} 轮 · 权重 {multi}',
-  weightLabel: '当前权重倍数',
-  referralBonusLabel: '本轮邀请加成',
-  referralStakeLabel: '被邀请人本轮质押',
-  invitedCountLabel: '已邀请人数',
-  referralBonusValue: '{amount} A9 · {count} 人 · 被邀请人质押 {stake} A9',
-  rewardDemoBound: '演示模式：已模拟绑定（未上链）。',
-  claimUnlockedDemo: '演示模式：已模拟领取解锁额度（未上链）。',
   phases: {
     idle: '待发起',
     preparing: '准备交易…',
@@ -336,11 +224,11 @@ const EN: ChainDict = {
   minStake: 'Minimum per stake',
   maxStake: 'Round cap',
   maxPerAddress: 'Per-address cap',
-  capRefundNote: 'The two caps are enforced independently: per-address cumulative ≤ 20,000,000 A9 and round total ≤ 200,000,000 A9. A transaction exceeding either cap is refunded in full by the contract (principal is safe, but gas is spent), so the UI blocks it up front.',
+  capRefundNote: 'Minimum 100,000 A9 per stake; per-address cumulative ≤ 20,000,000 A9 and round total ≤ 200,000,000 A9. An invalid stake (over a cap, outside the window) is returned in full when enough GRAM is attached (forward ≥ 0.1); with too little GRAM it goes to your refund ledger, which you can recover under "Stake refund". A transfer below 100,000 A9 sent without enough GRAM is not refunded. The UI blocks these cases up front.',
   failLoss: 'On failure',
   shareEst: 'Estimated share',
   myStake: 'Already staked this round',
-  riskAck: 'I have read the risk disclosure: staking cannot be cancelled; if this round fails, 100% of all principal staked in this round is burned; oracle technical failures never burn principal.',
+  riskAck: 'I have read the risk disclosure: staking cannot be cancelled; if this round fails, 100% of all principal staked in this round is burned; prices are submitted by a single keeper; a technical abort returns principal in full.',
   riskAckShort: 'Risk acknowledged (acceptFullPrincipalBurn = 1)',
   previewTitle: 'Message preview',
   previewOp: 'opcode',
@@ -354,11 +242,10 @@ const EN: ChainDict = {
   stakeAction: 'Sign & stake',
   stakeSigning: 'Waiting for wallet signature…',
   claimTitle: 'On-chain claim',
-  claimDesc: 'Claim principal in full; early rewards pay 50% now and lock the remainder. You can claim principal separately.',
-  claimAll: 'Principal + 50% early reward',
-  claimAllNote: 'ClaimAll irreversibly chooses EARLY for pending rewards. The other 50% enters the post-R10 unlock pool. You pay gas.',
-  claimPrincipal: 'Claim principal',
-  claimReward: 'Claim 50% early reward',
+  claimDesc: 'Principal + full reward in one claim',
+  claimAll: 'Claim all',
+  claimAllNote: 'One transaction claims principal + reward for every settled round and returns any A9 in your refund ledger. You pay gas (0.2 GRAM attached).',
+  claimRoundAction: 'Claim principal + reward',
   claimEmpty: 'Nothing to claim',
   claimEmptyDesc: 'On-chain claimable amounts appear once an indexer syncs settled rounds. Review the amounts before requesting a claim.',
   claimRound: 'Round',
@@ -380,60 +267,6 @@ const EN: ChainDict = {
   refundWalletNote: 'Connect a real GRAM wallet to get it back.',
   refundDemoDone: 'Demo mode: simulated recovery (not on-chain).',
   refundRecovered: 'Recovered',
-  rewardTitle: 'Reward handling',
-  rewardDesc: 'Per-round reward: roll over, early claim 50%, or hold. Mutually exclusive and irreversible.',
-  rollWarning: 'Roll = stake your winnings again; it can go to zero. If you want to lock it in, choose early claim (50%).',
-  rewardEmpty: 'No rewards to handle',
-  rewardEmptyDesc: 'Rewards appear here after a round settles successfully. Failed rounds have no reward.',
-  statePending: 'Pending',
-  stateRolled: 'Rolled',
-  stateEarly: 'Early claimed',
-  stateUnlocked: 'Unlocked',
-  statePendingHint: 'Default hold: locked until R10 ends, then linear over 12 months.',
-  stateRolledHint: 'Rolled {amount} A9 into the next round staking; if that round fails this amount is burned with principal.',
-  stateEarlyHint: 'Early claimed {paid} A9; {locked} A9 entered the post-R10 unlock pool (not burned).',
-  optRoll: 'Roll over',
-  optRollHint: 'Full amount into next round; may go to zero',
-  optEarly: 'Early claim 50%',
-  optEarlyHint: 'Get {amount} A9 now; {locked} A9 locked until after R10',
-  optHold: 'Hold',
-  optHoldHint: 'Default: locked until after R10, then linear over 12 months',
-  rollableLabel: 'Rollable',
-  earlyAmountLabel: 'Early claim amount',
-  lockedLabel: 'To unlock pool',
-  rewardDemoNote: 'Demo mode: buttons are simulated and send no on-chain transaction.',
-  rewardWalletNote: 'Connect a real GRAM wallet to send on-chain transactions (currently read-only/demo).',
-  unlockTitle: 'Unlock progress',
-  unlockInactive: 'Unlock starts after R10 ends: linear over 12 months ({amount} A9 locked now).',
-  unlockActive: '{pct}% unlocked · {amount} A9 claimable',
-  unlockMeta: '{locked} A9 locked · {claimed} A9 claimed · linear over 12 months',
-  unlockAction: 'Claim unlocked',
-  unlockNothing: 'Nothing claimable yet',
-  inviteTitle: 'Referral',
-  inviteDesc: 'Invite code and link. Your invitee binds a referrer before their first stake; binding cannot be changed.',
-  inviteCodeLabel: 'My invite code',
-  inviteLinkLabel: 'Invite link',
-  inviteCopy: 'Copy',
-  inviteCopied: 'Copied',
-  inviteNote: 'Referral bonus = {bonusPct}% of invitee stake, capped at your own stake; direct invitees only (one level).',
-  boundLabel: 'Bound referrer',
-  boundNote: 'Bound; cannot be changed',
-  unboundLabel: 'No referrer bound',
-  pendingLabel: 'Pending referrer',
-  pendingNote: 'Invite link detected. Bind before your first stake (cannot be changed afterwards).',
-  bindAction: 'Bind referrer',
-  bindInputPlaceholder: 'Paste invite code or referrer address',
-  bindInvalid: 'Invalid invite code or address',
-  bindSelf: 'Cannot bind yourself',
-  streakLabel: 'Streak',
-  streakValue: '{count} rounds · weight {multi}',
-  weightLabel: 'Current weight',
-  referralBonusLabel: 'Referral bonus this round',
-  referralStakeLabel: 'Invitee stake this round',
-  invitedCountLabel: 'Invitees',
-  referralBonusValue: '{amount} A9 · {count} invitees · invitee stake {stake} A9',
-  rewardDemoBound: 'Demo mode: binding simulated (not on-chain).',
-  claimUnlockedDemo: 'Demo mode: unlock claim simulated (not on-chain).',
   phases: {
     idle: 'Ready',
     preparing: 'Preparing…',
