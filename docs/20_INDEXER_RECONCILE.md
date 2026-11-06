@@ -324,40 +324,80 @@ TV 应持有 = TV 初始注资
 3. 总量守恒：`Σ持币者 == totalSupply`、`totalSupply + burned == 10,000,000,000 A9`（技术终止轮不销毁）；两项误差必须 0 raw。
 4. 所有金额 raw units / BigInt；报告同时打印 raw 与 A9 便于审计。
 
-### C-4 v8.8 回归实例对账快照（`ops/config/regress-v88.registry.json`）
+### C-4 v8.8 两个回归实例与快照规则
 
-- RC `kQAIVoxXHrWkiH88k9yq_DPKiJR8-IfIf2BdeoocUsgGJs6F`（`0:08568c57…c80626`）、TV `kQBwpAyxSG23IAnfem0-OFqf-b-kH7_fv4rt6UsjpJSrO_7A`、JettonMaster `kQAwyGvhZ2IxD6nktU-d2jyvZ9rJkwbFfoS6h5OcA_xijh-u`。
-- 该实例仍在跑轮次，**对账以报告头部的「快照时间（UTC）」为准**；进行中轮次只校验已解析 K 线的连续性，终态轮次才做不可变哈希比对。
-- 结果见 §C-5（每次重跑以当次输出为准）。
+本任务期间 v8.8 在测试网上出现过两个实例，分别对账、分别记录（不混用数字）：
 
+| 实例 | RC | 用途 | 结果 |
+| --- | --- | --- | --- |
+| 部署残局实例（旧） | `kQAIVoxXHrWkiH88k9yq_DPKiJR8-IfIf2BdeoocUsgGJs6F`（`0:08568c57…`） | round-0 退款账本专项验证（R1 卡在 SETTLING_SUCCESS） | §C-5a，DIFFS 0 |
+| 完整回归实例（新，当前 registry 指向） | `kQDvMloffAiVnuZ3UxWXwB558RoXBy4oP_KiGSQjWysO0xPS`（`0:ef325a1f…`） | 全链路对账（R1 成功 + R2 失败三笔销毁 + R3 PREVIEW） | §C-5b，DIFFS 0 |
 
-### C-5 v8.8 回归实例对账结果（本次快照）
+新实例地址：TeamVault `kQDvVcH6E9O1RKa6tA8xx6_qOFhTYb07Q6vO-ydpuejQzvz3`、JettonMaster `kQAdRbHk6_ma1eLmtJjMi2zyoQKQYFmv1fAZz5YPGBdvjom5`、RC jetton wallet `kQDvWYM4JT3q-bG4j9Uh_xMqzqYlgpdBuzOAeTlkXVU42lHs`、TV jetton wallet `kQDvZVFQQ1d4ZLWhyu3G3Qprv-H-8iRja5g5JB2XsNvySbE2`。
 
-**命令**（`--balances` 为 v8.8 口径开关；实例地址显式传入，因 `regress-v88.registry.json` 在本任务执行期间被重置为未部署模板）：
+快照规则：每份报告头部打印「快照时间（UTC）+ currentRound」；进行中轮次只做已解析 K 线连续性与余额校验，终态轮次（8/9/10）强制不可变哈希比对；TV 差额恰为 `k × teamRoundRaw` 且存在 SETTLING 轮次时判为在途（NOTE，不计异常）；其余任何差额都必须 DIFF=0。
+
+### C-5a 部署残局实例（round-0 口径专项验证）
+
+快照：`2026-11-06T09:38:27.758Z`（UTC）；`currentRound=1`，R1 `status=6 (SETTLING_SUCCESS)`；configHash `sha256:f4f6b5ad…a93f`。DIFFS 0 / EXIT 0。
+
+| 项 | 数值 | 结论 |
+| --- | --- | --- |
+| RC 初始注资（自动检测） | 7,000,000,000 A9 | — |
+| Σ DepositAccepted | 100,000 A9 | 9 次质押仅 1 次接受 |
+| round-0 退款账本净留存（被拒 900,000 − 已退款 800,000） | 100,000 A9 | 已计入 RC 预期 |
+| RC 应持有 vs 实际 | 7,000,200,000 vs 7,000,200,000 | Δ=0 raw |
+| TV 应持有 vs 实际 | 1,200,000,000 vs 1,080,000,000 | Δ=−1×teamRoundRaw：R1 SETTLING，团队转账已出 TV 钱包、ack 未落账 → 在途 NOTE |
+| 持币者合计 vs totalSupply | 10,000,000,000 vs 10,000,000,000 | Δ=0 raw |
+
+该实例的价值：证明 round-0 口径可用 —— `round0Held = 被拒入账 900,000 − 已退款 800,000 = 100,000`，与 `get_user_stake(0, owner)`（在途/已领）联合解释一致；同时验证「初始注资自动检测」（7B）与「TV 聚合 getter 漏记时以逐轮/在途口径处理」。
+
+### C-5b 完整回归实例（全链路对账）
+
+快照：`2026-11-06T09:46:30.360Z`（UTC）；`currentRound=2`；R3 `status=1 (PREVIEW)`；configHash `sha256:11057eb1…05eb`；RC code hash `0x4EE42C5C…3EF8`（v8.8，其余 4 个合约不变）。DIFFS 0 / EXIT 0。
+
+逐轮（getter 独立读取）：
+
+| 轮 | 状态 | tier | target | seen | qualified(链上/封顶) | 质押 A9 | 权重 A9 | R/T/P 销毁 | TV 逐轮状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| R1 | 8 SUCCEEDED | 1 | 232000 | 24 | 16/16 | 300,000 | 330,000 | — / — / — | released=true, burned=false（1.2 亿） |
+| R2 | 9 FAILED_PERMANENT | 2 | 464000 | 24 | 0/0 | 300,000 | 360,000 | ✓ / ✓ / ✓（300,000） | released=false, burned=true（1.2 亿） |
+| R3 | 1 PREVIEW | — | 未开窗 | — | — | — | — | — | 不计入本轮对账 |
+
+余额与守恒（raw / A9）：
+
+| 项 | 值 | 结论 |
+| --- | --- | --- |
+| RC / TV 初始注资 | 7,000,000,000 / 1,200,000,000 A9 | 自动检测 |
+| Σ DepositAccepted（R1+R2） | 600,000 A9 | 3 用户 × 100,000 × 2 轮 |
+| round-0 退款账本净留存 | 0（被拒 0；M4 退款攻击 X/Y 已全部领回） | ✓ |
+| 技术终止不可用余额 | RC 0 / TV 0（N_aborted=0，报告显式两行输出，未漏行） | ✓ |
+| 已发奖励 / 已发本金 | 0 / 0 | 尚无领取 |
+| 销毁 | 奖励 700,000,000 + 团队 120,000,000 + 本金 300,000 = 820,300,000 A9 | ✓（8.2 亿） |
+| RC 应持有 vs 实际 | 6,300,300,000 vs 6,300,300,000 | Δ=0 raw（63.003 亿） |
+| TV 应持有 vs 实际 | 960,000,000 vs 960,000,000 | Δ=0 raw（9.6 亿） |
+| team 钱包 | 120,000,000 A9 | R1 释放，未受 R2 销毁影响 |
+| Σ 持币者 vs totalSupply | 9,179,700,000 vs 9,179,700,000 | Δ=0 raw（7 个钱包） |
+| totalSupply + burned vs 1e19 | 9,179,700,000 + 820,300,000 = 10,000,000,000 | Δ=0 raw |
+
+持币者分布（7 个）：RC jetton wallet 63.003 亿、TV jetton wallet 9.6 亿、team 1.2 亿、adminOwner（内盘管理）17.97 亿、用户 A/B/C 各 800,000 A9；合计 91.797 亿 = totalSupply。
+
+这轮验证到的关键点：
+
+1. v8.8 totalSupply 随销毁下降（9,179,700,000），不再恒为 100 亿；`supply + burned = 1e19` 仍精确成立（误差 0 raw）。
+2. TV 逐轮 `get_round_state` 口径与预期完全一致：R1 released=true/burned=false、R2 released=false/burned=true；TV 现金 9.6 亿对平（聚合 getter 在本实例同样不可作为唯一依据）。
+3. 技术终止两行在 N=0 时也显式输出 0（不是省略），满足审计可读性要求。
+4. round-0 账本在有 M4 退款攻击后净留存回到 0，说明「被拒入账 − 已退款」口径能随链上状态自动归零。
+5. RC 预期公式逐项可复核：`7,000,000,000 + 600,000 − 700,000,000 − 300,000 = 6,300,300,000`，与 `get_wallet_data` 完全一致。
+
+复跑命令：
 
 ```bash
 node worker/src/indexer/tools/chain-reconcile.mjs --network testnet --balances \
-  --rc kQAIVoxXHrWkiH88k9yq_DPKiJR8-IfIf2BdeoocUsgGJs6F \
-  --tv kQBwpAyxSG23IAnfem0-OFqf-b-kH7_fv4rt6UsjpJSrO_7A \
-  --jm kQAwyGvhZ2IxD6nktU-d2jyvZ9rJkwbFfoS6h5OcA_xijh-u
+  --registry ops/config/regress-v88.registry.json \
+  --rc kQDvMloffAiVnuZ3UxWXwB558RoXBy4oP_KiGSQjWysO0xPS \
+  --tv kQDvVcH6E9O1RKa6tA8xx6_qOFhTYb07Q6vO-ydpuejQzvz3 \
+  --jm kQAdRbHk6_ma1eLmtJjMi2zyoQKQYFmv1fAZz5YPGBdvjom5
+# 预期：DIFFS (0)，EXIT=0
 ```
-
-**快照**：`2026-11-06T09:38:27.758Z`（UTC）；链上 `currentRound=1`，R1 `status=6 (SETTLING_SUCCESS)`；configHash `sha256:f4f6b5ade3c256527e982c79ac8f5f1efcda27483904e70d41a77cdacca5a93f`。
-
-| 项 | 链上 / 计算 | 备注 |
-| --- | --- | --- |
-| **DIFFS** | **0** | CLI 退出码 0 ✅ |
-| RC 初始注资（首笔 internal_transfer） | 7,000,000,000 A9 | 非写死，自动检测 |
-| Σ DepositAccepted（轮次内） | 100,000 A9 | 9 次质押中 1 次被接受 |
-| round-0 退款账本净留存（被拒 900,000 − 已退 800,000） | 100,000 A9 | 已计入 RC 预期（C-2） |
-| 技术终止不可用余额 | 0（N_aborted=0） | RC/TV 各 0；脚本已支持 N>0 场景 |
-| **RC 应持有 vs 实际** | 7,000,200,000 vs 7,000,200,000 | **Δ=0 raw** |
-| TV 初始注资 | 1,200,000,000 A9 | 自动检测 |
-| **TV 应持有 vs 实际** | 1,200,000,000 vs 1,080,000,000 | Δ=−120,000,000 = 1×teamRoundRaw：R1 处于 SETTLING，团队转账已出 TV 钱包、ack 未落账 → **在途，不计异常**（NOTE） |
-| 持币者合计 vs totalSupply | 10,000,000,000 vs 10,000,000,000 | Δ=0 raw（7 个钱包） |
-| totalSupply + burned vs 1e19 | 10,000,000,000 + 0 | Δ=0 raw（尚无销毁） |
-
-**说明**：该实例仍在运行，团队释放/结算 ack 存在秒级在途窗口；CLI 对「Δ 恰为 k × teamRoundRaw 且存在 SETTLING 轮次」明确标注在途，其余任何差额都会判 DIFF 并 exit 1。终态轮次（status 8/9/10）仍强制哈希/根数不可变校验。
-
-**待补**：技术终止（N_aborted>0）场景尚无实例证据（本实例与 v8.6 均未触发 TECHNICAL_ABORTED）；脚本逻辑已实现（N×7亿 / N×1.2亿 单列 + 终止轮标志必须全 false），下次回归出现终止轮即可验证。
 
