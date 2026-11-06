@@ -38,7 +38,7 @@
 
 > **V6 已确认**：① 观察窗口固定 **24 根 / 24h / 16 阈值（容错 8 根）**；② **不允许取消质押**——状态机没有 cancel/withdraw 通道，唯一退款路径是 `TECHNICAL_ABORTED`（退还全部本金）。
 
-> **PREVIEW（预告期）说明（V6 已确认）**：结算后进入 **PREVIEW（固定 24h，链上可验证：`previewEnd = settledAt + 24h`）**，前端展示「距离下一轮质押开始」倒计时与分享卡片；期间不许质押；**结束后自动进入 `STAKING_OPEN`（无价格闸门）**，并在开窗交易中锁定目标价。**95% 闸门、7 天等待/提档已取消。**
+> **PREVIEW（预告期）说明（V6 已确认）**：结算后进入 **PREVIEW（固定 12h，链上可验证：`previewEnd = settledAt + 12h`）**，前端展示「距离下一轮质押开始」倒计时与分享卡片；期间不许质押；**结束后自动进入 `STAKING_OPEN`（无价格闸门）**，并在开窗交易中锁定目标价。**95% 闸门、7 天等待/提档已取消。**
 
 ## 2. 状态转移
 
@@ -101,9 +101,9 @@ OBSERVING -> ORACLE_PAUSED -> OBSERVING
 > 例：R3 目标 $0.008 失败 → R4 仍是 $0.008。由此引入「**档位 tier = 1 + 已成功轮数**」概念，10 轮 ≠ 10 档位（失败占轮次）。
 > **状态机实现**：失败轮 `tier` 不变、下一轮沿用同一目标档；成功轮 `tier += 1`；前端按「档位」展示。
 
-## 4. 质押窗口（V6：24h 预告 + 72h 报名）
+## 4. 质押窗口（V7：12h 预告 + 36h 报名）
 
-V6 已确认：上一轮结算后进入 **12 小时预告期（PREVIEW）**，预告结束**自动开窗**；报名窗口 **72 小时（259,200 秒）**。
+V7 已确认：上一轮结算后进入 **12 小时预告期（PREVIEW）**，预告结束**自动开窗**；报名窗口 **36 小时（129,600 秒）**。
 
 参数： - `stakeOpenAt` - `stakeCloseAt` - `stakeDuration` - `stakeGap` - `roundId` - `prevSettledAt`
 
@@ -123,7 +123,7 @@ stakeDuration = stakeCloseAt - stakeOpenAt = 129,600  // 秒
 nonce；合约将其聚合到该地址的总质押。 5.
 若没有任何有效质押，**本轮照常启动并进入观察**（V3 已裁决，见 §4.2）；不跳过轮次、不延长窗口、不视为价格失败。
 6. **R1 无 PREVIEW**：第 1 轮由管理员**手动 `OpenRound`** 开启（无 12h 预告期）；**R2~R10** 才走「结算 → 12h PREVIEW → 自动开窗」。
-7. **晚开窗 liveness 兜底**：若 keeper 错过整个 72h 报名窗口，`OpenRound` 会把 `stakeOpenAt` 重锚为 `now`（正常路径不触发）。
+7. **晚开窗 liveness 兜底**：`OpenRound` 会**无条件把 `stakeOpenAt` 锚定为 `now`**（A9-F9，v8.7），保证报名窗口恒为完整的 36h，不存在「晚开窗导致窗口被压缩」的临界断崖。
 
 ### 4.1 V6 时间线与状态（已定稿）
 
@@ -134,13 +134,13 @@ T0  结算（SUCCEEDED / FAILED_PERMANENT；TeamVault 释放或销毁；进入�
      v
 STAKING_OPEN（自动开窗；开窗交易锁定 target = max(阶梯, 2×24h TWAP)）
      |  1h TWAP >= target → 触价提前关窗
-     |  到 72h → 正常关窗
+     |  到 36h → 正常关窗
      v
 STAKING_CLOSED
      |
      | observationStart = stakeCloseAt
      v
-OBSERVING（24 根 / 72h，不缩短）
+OBSERVING（24 根 / 24h，不缩短）
      |
      | qualified >= 16 成功 / <= 15 失败（24 根齐备，无中间态）
      v
