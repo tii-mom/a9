@@ -93,6 +93,34 @@ fun onInternalMessage(in: InMessage) {
     }
 }
 
+// A9-F3: idempotently clear a dispatched burn flag after a first/second-hop bounce.
+// Repeated notifications are harmless; confirmed burns are never reset.
+fun clearBurnDispatched(queryId: uint64) {
+    val roundId: uint8 = ((queryId >> 16) & 0xff) as uint8;
+    val kind: uint8 = ((queryId >> 8) & 0xff) as uint8;
+    var s = lazy Storage.load();
+    val rr = s.rounds.get(roundId);
+    if (!rr.isFound) {
+        return;
+    }
+    var rd = rr.loadValue();
+    if (isTerminal(rd.status)) {
+        return;
+    }
+    var changed = false;
+    if (kind == BURN_QUERY_REWARD && !rd.rewardBurnConfirmed && rd.rewardBurnDispatched) {
+        rd.rewardBurnDispatched = false;
+        changed = true;
+    } else if (kind == BURN_QUERY_PRINCIPAL && !rd.principalBurnConfirmed && rd.principalBurnDispatched) {
+        rd.principalBurnDispatched = false;
+        changed = true;
+    }
+    if (changed) {
+        s.rounds.set(roundId, rd);
+        s.save();
+    }
+}
+
 fun onBouncedMessage(in: InMessageBounced) {
     // P0-3: a bounced claim transfer proves the transfer did not execute.
     in.bouncedBody.skipBouncedPrefix();
@@ -101,22 +129,9 @@ fun onBouncedMessage(in: InMessageBounced) {
     }
     val op = in.bouncedBody.loadUint(32);
     if (op == OP_JETTON_BURN) {
-        // F-03: burn bounced -> allow RetryPendingActions to resend it.
+        // F-03/F3: first-hop burn bounce -> allow RetryPendingActions to resend.
         val burnQ: uint64 = in.bouncedBody.loadUint(64) as uint64;
-        val roundId: uint8 = ((burnQ >> 16) & 0xff) as uint8;
-        val kind: uint8 = ((burnQ >> 8) & 0xff) as uint8;
-        var s = lazy Storage.load();
-        val rr = s.rounds.get(roundId);
-        if (rr.isFound) {
-            var rd = rr.loadValue();
-            if (kind == BURN_QUERY_REWARD) {
-                rd.rewardBurnDispatched = false;
-            } else if (kind == BURN_QUERY_PRINCIPAL) {
-                rd.principalBurnDispatched = false;
-            }
-            s.rounds.set(roundId, rd);
-            s.save();
-        }
+        clearBurnDispatched(burnQ);
         return;
     }
     if (op != OP_JETTON_TRANSFER) {
@@ -403,7 +418,7 @@ fun burnIdForRound(roundId: uint8, configVersion: uint32): uint256 {
 
 // P0-2: burn queryId encodes round + kind (roundId<<16 | kind<<8 | nonce).
 fun burnQueryId(roundId: uint8, kind: uint8, nonce: uint8 = 0): uint64 {
-    return ((roundId as uint64) << 16) | ((kind as uint64) << 8) | (nonce as uint64);
+    return BURN_QUERY_TAG | ((roundId as uint64) << 16) | ((kind as uint64) << 8) | (nonce as uint64);
 }
 
 fun ensureRoundExists(s: Storage, roundId: uint8): RoundData {
@@ -1010,6 +1025,17 @@ fun refundStake(mutate s: Storage, owner: address, amount: coins, valueCoins: co
 fun handleTransferBounced(sender: address, msg: TransferBounced) {
     val s = lazy Storage.load();
     assert (sender == vaults(s).stakingJettonWallet) throw Errors.NotJettonWallet;
+    // A9-F3: burn queryId = BURN_QUERY_TAG | (roundId<<16) | (kind<<8);
+    // claim queryId = (roundId<<32) | (kind<<24) | counter. The tag bit is never
+    // set by claimQueryId, so it is the unambiguous discriminator.
+    if ((msg.queryId & BURN_QUERY_TAG) != 0) {
+        val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
+        val kind: uint8 = ((msg.queryId >> 8) & 0xff) as uint8;
+        assert (roundId >= 1 && roundId <= MAX_ROUNDS) throw Errors.BadBurnQuery;
+        assert (kind == BURN_QUERY_REWARD || kind == BURN_QUERY_PRINCIPAL) throw Errors.BurnKindMismatch;
+        clearBurnDispatched(msg.queryId);
+        return;
+    }
     rollbackPendingClaim(msg.queryId);
 }
 

@@ -138,7 +138,7 @@ fun onInternalMessage(in: InMessage) {
             val params = st.params.load();
             val amount = params.teamRoundRaw;
             assert (amount > 0) throw Errors.ZeroTeamQuota;
-            val queryId = ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
+            val queryId = BURN_QUERY_TAG | ((roundId as uint64) << 16) | ((BURN_QUERY_TEAM as uint64) << 8);
             st.rounds.set(roundId, TeamRoundState {
                 released: false,
                 burned: false,
@@ -224,7 +224,7 @@ fun onInternalMessage(in: InMessage) {
             }
             val roundId: uint8 = ((msg.queryId >> 16) & 0xff) as uint8;
             val kind: uint8 = ((msg.queryId >> 8) & 0xff) as uint8;
-            if (kind != RELEASE_QUERY_TEAM) {
+            if (kind != RELEASE_QUERY_TEAM && kind != BURN_QUERY_TEAM) {
                 return;
             }
             val prev = st.rounds.get(roundId);
@@ -235,7 +235,11 @@ fun onInternalMessage(in: InMessage) {
             if (state.released || state.burned || state.queryId != msg.queryId) {
                 return;
             }
+            // A9-F3: allow BurnTeamQuota to retry after a second-hop burn bounce.
             st.rounds.delete(roundId);
+            if (kind == BURN_QUERY_TEAM) {
+                st.pendingBurnIds.delete(roundId);
+            }
             st.save();
         }
         TopUpTons => {

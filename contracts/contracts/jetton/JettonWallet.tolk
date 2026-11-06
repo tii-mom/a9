@@ -29,7 +29,7 @@ fun onBouncedMessage(in: InMessageBounced) {
     // C-4: parse the queryId from a copy before lazy field access consumes the body.
     var querySlice = in.bouncedBody;
     var bouncedQueryId: uint64 = 0;
-    if (op == OP_JETTON_INTERNAL_TRANSFER) {
+    if (op == OP_JETTON_INTERNAL_TRANSFER || op == OP_BURN_NOTIFICATION) {
         querySlice.loadUint(32);
         bouncedQueryId = querySlice.loadUint(64) as uint64;
     }
@@ -47,7 +47,7 @@ fun onBouncedMessage(in: InMessageBounced) {
     // C-4: the second hop (recipient wallet) bounced; the sender wallet only sees
     // the bounce. Notify the owner so RC/TeamVault can roll back their pending
     // claim/release instead of being stuck on ClaimPending forever.
-    if (op == OP_JETTON_INTERNAL_TRANSFER) {
+    if (op == OP_JETTON_INTERNAL_TRANSFER || op == OP_BURN_NOTIFICATION) {
         // A9-HIGH-03/F4: reserve 5-year storage + one notification fee, then carry
         // the whole remaining bounced value to the owner. IGNORE_ERRORS keeps the
         // jettonBalance rollback above intact even if the notice cannot be paid.

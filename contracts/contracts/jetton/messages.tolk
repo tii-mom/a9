@@ -55,6 +55,7 @@ struct (0xd53276db) ReturnExcessesBack {
 }
 
 const OP_JETTON_INTERNAL_TRANSFER: uint32 = 0x178d4519;
+const OP_BURN_NOTIFICATION: uint32 = 0x7bdd97de;
 
 // C-4: owner notification after a second-hop transfer bounce.
 struct (0x52540027) TransferBounced {

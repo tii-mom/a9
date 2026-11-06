@@ -559,3 +559,59 @@ get fun `test CRIT-02 second-hop bounce via real JettonWallet lands in ledger`()
     }).bounced());
     expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(1000 as uint128);
 }
+
+
+// ===========================================================================
+// A9-F3: second-hop burn bounce must clear dispatched and allow retry
+// ===========================================================================
+
+get fun `test F3 burn second-hop bounce clears dispatched and retry resends`() {
+    testing.setNow(1000000);
+    val admin = testing.treasury("f3-admin");
+    // RC with a non-master jettonMaster (admin): BurnNotification to admin bounces,
+    // producing a real JettonWallet second-hop bounce into RC.
+    val rc = deployRoundController(admin.address, admin.address, admin.address, admin.address);
+    val walletStorage = WalletStorage {
+        jettonBalance: 700000000000000000, // 700M A9 reward burn capacity
+        ownerAddress: rc.address,
+        minterAddress: admin.address,
+    };
+    val walletInit = ContractState { code: build("JettonWallet"), data: walletStorage.toCell() };
+    val wallet = AutoDeployAddress { stateInit: walletInit }.calculateAddress();
+    expect(net.send(testing.treasury("f3-deployer").address, createMessage({
+        bounce: false, value: ton("3"), dest: { stateInit: walletInit }, body: TopUpTons {},
+    }))).toHaveSuccessfulDeploy({ to: wallet });
+    expect(setRcWallet(rc, admin.address, wallet)).toHaveSuccessfulTx<SetJettonWallet>({
+        from: admin.address, to: rc.address,
+    });
+    expect(setRcWalletCode(rc, admin.address, build("JettonWallet"))).toHaveSuccessfulTx<SetJettonWalletCode>({
+        from: admin.address, to: rc.address,
+    });
+    expect(openRound(rc, admin.address, 300000)).toHaveSuccessfulTx<OpenRound>({ from: admin.address, to: rc.address });
+    advance(STAKE_DURATION_SECONDS as int);
+    expect(closeStaking(rc, admin.address, 0)).toHaveSuccessfulTx<CloseStaking>({ from: admin.address, to: rc.address });
+    expect(startObservation(rc, admin.address, 1)).toHaveSuccessfulTx<StartObservation>({ from: admin.address, to: rc.address });
+    submitAllCandles(rc, admin.address, 1, 15, rcRound(rc, 1).targetPriceUsdE8);
+    expect(rcStatus(rc, 1)).toEqual(STATUS_SETTLING_FAILURE);
+    // a real BurnNotificationForMinter second-hop bounce reaches the real RC wallet
+    expect(burnStatus(rc, 1).rewardBurnConfirmed).toBeFalse();
+    val burnQ: uint64 = BURN_QUERY_TAG | ((1 as uint64) << 16) | ((BURN_QUERY_REWARD as uint64) << 8);
+    val bounceBody = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x7bdd97de, 32) // BurnNotificationForMinter
+        .storeUint(burnQ, 64)
+        .storeCoins(700000000000000000) // jettonAmount
+        .storeAddress(rc.address)       // burnInitiator (wallet owner)
+        .storeUint(0, 1)                // sendExcessesTo: null
+        .endCell();
+    net.send(wallet, createMessage({
+        bounce: false, value: ton("0.2"), dest: wallet, body: bounceBody,
+    }).bounced());
+    val retry1 = retryPendingActions(rc, admin.address, 1);
+    expect(retry1).toHaveSuccessfulTx<RetryPendingActions>({ from: admin.address, to: rc.address });
+    expect(retry1.findTransaction<AskToBurn>({ from: rc.address, to: wallet, success: true })).toBeNotNull();
+    // second retry must not double-send (dispatched is set again)
+    val retry2 = retryPendingActions(rc, admin.address, 1);
+    expect(retry2).toHaveSuccessfulTx<RetryPendingActions>({ from: admin.address, to: rc.address });
+    expect(retry2.findTransaction<AskToBurn>({ from: rc.address, to: wallet, success: true })).toBeNull();
+}
