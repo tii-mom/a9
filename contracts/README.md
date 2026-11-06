@@ -1,6 +1,6 @@
 # A9 Protocol — 自研合约（RoundController + TeamVault）
 
-**版本**：V8.6 冻结基线（2026-11-06；权重制 + 奖励三态 + K 线滚动哈希；tag `v8.6-audit-fixed` @ `c24809a`；时间线 V7：24h/24 根 1h/16 阈值 + 12h+36h+24h）
+**版本**：V8.9 冻结基线（2026-11-06；M4.2 round-0 退款账本 bounce 回滚修复；tag `v8.9-audit-fixed`；时间线 V7：24h/24 根 1h/16 阈值 + 12h+36h+24h）
 **范围**：A9 协议自研 TON 合约（RoundController + TeamVault）+ A9 Jetton Master/Wallet（Tolk 复刻 TEP-74/89，含 mint-once 改造）及其测试/部署模板。
 **权威口径**：docs/00_DECISIONS_V2.md（当前版本，时间线 V6.2）> docs/04_CONTRACT_ABI.md > 本 README。本 README 记录实现细节、ABI、部署模板与**与文档的差异/工程裁决**。
 
@@ -10,10 +10,10 @@
 
 - **工具链**：Acton 1.1.0 + Tolk（本机已安装；acton build / acton test / acton script 均可用）。
 - **编译**：acton build 通过，0 error；acton check 0 warning。
-- **测试**：acton test → **177 passed / 18 files**（v8.8 M4 修复：F2 退款账本 carry + claimable_all 口径；含真 Jetton/真 OA 回归）；acton check 0 error 0 warning。
-- **冻结 tag/commit**：`v8.6-audit-fixed` @ `c24809a`（HEAD）。
-- **合约代码哈希（v8.6 冻结，clean rebuild，Tolk code cell）**——**以此为准**：
-    - RoundController：0x4EE42C5C0EB13CDB6689823BEA883D30E852EEA066D3C108A6531A69D4093EF8
+- **测试**：acton test → **179 passed / 18 files**（v8.9 M4.2：round-0 退款账本 bounce 回滚 carry；含真 Jetton/真 OA 回归）；acton check 0 error 0 warning。
+- **冻结 tag/commit**：`v8.9-audit-fixed`（HEAD；M4.2 定向修复）。
+- **合约代码哈希（v8.9 冻结，clean rebuild，Tolk code cell）**——**以此为准**：
+    - RoundController：0xFE7088ED1C52949CD1CB0931D95911F757BC402FC37065502002DF15CCDD50AE
     - TeamVault：0xDE6BE49154E3024C9B6945EA81E7181F3E1D04FECC85DBC629C08EDE6A673FB6
     - OracleAdapter：0x0C91E5338E00F18B5FFC7C5C26B510424775D8089588F4147E5B667703676768
     - JettonMaster：0xB8FAF413176C6329A98B2474FEDF765A796A14EDA96C031EE1FE5B27E59EE272

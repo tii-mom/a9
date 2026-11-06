@@ -680,3 +680,61 @@ get fun `test M4-01 refund claim bounce preserves ledger amount and claimability
         body: ClaimPrincipal { queryId: 0, roundId: 0 },
     }))).toHaveSuccessfulTx<ClaimPrincipal>({ from: r.user, to: r.rc.address });
 }
+
+
+// ===========================================================================
+// A9-M4-02b: round-0 refund rollback keeps in-flight amount
+// ===========================================================================
+
+fun startRefundClaim(r: RealSetup): uint64 {
+    val counter = net.runGetMethod<uint64>(r.rc.address, "get_claim_counter");
+    val q: uint64 = ((CLAIM_KIND_PRINCIPAL as uint64) << 24) | counter;
+    testing.processSingleTraceStep(r.user, createMessage({
+        bounce: true, value: ton("0.5"), dest: r.rc.address,
+        body: ClaimPrincipal { queryId: 0, roundId: 0 },
+    }));
+    expect(net.runGetMethod<bool>(r.rc.address, "has_pending_claim", [q])).toBeTrue();
+    return q;
+}
+
+fun bounceAskTransfer(r: RealSetup, q: uint64) {
+    val body = beginCell()
+        .storeUint(0xFFFFFFFF, 32)
+        .storeUint(0x0f8a7ea5, 32) // AskToTransfer
+        .storeUint(q, 64)
+        .endCell();
+    testing.processSingleTraceStep(r.rcWallet, createMessage({
+        bounce: false, value: ton("0.1"), dest: r.rc.address, body,
+    }).bounced());
+}
+
+get fun `test M4-02b interleaved refund keeps X+Y on bounce`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    // ledger X=1000
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 1000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    // X claim in flight (claimed=true, amountRaw=1000)
+    val q = startRefundClaim(r);
+    // new refund Y=2000 arrives while claim is in flight
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 2000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    expect(rcUserStake(r.rc, 0, r.user).amountRaw).toEqual(2000 as uint128);
+    // bounce the in-flight claim: ledger must become X+Y = 3000
+    bounceAskTransfer(r, q);
+    val pos = rcUserStake(r.rc, 0, r.user);
+    expect(pos.amountRaw).toEqual(3000 as uint128);
+    expect(pos.principalClaimed).toBeFalse();
+}
+
+get fun `test M4-02b non-interleaved refund bounce keeps X`() {
+    val r = setupReal();
+    openRoundReal(r, 300000);
+    expect(askTransfer(r.user, r.userWallet, r.rc.address, 1000, ton("0.02"), emptyPayload(), ton("0.4")))
+        .toHaveSuccessfulTx<AskToTransfer>({ from: r.user, to: r.userWallet });
+    val q = startRefundClaim(r);
+    bounceAskTransfer(r, q);
+    val pos = rcUserStake(r.rc, 0, r.user);
+    expect(pos.amountRaw).toEqual(1000 as uint128);
+    expect(pos.principalClaimed).toBeFalse();
+}

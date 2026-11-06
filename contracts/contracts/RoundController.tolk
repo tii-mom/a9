@@ -260,6 +260,13 @@ fun rollbackPendingClaim(queryId: uint64) {
             val posRes = inner.get(owner);
             if (posRes.isFound) {
                 var pos = posRes.loadValue();
+                // A9-M4-02b: a round-0 refund claim may be in flight while new
+                // refunds land. creditRefundLedger zeroed the pre-claim carry, so
+                // restore it on bounce: new balance = unclaimed carry + in-flight X.
+                if (p.roundId == 0) {
+                    val carry: uint128 = pos.principalClaimed ? 0 as uint128 : pos.amountRaw;
+                    pos.amountRaw = carry + p.amountRaw;
+                }
                 pos.principalClaimed = false;
                 inner.set(owner, pos);
                 s.stakes.set(p.roundId, inner);
