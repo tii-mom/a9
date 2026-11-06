@@ -106,9 +106,12 @@ export interface QueryState<T> {
 /** Poll an endpoint on an interval (default 3s). Pauses when the tab is hidden. */
 export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { intervalMs?: number; enabled?: boolean } = {}): QueryState<T> {
   const { intervalMs = 3000, enabled = true } = opts;
+  // `key` is the serialized data. An unchanged response keeps the same snapshot object, so React bails out.
   const [snapshot, setSnapshot] = useState<{
-    deps: unknown[]; data: T | null; error: ApiError | null; loading: boolean; updatedAt: number | null;
-  }>({ deps: [...deps], data: null, error: null, loading: enabled, updatedAt: null });
+    deps: unknown[]; data: T | null; key: string | null; error: ApiError | null; loading: boolean;
+  }>({ deps: [...deps], data: null, key: null, error: null, loading: enabled });
+  // Freshness lives in a ref: a successful poll with unchanged data must not re-render the caller.
+  const freshRef = useRef<{ deps: unknown[]; at: number } | null>(null);
   const sameDeps = (previous: unknown[]) => previous.length === deps.length && previous.every((value, index) => Object.is(value, deps[index]));
   const current = enabled && sameDeps(snapshot.deps);
   const [nonce, setNonce] = useState(0);
@@ -121,8 +124,8 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
     const requestDeps = [...deps];
     const matches = (previous: unknown[]) => previous.length === requestDeps.length && previous.every((value, index) => Object.is(value, requestDeps[index]));
     setSnapshot((previous) => enabled && matches(previous.deps)
-      ? { ...previous, loading: true }
-      : { deps: requestDeps, data: null, error: null, loading: enabled, updatedAt: null });
+      ? (previous.loading || previous.data !== null ? previous : { ...previous, loading: true })
+      : { deps: requestDeps, data: null, key: null, error: null, loading: enabled });
     if (!enabled) return;
     let alive = true;
     let inFlight = false;
@@ -138,15 +141,26 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
     const run = async () => {
       if (!alive || inFlight) return;
       inFlight = true;
-      setSnapshot((previous) => ({ ...previous, loading: true }));
+      // Background polls of loaded data do not flip loading, so they cause no re-render by themselves.
+      setSnapshot((previous) => (previous.data === null && !previous.loading ? { ...previous, loading: true } : previous));
       try {
         const next = await fnRef.current();
         if (!alive) return;
-        setSnapshot({ deps: requestDeps, data: next, error: null, loading: false, updatedAt: Date.now() });
+        const key = JSON.stringify(next);
+        freshRef.current = { deps: requestDeps, at: Date.now() };
+        setSnapshot((previous) => (
+          previous.key === key && previous.error === null && !previous.loading && matches(previous.deps)
+            ? previous // unchanged: same object, no re-render; the old data reference is kept
+            : { deps: requestDeps, data: next, key, error: null, loading: false }
+        ));
       } catch (e) {
         if (!alive) return;
         const error = e instanceof ApiError ? e : new ApiError('NETWORK', String(e));
-        setSnapshot((previous) => ({ ...previous, error, loading: false }));
+        setSnapshot((previous) => (
+          previous.error?.code === error.code && previous.error?.message === error.message && !previous.loading
+            ? previous
+            : { ...previous, error, loading: false }
+        ));
       } finally {
         inFlight = false;
       }
@@ -168,7 +182,7 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
     data: current ? snapshot.data : null,
     error: current ? snapshot.error : null,
     loading: enabled && (!current || snapshot.loading),
-    updatedAt: current ? snapshot.updatedAt : null,
+    updatedAt: current && freshRef.current && sameDeps(freshRef.current.deps) ? freshRef.current.at : null,
     refresh,
     refetch: refresh,
   };

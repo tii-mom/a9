@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useId } from 'react';
 import type { ProtocolConfig } from '@shared/types';
 import { formatUsdE8, pad2 } from '../../lib/format';
@@ -9,7 +10,7 @@ import { usdNum } from './utils';
 interface Props { cfg: ProtocolConfig | null; board: BoardView; copy: LandingCopy }
 
 /** Only reported TWAP values are plotted. A segment represents one candle, never a tick path. */
-export function PriceChart({ cfg, board, copy }: Props) {
+function PriceChartView({ cfg, board, copy }: Props) {
   const { lang } = useLang();
   const zh = lang === 'zh';
   const titleId = useId();
@@ -72,3 +73,6 @@ export function PriceChart({ cfg, board, copy }: Props) {
     </div>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const PriceChart = memo(PriceChartView);

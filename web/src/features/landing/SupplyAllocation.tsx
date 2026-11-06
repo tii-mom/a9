@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { ProtocolConfig, RoundSummary } from '@shared/types';
 import { ladderLetter } from './derive';
 import type { LandingCopy } from './landing.i18n';
@@ -8,7 +9,7 @@ interface Props {
   copy: LandingCopy;
 }
 
-export function SupplyAllocation({ cfg, rounds, copy }: Props) {
+function SupplyAllocationView({ cfg, rounds, copy }: Props) {
   const roundCount = cfg?.roundCount ?? 10;
   const letters = Array.from({ length: roundCount }).map((_, index) => {
     const round = rounds.find((item) => item.roundId === index + 1);
@@ -69,3 +70,6 @@ export function SupplyAllocation({ cfg, rounds, copy }: Props) {
     </section>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const SupplyAllocation = memo(SupplyAllocationView);

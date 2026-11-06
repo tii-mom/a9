@@ -50,13 +50,15 @@ export default function LandingPage() {
     if (el) { el.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); el.focus({ preventScroll: true }); }
   };
 
-  const onClaim = () => navigate('/me');
+  const onClaim = useCallback(() => navigate('/me'), [navigate]);
 
   return (
     <>
       <SiteHeader tape={<Tape cfg={cfg} stats={stats} board={board} trades={trades} copy={copy} />} isLanding />
       <main id="main-content" tabIndex={-1}>
         <span id="top" />
+        {/* Static thesis above the live board: renders with the first paint (LCP) and tells first-time visitors what the round is. Same copy as the hero title. */}
+        <p className="wrap home-strap">{copy.hero.title}<em>{copy.hero.titleEm}</em></p>
         <div className={"wrap data-health" + (data.error || data.stale ? " degraded" : "")} role="status" aria-live="polite">
           <span>{data.loading && !data.error ? copy.common.loading : data.error ? (zh ? "部分数据刷新失败 · 显示上次可用数据" : "Some feeds failed · showing last available data") : data.stale ? (zh ? "数据已过期 · 等待刷新" : "Data is stale · awaiting refresh") : (zh ? "数据已更新" : "Data updated")}{data.updatedAt ? ` · ${new Date(data.updatedAt).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit" })}` : ""} · {cfg?.dataSource === "demo" ? (zh ? "演示环境" : "Demo environment") : cfg?.network ?? "—"}</span>
           {data.error || data.stale ? <button className="btn sm" type="button" onClick={refreshAll}>{copy.common.retry}</button> : null}

@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { OrderBook, ProtocolConfig, ProtocolStats, Trade } from '@shared/types';
@@ -19,7 +20,7 @@ interface Props {
 
 const barStyle = (width: number): CSSProperties => ({ ['--w' as string]: Math.max(0, Math.min(100, width)) + '%' }) as CSSProperties;
 
-export function OrderFlow({ health, cfg, stats, board, trades, book, copy }: Props) {
+function OrderFlowView({ health, cfg, stats, board, trades, book, copy }: Props) {
   const { lang } = useLang();
   const status = (value: string) => value === 'error' ? (lang === 'zh' ? '刷新失败 · 保留上次数据' : 'Refresh failed · last data shown') : value === 'loading' ? copy.common.loading : value === 'stale' ? (lang === 'zh' ? '数据已过期' : 'Stale data') : cfg?.dataSource === 'demo' ? (lang === 'zh' ? '演示数据' : 'Demo data') : (lang === 'zh' ? '轮询更新' : 'Polling');
   const decimals = cfg?.token.decimals ?? 9;
@@ -172,3 +173,6 @@ export function OrderFlow({ health, cfg, stats, board, trades, book, copy }: Pro
     </section>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const OrderFlow = memo(OrderFlowView);

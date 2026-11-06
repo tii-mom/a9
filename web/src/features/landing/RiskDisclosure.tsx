@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { ProtocolConfig } from '@shared/types';
 import { IcoWarn } from './icons';
 import { fill, type LandingCopy } from './landing.i18n';
@@ -7,7 +8,7 @@ interface Props {
   copy: LandingCopy;
 }
 
-export function RiskDisclosure({ cfg, copy }: Props) {
+function RiskDisclosureView({ cfg, copy }: Props) {
   return (
     <section className="sec" id="risk">
       <div className="wrap">
@@ -35,3 +36,6 @@ export function RiskDisclosure({ cfg, copy }: Props) {
     </section>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const RiskDisclosure = memo(RiskDisclosureView);

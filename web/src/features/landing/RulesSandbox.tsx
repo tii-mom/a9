@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useState } from 'react';
 import type { ProtocolConfig } from '@shared/types';
 import type { BoardView } from './derive';
@@ -24,7 +25,7 @@ function shortPattern(candleCount: number, need: number): boolean[] {
 
 type Preset = 'all' | 'need' | 'short' | 'none';
 
-export function RulesSandbox({ cfg, board, copy }: Props) {
+function RulesSandboxView({ cfg, board, copy }: Props) {
   const { lang } = useLang();
   const candleCount = cfg?.candleCount ?? 24;
   const need = cfg?.minQualifiedCandles ?? 16;
@@ -108,7 +109,6 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
                   key={index}
                   onClick={() => toggle(index)}
                   aria-pressed={on}
-                  aria-label={fill(on ? copy.rules.cellAriaOn : copy.rules.cellAriaOff, { i: index + 1 })}
                 >
                   <b>{String(index + 1).padStart(2, '0')}</b>
                   {on ? <IcoOk /> : <IcoNo />}
@@ -215,3 +215,6 @@ export function RulesSandbox({ cfg, board, copy }: Props) {
     </section>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const RulesSandbox = memo(RulesSandboxView);

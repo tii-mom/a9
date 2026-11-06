@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import type { MeResponse, ProtocolConfig, ProtocolStats } from '@shared/types';
 import { formatPct, formatUsdE8, pad2 } from '../../lib/format';
@@ -52,7 +53,7 @@ function phaseText(board: BoardView, copy: LandingCopy, lang: 'zh' | 'en'): stri
   return copy.board.phaseObserve;
 }
 
-export function BattleBoard({
+function BattleBoardView({
   cfg,
   stats,
   board,
@@ -416,3 +417,6 @@ export function BattleBoard({
     </section>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const BattleBoard = memo(BattleBoardView);

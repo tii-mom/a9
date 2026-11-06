@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { ProtocolConfig, RoundSummary } from '@shared/types';
 import { formatUsdE8, pad2 } from '../../lib/format';
 import { ladderLetter, type LadderLetter } from './derive';
@@ -12,7 +13,7 @@ interface Props {
   copy: LandingCopy;
 }
 
-export function RoundLadder({ cfg, rounds, copy }: Props) {
+function RoundLadderView({ cfg, rounds, copy }: Props) {
   const { lang } = useLang();
   const decimals = cfg?.token.decimals ?? 9;
   const p0 = cfg ? '$' + (usdNum(cfg.p0UsdE8) ?? 0).toFixed(5) : copy.common.dash;
@@ -88,3 +89,6 @@ export function RoundLadder({ cfg, rounds, copy }: Props) {
     </section>
   );
 }
+
+/** Memoised: re-renders only when its inputs change (docs/31 §5.3). */
+export const RoundLadder = memo(RoundLadderView);
