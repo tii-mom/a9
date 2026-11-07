@@ -665,6 +665,15 @@ export default {
         logRequest(request, r.status, started);
         return r;
       }
+      if (url.pathname === '/tonconnect-manifest.json') {
+        // Per-host manifest: the wallet signs ton_proof for the manifest's domain, so it must match
+        // the host the user is on (test.a9.lat on testnet, a9.lat in production).
+        const r = new Response(JSON.stringify({ url: url.origin, name: 'A9', iconUrl: `${url.origin}/a9-icon-192.png` }), {
+          headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' },
+        });
+        logRequest(request, r.status, started);
+        return r;
+      }
       if (url.pathname === '/api/admin/tg/setup' && request.method.toUpperCase() === 'POST') {
         // Registers this Worker's webhook + the "开战" menu button with Telegram (token stays a secret).
         requireAdmin(request, env);
