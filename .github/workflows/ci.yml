@@ -120,6 +120,8 @@ jobs:
       - name: Start wrangler dev
         working-directory: worker
         run: |
+          # wrangler.toml serves assets from ../web/dist; this job only smoke-tests the API, so a placeholder is enough
+          mkdir -p ../web/dist && [ -f ../web/dist/index.html ] || echo '<!doctype html><title>a9</title>' > ../web/dist/index.html
           (./node_modules/.bin/wrangler dev --port 8787 --var DEMO_CANDLE_SECONDS:2 --var DEMO_PREVIEW_SECONDS:2 > /tmp/wrangler.log 2>&1 &)
           for i in $(seq 1 60); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/api/health || true)
