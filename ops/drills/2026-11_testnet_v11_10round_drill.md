@@ -905,3 +905,28 @@ RC 余额期望 = 8,200,000,000
 ---
 
 *本演练记录归档到 `ops/records/`（交易哈希、事件、对账输出）与本文件同目录的结果表。*
+
+---
+
+## 附录 R：第一次测试网实跑记录（2026-11-07，极速档 10/30/10×24/60/60）
+
+部署：JettonMaster `kQDNyvApbpZNibyuLHuoj3XqbNUdu2ldurxO-WsyVIop9Kag` · RoundController `kQBfMft6yykyzkcmpMsRpI3zqQAXEQDGwmbpgABEsQlyZYZf` · JunxiangDistributor `kQCyTbjVfO1kkS0Pzl-iUnejsUgPfivj-ycRhR_Z6KNnFb8k` · Worker `https://a9-testnet.348421501.workers.dev`（D1 `a9-testnet`）。keeper 模式 mixed（S,F,S,S,S,F,S,S,F,S）。
+
+| 城 | 结果 | 上车 | 奖池（亿） | 链上核对 |
+| --- | --- | --- | --- | --- |
+| R1 | 破城 | 0 | 7 | 奖池全额滚存，R2 开城奖池 14、tier 2 ✅（场景 c） |
+| R2 | 失败 | A ×1.2、B ×1.0 | 14 | 销毁 8.202 = 7 + 1.2 + 0.002；R3 奖池 14 ✅（场景 b、a 时机系数） |
+| R3 | 破城 | A | 14 | A 领 本金 + 2.8（20%），锁定 11.2；团队钱包收到 R1 的 1.2 ✅（场景 e 前半） |
+| R4 | 破城 | 0 | 7 | R3 锁定 11.2 全额解锁；A 领取后余额 14.009 亿 ✅（场景 e） |
+| R5 | 破城 | 0 | 14 | 滚存 ✅ |
+| R6 | 失败 | 0 | 21 | 销毁 10.5 + 1.2 ✅ |
+| R7 | 破城 | 0 | 17.5 | 滚存 ✅ |
+| R8 | 破城 | 0 | 24.5 | 滚存 ✅ |
+| R9 | 失败 | 0 | 31.5 | 销毁 15.75 + 1.2 ✅ |
+| R10 | 破城 | 0 | 22.75 | endAt 写入，剩余滚存 22.75 全部销毁 ✅（场景 h 前半） |
+
+最终守恒（链上读取）：total_supply = **40.398 亿**（销毁合计 59.602 亿）；团队钱包 **8.4 亿**（7 次破城 × 1.2，最后一笔 ReleaseTeam 在 endAt + 60s 前被拒（exit 208）、之后成功）；RC 余额 **0**。与手算完全一致。
+
+发现并修复的问题（均在演练脚本，合约无缺陷）：runner 硬编码旧 Jetton master（RC 正确以 exit 104 拒收）；窗口关闭后仍重试质押（改为提前 6s 截止）；读回失败即退出（改为记录后继续）。
+
+未覆盖（30 秒攻城期只够 1–2 人上车，需 90 秒攻城期重新部署后补跑）：多人按战力分奖、一键续战 (d)、受益人与 STON.fi 一键上车 (g)、技术终止 (f)、第 10 城有人上车时的 60 秒线性解锁 (h 后半)、军饷全流程 (i)、社交 (j，需 BotFather 配置 Mini App)、TON Proof (k，需人工钱包签名)。
