@@ -219,6 +219,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+        env:
+          VITE_TG_BOT_USERNAME: ${{ vars.PROD_TG_BOT_USERNAME }}
       - name: "Guard: migrations 目录只允许 NNNN_*.sql"
         # S-2 防呆：任何非迁移 .sql 混入 migrations/ 都会让生产 apply 执行它（例如演示 seed）
         run: |
@@ -266,6 +268,8 @@ jobs:
           PROD_KEEPER_ADDRESS: ${{ vars.PROD_KEEPER_ADDRESS }}
           PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
           PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
+          PROD_JUNXIANG_DISTRIBUTOR_ADDRESS: ${{ vars.PROD_JUNXIANG_DISTRIBUTOR_ADDRESS }}
+          PROD_TG_BOT_USERNAME: ${{ vars.PROD_TG_BOT_USERNAME }}
           PROD_D1_DATABASE_ID: ${{ vars.PROD_D1_DATABASE_ID }}
         run: |
           python3 - <<'PY'
@@ -283,6 +287,8 @@ jobs:
               'KEEPER_ADDRESS': os.environ.get('PROD_KEEPER_ADDRESS', ''),
               'JETTON_MASTER_ADDRESS': os.environ.get('PROD_JETTON_MASTER_ADDRESS', ''),
               'ORACLE_CONFIG_HASH': os.environ.get('PROD_ORACLE_CONFIG_HASH', ''),
+              'JUNXIANG_DISTRIBUTOR_ADDRESS': os.environ.get('PROD_JUNXIANG_DISTRIBUTOR_ADDRESS', ''),
+              'TG_BOT_USERNAME': os.environ.get('PROD_TG_BOT_USERNAME', ''),
           }
           for key, value in overrides.items():
               if value.strip():
@@ -302,6 +308,7 @@ jobs:
           required = [
               'ROUND_CONTROLLER_ADDRESS', 'TEAM_WALLET_ADDRESS', 'KEEPER_ADDRESS', 'JETTON_MASTER_ADDRESS',
               'ORACLE_CONFIG_HASH', 'TONCENTER_V2_URL', 'TONCENTER_V3_URL',
+              'JUNXIANG_DISTRIBUTOR_ADDRESS', 'TG_BOT_USERNAME',
           ]
           for key in required:
               got = str(values.get(key, '')).strip()
@@ -355,6 +362,8 @@ jobs:
           PROD_KEEPER_ADDRESS: ${{ vars.PROD_KEEPER_ADDRESS }}
           PROD_JETTON_MASTER_ADDRESS: ${{ vars.PROD_JETTON_MASTER_ADDRESS }}
           PROD_ORACLE_CONFIG_HASH: ${{ vars.PROD_ORACLE_CONFIG_HASH }}
+          PROD_JUNXIANG_DISTRIBUTOR_ADDRESS: ${{ vars.PROD_JUNXIANG_DISTRIBUTOR_ADDRESS }}
+          PROD_TG_BOT_USERNAME: ${{ vars.PROD_TG_BOT_USERNAME }}
         run: |
           args=(--env production)
           [ -n "$PROD_ROUND_CONTROLLER_ADDRESS" ] && args+=(--var "ROUND_CONTROLLER_ADDRESS:$PROD_ROUND_CONTROLLER_ADDRESS")
@@ -362,4 +371,6 @@ jobs:
           [ -n "$PROD_KEEPER_ADDRESS" ] && args+=(--var "KEEPER_ADDRESS:$PROD_KEEPER_ADDRESS")
           [ -n "$PROD_JETTON_MASTER_ADDRESS" ] && args+=(--var "JETTON_MASTER_ADDRESS:$PROD_JETTON_MASTER_ADDRESS")
           [ -n "$PROD_ORACLE_CONFIG_HASH" ] && args+=(--var "ORACLE_CONFIG_HASH:$PROD_ORACLE_CONFIG_HASH")
+          [ -n "$PROD_JUNXIANG_DISTRIBUTOR_ADDRESS" ] && args+=(--var "JUNXIANG_DISTRIBUTOR_ADDRESS:$PROD_JUNXIANG_DISTRIBUTOR_ADDRESS")
+          [ -n "$PROD_TG_BOT_USERNAME" ] && args+=(--var "TG_BOT_USERNAME:$PROD_TG_BOT_USERNAME")
           ./node_modules/.bin/wrangler deploy "${args[@]}"

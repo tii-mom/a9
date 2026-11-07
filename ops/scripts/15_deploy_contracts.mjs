@@ -27,8 +27,8 @@ const { args, execute, params, digest, registry, toolchain } = bootstrap({
 // keeper / teamWallet 写入 RC 初始数据，部署后永久不可改：优先登记表，其次环境变量。
 const keeper = str(args, 'keeper') || resolveWalletAddress(registry, 'keeper') || process.env[params.roles.keeper.env] || '';
 const teamWallet = str(args, 'team-wallet') || resolveWalletAddress(registry, 'teamWallet') || process.env[params.roles.teamWallet.env] || '';
-// junxiangPublisher 写入军饷分发合约，部署后不可改；缺省 = keeper（与 deploy-emulation 的默认一致）。
-const junxiangPublisher = str(args, 'junxiang-publisher') || resolveWalletAddress(registry, 'junxiangPublisher') || process.env[params.roles.junxiangPublisher.env] || keeper;
+// junxiangPublisher 写入军饷分发合约，部署后不可改；必须显式提供（与 keeper 分开的热钱包）。
+const junxiangPublisher = str(args, 'junxiang-publisher') || resolveWalletAddress(registry, 'junxiangPublisher') || process.env[params.roles.junxiangPublisher.env] || '';  // must be explicit (deploy refuses a default)
 
 // 时间与限额参数默认取 params（显式环境变量优先），保证链上初始数据与参数文件一致。
 const deployEnvDefaults = {

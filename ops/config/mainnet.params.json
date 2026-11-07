@@ -164,6 +164,7 @@
   "techAbort": {
     "abortTimeoutSeconds": 604800,
     "abortTimeoutDays": 7,
+    "fallbackUnlockSeconds": 2592000,
     "anyoneCanTrigger": true,
     "refundPrincipalBps": 10000,
     "burnsRewardOnAbort": false,
@@ -206,7 +207,7 @@
     "junxiangPublisher": {
       "env": "A9_JUNXIANG_PUBLISHER_ADDRESS",
       "registry": "junxiangPublisher",
-      "default": "keeper",
+      "default": null,
       "public": false,
       "walletNameEnv": "A9_JUNXIANG_WALLET",
       "note": "军饷分发 publisher 热钱包（主网全新生成，只放 gas）；默认与 keeper 分开，写入分发合约初始数据，部署后不可改"

@@ -142,6 +142,11 @@ JETTON_MASTER_ADDRESS = "0:__JETTON_MASTER_ADDRESS__"
 JUNXIANG_DISTRIBUTOR_ADDRESS = "0:__JUNXIANG_DISTRIBUTOR_ADDRESS__"
 ORACLE_CONFIG_VERSION = "1"
 ORACLE_CONFIG_HASH = "__ORACLE_CONFIG_HASH__"
+# 正式机器人用户名（不带 @），CI 用 GitHub Variable PROD_TG_BOT_USERNAME 注入
+TG_BOT_USERNAME = "__TG_BOT_USERNAME__"
+# 主网 STON.fi A9 池地址：建池后填入（为空则守城补贴关闭）
+STONFI_POOL_ADDRESS = ""
+# 生产 secrets（wrangler secret put --env production）：ADMIN_TOKEN、TONCENTER_API_KEY、TG_BOT_TOKEN、TG_WEBHOOK_SECRET
 
 # 生产安全 / 限流 / 展示参数（与 demo 段一致的公共项）
 ALLOWED_ORIGINS = "https://a9.lat,https://www.a9.lat"
