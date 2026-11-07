@@ -185,7 +185,8 @@ async function baseline() {
     const res = await api('/api/health');
     const h = res.headers;
     eq(h.get('x-content-type-options'), 'nosniff', 'X-Content-Type-Options');
-    eq(h.get('x-frame-options'), 'DENY', 'X-Frame-Options');
+    // framing: only Telegram (Mini App in Telegram Web) may embed the site; enforced via CSP frame-ancestors
+    assert(/frame-ancestors 'self' https:\/\/web\.telegram\.org https:\/\/\*\.telegram\.org/.test(h.get('content-security-policy') || ''), 'CSP frame-ancestors 仅允许 Telegram');
     eq(h.get('referrer-policy'), 'strict-origin-when-cross-origin', 'Referrer-Policy');
     assert((h.get('permissions-policy') || '').includes('geolocation=()'), 'Permissions-Policy');
     eq(h.get('cross-origin-opener-policy'), 'same-origin', 'COOP');
@@ -834,7 +835,7 @@ async function assetTests() {
     eq(res.status, 200, '首页 status');
     const type = res.headers.get('content-type') || '';
     assert(type.includes('text/html'), '首页 content-type 应为 html：' + type);
-    eq(res.headers.get('x-frame-options'), 'DENY', '静态资源安全头');
+    assert((res.headers.get('content-security-policy') || '').includes("frame-ancestors 'self' https://web.telegram.org"), '静态资源安全头（CSP frame-ancestors）');
     const spa = await fetch(BASE + '/leaderboard');
     eq(spa.status, 200, 'SPA 回退 status');
     assert((spa.headers.get('content-type') || '').includes('text/html'), 'SPA 回退 content-type');
