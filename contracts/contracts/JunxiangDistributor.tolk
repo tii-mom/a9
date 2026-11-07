@@ -64,8 +64,11 @@ fun onInternalMessage(in: InMessage) {
             assert (in.senderAddress == calcRecordAddress(contract.getAddress(), msg.owner, st.codes.load().recordCode)) throw Errors.NotTicket;
             st.totalPaidRaw += msg.amountRaw;
             st.save();
+            // The claimant pays everything: keep the distributor's own TON, then the event and the
+            // jetton transfer are both paid from this message's value (A9-V11-01).
+            reserveToncoinsOnBalance(contract.getOriginalBalance() - in.valueCoins, RESERVE_MODE_AT_MOST);
             emitExternalEvent(JunxiangClaimed { owner: msg.owner, amountRaw: msg.amountRaw, cumulativeRaw: msg.cumulativeRaw });
-            sendWithInboundValue(distributorWallet(st), buildJettonTransferBody(msg.queryId, msg.amountRaw as coins, msg.owner, msg.owner));
+            sendWithReservedBalance(distributorWallet(st), buildJettonTransferBody(msg.queryId, msg.amountRaw as coins, msg.owner, msg.owner));
         }
         TopUpTons => {}
         ReturnExcessesBack => {}

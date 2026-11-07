@@ -87,6 +87,12 @@ const VALUE_TICKET_DEPLOY: int = 50000000;    // restake: deploy/top up the new 
 const TICKET_MIN_BALANCE: int = 20000000;     // ticket keeps this for storage, returns the rest
 const MIN_TICKET_ACTION_VALUE: int = 150000000; // owner -> ticket claim
 const MIN_TICKET_RESTAKE_VALUE: int = 250000000;
+// RC-side floors for a ticket request (what is left after the ticket's own hop); restake with a
+// reward sends TicketUpdate + AddStake(deploy) + the claim transfer.
+const MIN_RC_REQUEST_VALUE: int = 100000000;
+const MIN_RC_RESTAKE_VALUE: int = 150000000;
+// a kept (non-refunded) deposit is logged only if its own TON covers the event
+const MIN_EVENT_VALUE: int = 10000000;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -118,4 +124,9 @@ enum Errors {
 
     NothingToRetry = 240,
     BadConfig = 250,
+
+    // junxiang (codes unchanged from v11-audit-freeze)
+    BadProof = 260,
+    NotDistributor = 270,
+    NothingNewToClaim = 271,
 }

@@ -48,7 +48,11 @@ fun onInternalMessage(in: InMessage) {
         CloseStaking => { handleCloseStaking(); }
         SubmitCandle => { handleSubmitCandle(in.senderAddress, msg); }
         TicketRequest => { handleTicketRequest(in.senderAddress, msg, in.valueCoins); }
-        AbortTechnical => { handleAbortTechnical(); }
+        AbortTechnical => {
+            // the caller pays (round-10 abort burns the carry from the RC balance)
+            assert (in.valueCoins >= VALUE_JETTON_ACTION) throw Errors.NotEnoughValue;
+            handleAbortTechnical();
+        }
         RetrySettlement => { handleRetrySettlement(msg.roundId, in.valueCoins); }
         ReleaseTeam => { handleReleaseTeam(in.valueCoins); }
         ReturnExcessesBack => {}
@@ -237,7 +241,8 @@ fun handleDeposit(sender: address, msg: TransferNotification, valueCoins: coins)
         if (head == 0) {
             payload.loadUint(2);
             ok = true;
-        } else if (head == 2 && payload.remainingBitsCount() == 267) {
+        } else if (payload.preloadUint(3) == 4 && payload.remainingBitsCount() == 267) {
+            // addr_std without anycast (100…); anycast would make loadAddress underflow (A9-V11-08)
             owner = payload.loadAddress();
             ok = true;
         }
@@ -274,7 +279,9 @@ fun handleDeposit(sender: address, msg: TransferNotification, valueCoins: coins)
     rd.stakeCount += 1;
     s.rounds.set(roundId, rd);
     s.save();
-    sendAddStake(s, owner, roundId, amount, weight, 0, SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
+    // The depositor pays everything: keep the RC's own TON, emit the event, then forward the
+    // rest of the deposit's TON to the ticket (A9-V11-01).
+    reserveToncoinsOnBalance(contract.getOriginalBalance() - valueCoins, RESERVE_MODE_AT_MOST);
     emitExternalEvent(DepositAccepted {
         roundId,
         owner,
@@ -283,17 +290,24 @@ fun handleDeposit(sender: address, msg: TransferNotification, valueCoins: coins)
         totalAcceptedStakeRaw: rd.totalStakeRaw,
         totalWeightRaw: rd.totalWeightRaw,
     });
+    // SAFETY: original balance reserved above; only the deposit's TON is forwarded.
+    sendAddStake(s, owner, roundId, amount, weight, 0, SEND_MODE_CARRY_ALL_BALANCE);
 }
 
 // Instant refund paid by the deposit's own forward TON; without it the amount is kept
 // (no ledger: keeps RC storage bounded; frontends always attach enough TON).
 fun refundDeposit(wallet: address, initiator: address, amount: uint128, valueCoins: coins) {
     if (valueCoins >= MIN_REFUND_VALUE && initiator.getWorkchain() == BASECHAIN) {
-        sendWithInboundValue(wallet, buildJettonTransferBody(REFUND_QUERY_TAG, amount as coins, initiator, initiator));
+        reserveToncoinsOnBalance(contract.getOriginalBalance() - valueCoins, RESERVE_MODE_AT_MOST);
         emitExternalEvent(DepositRefunded { owner: initiator, amountRaw: amount, instant: true });
+        sendWithReservedBalance(wallet, buildJettonTransferBody(REFUND_QUERY_TAG, amount as coins, initiator, initiator));
         return;
     }
-    emitExternalEvent(DepositRefunded { owner: initiator, amountRaw: amount, instant: false });
+    // Kept deposit: log it only if the message's own TON covers the event, so dust notifications
+    // cannot drain the RC's balance through event fees.
+    if (valueCoins >= MIN_EVENT_VALUE) {
+        emitExternalEvent(DepositRefunded { owner: initiator, amountRaw: amount, instant: false });
+    }
 }
 
 // ===========================================================================
@@ -589,6 +603,8 @@ fun handleTicketRequest(sender: address, msg: TicketRequest, valueCoins: coins) 
     var s = lazy Storage.load();
     val ticketCode = codes(s).ticketCode;
     assert (sender == calcTicketAddress(contract.getAddress(), msg.owner, msg.roundId, ticketCode)) throw Errors.NotTicket;
+    // Too little TON must fail in the compute phase (bounces to the ticket, clearing pending).
+    assert (valueCoins >= (msg.restake ? MIN_RC_RESTAKE_VALUE : MIN_RC_REQUEST_VALUE)) throw Errors.NotEnoughValue;
     val rr = s.rounds.get(msg.roundId);
     assert (rr.isFound) throw Errors.BadRoundId;
     val rd = rr.loadValue();
@@ -619,7 +635,9 @@ fun handleTicketRequest(sender: address, msg: TicketRequest, valueCoins: coins) 
 
     // Keep the RC's own TON balance: everything sent below comes out of the request's value
     // (the original balance already includes the inbound value, so subtract it).
-    reserveToncoinsOnBalance(contract.getOriginalBalance() - valueCoins, RESERVE_MODE_AT_MOST);
+    // +BOUNCE_ON_ACTION_FAIL everywhere below: an action-phase failure bounces the request to the
+    // ticket (clearing pending) instead of leaving it stuck (A9-V11-02).
+    reserveToncoinsOnBalance(contract.getOriginalBalance() - valueCoins, RESERVE_MODE_AT_MOST | RESERVE_MODE_BOUNCE_ON_ACTION_FAIL);
     val wallet = ownWallet(s);
 
     if (msg.restake) {
@@ -647,11 +665,11 @@ fun handleTicketRequest(sender: address, msg: TicketRequest, valueCoins: coins) 
         sendTicketUpdate(sender, principalDone, lockedClaimed);
         if (reward > 0) {
             emitExternalEvent(Claimed { owner: msg.owner, roundId: msg.roundId, principalRaw: 0, rewardRaw: reward });
-            sendAddStake(s, msg.owner, cur, principal, weight, VALUE_TICKET_DEPLOY, SEND_MODE_PAY_FEES_SEPARATELY);
+            sendAddStake(s, msg.owner, cur, principal, weight, VALUE_TICKET_DEPLOY, SEND_MODE_PAY_FEES_SEPARATELY | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
             sendClaimTransfer(wallet, reward, msg.owner);
         } else {
             // SAFETY: original balance reserved above; only the request's TON is forwarded.
-            sendAddStake(s, msg.owner, cur, principal, weight, 0, SEND_MODE_CARRY_ALL_BALANCE);
+            sendAddStake(s, msg.owner, cur, principal, weight, 0, SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
         }
         return;
     }
@@ -669,7 +687,7 @@ fun sendTicketUpdate(ticket: address, principalDone: bool, lockedClaimed: uint12
         dest: ticket,
         body: TicketUpdate { queryId: 0, principalDone, lockedClaimedRaw: lockedClaimed },
     });
-    out.send(SEND_MODE_PAY_FEES_SEPARATELY);
+    out.send(SEND_MODE_PAY_FEES_SEPARATELY | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
 }
 
 // Last message of a request: carries everything above the reserved original balance.
@@ -683,7 +701,7 @@ fun sendClaimTransfer(wallet: address, amount: uint128, owner: address) {
     // SAFETY: a reserve of the RC's original balance (minus this request's value) is set
     // before any send in handleTicketRequest, so CARRY_ALL_BALANCE only forwards the
     // request's own TON; RC jettons are not affected by TON modes.
-    out.send(SEND_MODE_CARRY_ALL_BALANCE);
+    out.send(SEND_MODE_CARRY_ALL_BALANCE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
 }
 
 // ===========================================================================

@@ -86,7 +86,8 @@ fun sendRequest(sender: address, queryId: uint64, restake: bool) {
             restake,
         },
     });
-    out.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
+    // an action-phase failure bounces the owner's message (state, incl. pending, is rolled back)
+    out.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE | SEND_MODE_BOUNCE_ON_ACTION_FAIL);
 }
 
 // Keep a small storage reserve, return everything else to the owner.

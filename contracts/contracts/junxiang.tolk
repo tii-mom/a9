@@ -8,6 +8,7 @@
 // Leaf   = sha256( wc:int8 || addrHash:uint256 || cumulative:uint128 )   (49 bytes)
 // Parent = sha256( min(a,b) || max(a,b) )                                 (sorted pair)
 // Proof  = sibling hashes bottom-up, packed 3 x uint256 per cell, next cell in ref 0.
+import "constants"
 
 struct DistributorCodes {
     jettonWalletCode: cell
@@ -61,8 +62,10 @@ fun merkleRootOf(leaf: uint256, proof: cell?): uint256 {
             node = hashPair(node, cs.loadUint(256));
             levels += 1;
         }
+        // canonical encoding only: whole 256-bit hashes, at most one ref to the next cell
+        assert (cs.remainingBitsCount() == 0 && cs.remainingRefsCount() <= 1) throw Errors.BadProof;
         next = cs.remainingRefsCount() > 0 ? cs.loadRef() : null;
-        assert (levels <= 32) throw 260;
+        assert (levels <= 32) throw Errors.BadProof;
     }
     return node;
 }
