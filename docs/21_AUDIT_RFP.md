@@ -28,7 +28,7 @@ A9 是一个部署在 TON 上的高风险链上游戏协议。核心机制一句
 
 | 合约 | 源文件 | 行数 | code hash | 资金风险 |
 | --- | --- | --- | --- | --- |
-| **RoundController** | `contracts/contracts/RoundController.tolk`（共享：`types.tolk`、`constants.tolk`、`jetton.tolk`、`ticket.tolk`） | 847 | `0x74FCF17AAE8C029033AC0CEA75903BB4E1091464C27C423637BC490833EFE0D1` | **最高**：托管奖池（7 亿/城 + 滚存）、全部用户本金、团队额度 |
+| **RoundController** | `contracts/contracts/RoundController.tolk`（共享：`types.tolk`、`constants.tolk`、`jetton.tolk`、`ticket.tolk`） | 847 | `0x905F62F5CF3B114E94F195E25319F58A505FBFCD78EA3997AE8E26D285D5C96B` | **最高**：托管奖池（7 亿/城 + 滚存）、全部用户本金、团队额度 |
 | **StakeTicket**（攻城令） | `contracts/contracts/StakeTicket.tolk`、`contracts/contracts/ticket.tolk` | 123 + 91 | `0x0F00D2995452947199CE5887B17C3F0BF502ECAE1D9A439A74A8D32E7EBD3DBC` | 高：每人每城一个，持有本金与奖励的领取状态；不持有 Jetton，但决定 RC 的请求来源 |
 | **JunxiangDistributor**（军饷分发） | `contracts/contracts/JunxiangDistributor.tolk`、`contracts/contracts/junxiang.tolk` | 86 + 120 | `0x7FD6F461CF14393C3BB0FECB1208EB9B796A974D84B140EE9FCE9B10B14932AF` | 高：托管军饷 A9，按累计默克尔根支付 |
 | **ClaimRecord**（军饷领取记录） | `contracts/contracts/ClaimRecord.tolk` | 40 | `0xA74D51786D46FE16A749D92D71D5479A6D10689C5542D3A46D6B7E42FD302C43` | 中：每个钱包一个，记录已领累计额，决定单调性 |
@@ -42,7 +42,7 @@ A9 是一个部署在 TON 上的高风险链上游戏协议。核心机制一句
 
 ### 2.3 测试基线
 
-- `acton test`：contracts/README 状态行写 **30 个通过（含军饷 4 个）**，§0 与 §7 的分项写 26 个（RC 相关）。**审计启动前以 `acton test` 实际输出为准**，并在交接材料中写明。
+- `acton test`：**30 个通过（3 个文件：RC 23 + jetton 3 + 军饷 4）**，冻结时已实测。
 - `acton check`：0 error 0 warning（审计启动时重新确认）。
 - 测试源码：`contracts/tests/`（`round.test.tolk`、`junxiang.test.tolk`、`jetton.test.tolk`、`helpers.tolk`）。RC 测试覆盖 10 轮代币守恒（奖励 + 滚存 + 销毁 + 团队，最终 RC 余额为 0）。
 - 部署 ABI：`contracts/deploy/abi/*.json`。
