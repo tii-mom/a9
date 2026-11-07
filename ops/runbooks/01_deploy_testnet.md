@@ -52,10 +52,10 @@
 | --- | --- |
 | JettonWallet | `0xD06DAA57ED188CE9CB6CA596DD2111347433BF335223AC66C0D713C8E3DB74F4` |
 | JettonMaster | `0x76B56D9A6301223F1201D719E2F4A3FB84E08D7D701CB93BB43C9D0208E5E241` |
-| RoundController | `0x905F62F5CF3B114E94F195E25319F58A505FBFCD78EA3997AE8E26D285D5C96B` |
-| StakeTicket | `0x0F00D2995452947199CE5887B17C3F0BF502ECAE1D9A439A74A8D32E7EBD3DBC` |
-| JunxiangDistributor | `0x7FD6F461CF14393C3BB0FECB1208EB9B796A974D84B140EE9FCE9B10B14932AF` |
-| ClaimRecord | `0xA74D51786D46FE16A749D92D71D5479A6D10689C5542D3A46D6B7E42FD302C43` |
+| RoundController | `0xCAD074BAF5B83C3475BE90049B944F8BE3B2D6048F28C2FB6CC77CCB8470C98B` |
+| StakeTicket | `0xB04B6A611A93401F40B10274D85E72EAAF9624553F546FAC7C4CDCD7555A4F91` |
+| JunxiangDistributor | `0x9E07E813F0081B715C084BCF479C35E94BA4A711CAF4844C68112B5565B742D8` |
+| ClaimRecord | `0x8DB60A5B92079367C80AAA9856B2CDDABAFB0667F0C1CEC0CBF19359D8388D61` |
 
 > `contracts/deploy/params.testnet.json` 仍是 v6 旧参数（有 `<PLACEHOLDER>`，且仍写着单地址上限、总额上限）。v11 不能直接用它，必须按 v11 参数重新生成，并核对 `ticketCodeHash` 等新字段。
 
@@ -155,7 +155,7 @@ node ops/scripts/verify_deployment.mjs --online --save                      # ST
 `verify_deployment` 有 FAIL 时不得开 R1。`--lenient` 只用于排查，输出不作为开轮依据。
 
 - [ ] `RC.get_jetton_wallet_address()` = `JettonMaster.get_wallet_address(RC)`
-- [ ] `RC.get_ticket_code_hash()` = `0x0F00D299…EBD3DBC`（与 §1 一致）
+- [ ] `RC.get_ticket_code_hash()` = `0xB04B6A61…5A4F91`（与 §1 一致）
 - [ ] `RC.get_jetton_wallet_code_hash()` 与 JettonWallet 代码哈希一致
 - [ ] `RC.get_protocol_config()` 各字段与参数签字单一致，尤其：
   - `abortTimeoutSeconds`（正式档 604800；快速档按 drill）

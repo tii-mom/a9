@@ -63,7 +63,7 @@
     "note": "observation and preview share abortTimeoutSeconds (fast-cycle: 900)"
   },
   "stakeTicket": {
-    "codeHash": "0x0F00D2995452947199CE5887B17C3F0BF502ECAE1D9A439A74A8D32E7EBD3DBC",
+    "codeHash": "0xB04B6A611A93401F40B10274D85E72EAAF9624553F546FAC7C4CDCD7555A4F91",
     "claimTonMinNano": "150000000",
     "restakeTonMinNano": "250000000",
     "note": "one ticket per (owner, round); address derived from RC + owner + round + code"
@@ -71,8 +71,8 @@
   "junxiangDistributor": {
     "publisherDefault": "keeper",
     "publisherEnv": "A9_JUNXIANG_PUBLISHER_ADDRESS",
-    "codeHash": "0x7FD6F461CF14393C3BB0FECB1208EB9B796A974D84B140EE9FCE9B10B14932AF",
-    "recordCodeHash": "0xA74D51786D46FE16A749D92D71D5479A6D10689C5542D3A46D6B7E42FD302C43",
+    "codeHash": "0x9E07E813F0081B715C084BCF479C35E94BA4A711CAF4844C68112B5565B742D8",
+    "recordCodeHash": "0x8DB60A5B92079367C80AAA9856B2CDDABAFB0667F0C1CEC0CBF19359D8388D61",
     "initialListId": 0,
     "firstPublishedListId": 1,
     "fundingRule": "not funded at deploy; ops funds the distributor jetton wallet with >= the cumulative total BEFORE each junxiang-set-root",
