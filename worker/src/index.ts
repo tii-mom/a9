@@ -32,7 +32,6 @@ import {
 import * as state from './state';
 import * as store from './store';
 import * as views from './views';
-import * as rewards from './rewards';
 import { clientIp, createAuthSession, enforceRateLimit, issueAuthChallenge, issueAuthNonce, requireWriteAuth } from './tonproof';
 import { notImplemented, oraclePaused } from './http';
 import { reconcile as indexerReconcile, tick as indexerTick } from './indexer';
@@ -45,6 +44,7 @@ import { handleTelegramWebhook, pushSquadDigest } from './bot';
 import { loadGateForBot } from './social-bot-wiring';
 import { handleAdminPayoutBuild } from './social/payout';
 import { computeRoundJunxiang } from './social/runner';
+import { runWeeklyPayoutBuild } from './social/auto';
 
 export type { Env };
 
@@ -150,9 +150,9 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
 }
 
 /**
- * 演示领取（v10 合约同口径）：Claim(roundId) = 本金 + 全额奖励一次领完；all=true 等价 ClaimAll。
- * 可领：SUCCEEDED（本金 + 奖励）/ TECHNICAL_ABORTED（只退本金）；FAILED_PERMANENT 无可领。
- * demo 没有退款账本（入参校验失败直接拒绝），所以 roundsMask 不会出现 bit 15。
+ * 演示领取（v11 同口径）：每城一次领取「未领本金 + 20% 立即奖励 + 已解锁的压城部分」；all=true 逐城领取全部。
+ * 可领：SUCCEEDED（本金 + 20%，之后压城解锁增量）/ TECHNICAL_ABORTED（只退本金）；FAILED_PERMANENT 无可领。
+ * v11 没有退款账本，roundsMask 不会出现 bit 15。kind 字段保留兼容（web 旧调用），不再区分本金与奖励。
  */
 async function handleClaim(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
   const body = await readJsonBody(request);
@@ -180,27 +180,38 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
   const myStakes = (await store.listStakesForAddress(env, address)).filter((row) => roundIds.includes(row.round_id));
   if (!all && !myStakes.length) throw notFound('该地址在本轮没有质押记录');
 
+  // v11 demo：每城的「现在可领」与 /api/me 的 rounds[] 同口径（views.buildMe），每次领取写一条 claim_events 流水；
+  // 流水键 demo:<now>:<round> 保证同一次请求重放幂等，压城未解锁部分留待后续领取。
+  const me = await views.buildMe(env, st, address);
+  const positions = me.rounds.filter((item) => roundIds.includes(item.roundId));
   let mask = 0;
   let principalTotal = 0n;
   let rewardTotal = 0n;
   let alreadyClaimed = false;
-  for (const roundId of roundIds) {
-    const round = st.rounds.find((item) => item.round_id === roundId);
+  for (const position of positions) {
+    const round = st.rounds.find((item) => item.round_id === position.roundId);
     if (!round || (round.state !== 'SUCCEEDED' && round.state !== 'TECHNICAL_ABORTED')) continue;
-    const rows = myStakes.filter((row) => row.round_id === roundId);
-    if (!rows.length) continue;
-    if (rows.every((row) => row.principal_claimed === 1)) {
-      alreadyClaimed = true;
+    const principal = toBigInt(position.claimablePrincipalRaw);
+    const reward = toBigInt(position.claimableRewardRaw);
+    if (principal + reward === 0n) {
+      if (position.principalClaimed) alreadyClaimed = true;
       continue;
     }
-    const principal = rows.reduce((sum, row) => sum + toBigInt(row.amount_raw), 0n);
-    const reward = rewards.rewardOfAddress(round, address, st.stakeRows, st.rewardRows);
-    const recorded = await store.recordRoundClaim(env, { roundId, address, principalRaw: principal, rewardRaw: reward, claimedAt: st.now });
+    const recorded = await store.recordClaimEvent(env, {
+      txLt: 'demo:' + st.now + ':' + position.roundId,
+      roundId: position.roundId,
+      address,
+      principalRaw: principal,
+      rewardRaw: reward,
+      claimedAt: st.now,
+    });
     if (!recorded) {
       alreadyClaimed = true;
       continue;
     }
-    mask |= 1 << (roundId - 1);
+    const fullyUnlocked = toBigInt(position.unlockedRaw) >= toBigInt(position.lockedRaw);
+    await store.markStakesClaimed(env, position.roundId, address, { principal: true, reward: fullyUnlocked });
+    mask |= 1 << (position.roundId - 1);
     principalTotal += principal;
     rewardTotal += reward;
   }
@@ -705,6 +716,8 @@ export default {
           } catch (e) {
             console.error('[bot] digest failed', e instanceof Error ? e.message : String(e));
           }
+          // v11 军饷：周一 00:00 UTC 构建一次累计清单（D1 去重；只记账不上链，见 social/auto.ts）。永不抛出。
+          await runWeeklyPayoutBuild(env as never, Date.now());
           const auto = await state.autoplay(env);
           const st = await state.reconcile(env);
           await state.refreshDemoMarket(env, st);

@@ -123,6 +123,7 @@ async function main(): Promise<void> {
   add('round.current', currentRound >= 0 && currentRound <= 10, 'currentRound=' + currentRound);
   const state = await getProtocolState(client, rc.raw);
   add('protocolState.currentRound', state.currentRoundId === currentRound, 'get_protocol_state.currentRoundId=' + state.currentRoundId + ' vs ' + currentRound);
+  add('protocolState.fallbackUnlock', state.fallbackUnlockSeconds > 0, 'get_protocol_state.fallbackUnlockSeconds=' + state.fallbackUnlockSeconds + '（第 7 槽；旧部署 6 槽时默认 2592000）');
   const jetton = await getJettonData(client, jm.raw);
   add('jetton.mintable', jetton.mintable === false, 'mintable=' + String(jetton.mintable));
 

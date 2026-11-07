@@ -166,7 +166,8 @@ function BattleBoardView({
   }
 
   // result numbers
-  const burnedTotalRaw = board.burnedRaw ?? String(BigInt(board.rewardBudgetRaw) + BigInt(board.totalStakeRaw));
+  // v11 fallback: half the pool + all principal (the indexer's burnedRaw also includes the team quota)
+  const burnedTotalRaw = board.burnedRaw ?? String(BigInt(board.rewardBudgetRaw) / 2n + BigInt(board.totalStakeRaw));
   const nextRoundId = board.nextRoundId;
   const nextTarget = board.nextTargetUsdE8;
   const nextMult = board.nextPriceMultiplier;

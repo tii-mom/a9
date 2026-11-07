@@ -30,6 +30,9 @@ struct ProtocolTiming {
     minQualifiedCandles: uint8
     // after this delay past the expected end of a stage, anyone may abort
     abortTimeoutSeconds: uint32
+    // locked 80% fallback: linear unlock window after round 10 (and final team release delay).
+    // Mainnet 30 days; fast testnet profiles use seconds (docs/35 D-45).
+    fallbackUnlockSeconds: uint32
     riskDisclosureVersion: uint16
     configVersion: uint32
 }
@@ -373,6 +376,7 @@ struct ProtocolStateView {
     endAt: uint64
     successCount: uint8
     currentRoundId: uint8
+    fallbackUnlockSeconds: uint32
 }
 
 // What a ticket with this weight is owed right now (reads only round state).

@@ -31,7 +31,7 @@ function RulesSandboxView({ cfg, board, copy }: Props) {
   const need = cfg?.minQualifiedCandles ?? 16;
   const basePattern = defaultPattern(candleCount, need);
   const [sim, setSim] = useState<boolean[] | null>(null);
-  const [stakeText, setStakeText] = useState('100000');
+  const [stakeText, setStakeText] = useState('1000');
   const decimals = cfg?.token.decimals ?? 9;
 
   const cells = sim !== null && sim.length === candleCount ? sim : basePattern;
@@ -74,21 +74,21 @@ function RulesSandboxView({ cfg, board, copy }: Props) {
               <div className="n">{step.n}</div>
               <h3>{step.title}</h3>
               <p>{lang === 'zh' ? [
-                  `报名期 ${cfg ? cfg.stakeDurationSeconds / 3600 : '—'} 小时。参与前确认最大损失；结束后不可追加或提前退出。`,
+                  `攻城期 ${cfg ? cfg.stakeDurationSeconds / 3600 : '—'} 小时。上车前确认最大损失；结束后不可追加或提前退出。`,
                   `观察期 ${cfg ? cfg.observationSeconds / 3600 : '—'} 小时，${candleCount} 根 × ${cfg ? cfg.candleSeconds / 3600 : '—'} 小时 K 线。每根按多源 TWAP 考核。`,
                   `至少 ${need}/${candleCount} 根 TWAP 达到锁定目标价即通过，无需连续，恰好等于目标也达标。`,
-                  '成功后本金 + 奖励一次全额领取，奖励按质押比例分配；失败销毁本轮奖励与全部质押本金。'
+                  '破城：本金立即可领，奖励 20% 立即可领、80% 压城；城没破：本金 100% 销毁（输了归零），奖池一半销毁、一半滚入下一城。'
                 ][index] : [
                   `Stake during the ${cfg ? cfg.stakeDurationSeconds / 3600 : '—'}h window. Confirm the full loss risk. No additions or early exits after closing.`,
                   `Observe ${candleCount} × ${cfg ? cfg.candleSeconds / 3600 : '—'}h candles over ${cfg ? cfg.observationSeconds / 3600 : '—'}h, scored by multi-source TWAP.`,
                   `At least ${need}/${candleCount} TWAP candles must reach the locked target. They need not be consecutive. Equality qualifies.`,
-                  'On success, principal plus a pro-rata reward is claimed in full at once. Failure burns the round reward and all staked principal.'
+                  'On success, principal is claimable at once and the reward is split by weight: 20% at once, 80% locked. On failure, all principal is burned (losing means zero) and half the pool burns while half rolls over.'
                 ][index]}</p>
               <span className="k">{lang === 'zh' ? ['本金 100% 风险', '每根独立考核', `≥ ${need} 根通过`, '领取额度见账户页'][index] : ['100% principal at risk', 'Each candle scored independently', `≥ ${need} passes`, 'Review claims in your account'][index]}</span>
             </div>
           ))}
         </div>
-        <p className="note">{lang === 'zh' ? '目标 = max(P0 × 2^tier, 2 × 开窗 24h TWAP)；tier = 1 + 已成功轮数。奖励 = 本轮预算 × 我的质押 / 本轮总质押。' : 'Target = max(P0 × 2^tier, 2 × opening 24h TWAP); tier = 1 + successful rounds. Reward = round budget × my stake / round total stake.'}</p>
+        <p className="note">{lang === 'zh' ? '目标 = max(P0 × 2^tier, 2 × 开窗 24h TWAP)；tier = 1 + 已破城数。奖励 = 本城奖池 × 我的战力 / 本城总战力，战力 = 本金 × 时机系数（攻城期前 12h ×1.5、中 12h ×1.2、后 12h ×1.0）。' : 'Target = max(P0 × 2^tier, 2 × opening 24h TWAP); tier = 1 + gates broken. Reward = gate pool × my weight / total weight, weight = principal × timing factor (first 12h ×1.5, middle 12h ×1.2, last 12h ×1.0).'}</p>
 
         <div className="sec-h" style={{ marginTop: 44 }}>
           <span className="lbl">{copy.rules.sandLbl}</span>
@@ -162,7 +162,7 @@ function RulesSandboxView({ cfg, board, copy }: Props) {
                 </div>
                 <div>
                   <dt>{copy.rules.outWinReward}</dt>
-                  <dd className="ok">{lang === 'zh' ? '按质押比例' : 'Pro rata to stake'}</dd>
+                  <dd className="ok">{lang === 'zh' ? '按战力比例' : 'Pro rata to weight'}</dd>
                 </div>
                 <div>
                   <dt>{copy.rules.outWinTotal}</dt>

@@ -170,7 +170,8 @@
     "burnsRewardOnAbort": false,
     "burnsTeamOnAbort": false,
     "tierConsumed": false,
-    "note": "观察应结束后 abortTimeoutSeconds 仍未判定，或预告结束后仍未开轮（keeper 失联）→ 任何人 AbortTechnical；本金经攻城令领取，奖励/团队额度滚入下一城（D-39）。observation 与 preview 共用同一个超时（v11 ProtocolTiming.abortTimeoutSeconds）。"
+    "note": "观察应结束后 abortTimeoutSeconds 仍未判定，或预告结束后仍未开轮（keeper 失联）→ 任何人 AbortTechnical；本金经攻城令领取，奖励/团队额度滚入下一城（D-39）。observation 与 preview 共用同一个超时（v11 ProtocolTiming.abortTimeoutSeconds）。",
+    "fallbackUnlockSeconds": 2592000
   },
   "risk": {
     "disclosureVersion": 1,

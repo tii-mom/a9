@@ -13,7 +13,7 @@ import { BUY_ENTRY_OPEN } from './flags';
 import { LiveCountdown } from './LiveCountdown';
 import { DEFAULT_MIN_STAKE_TOKENS } from '../chain/protocol';
 
-/** v10：单笔最低 100,000 A9。 */
+/** v11：单笔最低 1,000 A9（与链上 minStakeRaw 一致）。 */
 const MIN_STAKE_A9 = Number(DEFAULT_MIN_STAKE_TOKENS);
 
 interface Props {
@@ -45,7 +45,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
   const riskVersion = cfg?.riskDisclosureVersion ?? 1;
 
   const [payTon, setPayTon] = useState('100');
-  const [stakeAmount, setStakeAmount] = useState('50000');
+  const [stakeAmount, setStakeAmount] = useState('1000');
   // Two separate acknowledgements: (1) principal may go to zero, (2) failure burns the round's
   // reward budget and all staked principal. Neither is pre-checked; both are required to stake.
   const [risk, setRisk] = useState(false);
@@ -79,7 +79,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
   const stakeVal = Math.max(0, Number(stakeAmount) || 0);
   const amountRaw = toRawUnits(stakeAmount, decimals);
 
-  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < MIN_STAKE_A9 || amountRaw === '0' || stakeVal + myStake > 20000000 || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || !burnAck || submitting || roundId === null;
+  const stakeDisabled = !dataReady || !stakeOpen || !wallet.connected || realWallet || !Number.isFinite(stakeVal) || stakeVal < MIN_STAKE_A9 || amountRaw === '0' || fuseBalanceRaw === null || stakeVal > fuseBalance || !risk || !burnAck || submitting || roundId === null;
   const stakeLabel = submitting
     ? copy.cmd.btnSubmitting
     : !stakeOpen
@@ -105,7 +105,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
       toast(copy.cmd.toastContractPending);
       return;
     }
-    if (!Number.isFinite(stakeVal) || stakeVal < MIN_STAKE_A9 || amountRaw === '0' || stakeVal + myStake > 20000000) {
+    if (!Number.isFinite(stakeVal) || stakeVal < MIN_STAKE_A9 || amountRaw === '0') {
       toast(copy.cmd.toastEnterAmount);
       return;
     }
@@ -395,7 +395,7 @@ export function CommandPanel({ cfg, board, dataReady, clockTargetMs, nextStakeTa
                 <input id="burnOk" type="checkbox" checked={burnAck} onChange={(event) => setBurnAck(event.target.checked)} />
                 <span>{copy.cmd.burnText}</span>
               </label>
-              <p className="note">{lang === 'zh' ? '单笔最低 100,000 A9；单地址本轮最多 20,000,000 A9。成功后本金 + 奖励一次全额领取，奖励按质押比例分配。' : 'Minimum 100,000 A9; up to 20,000,000 A9 per address per round. On success, principal plus a pro-rata reward is claimed in full at once.'}</p>
+              <p className="note">{lang === 'zh' ? '单笔最低 1,000 A9，无单地址与本城总额上限。破城后本金与 20% 奖励立即可领，80% 压城随后续破城或第 10 城后 30 天解锁；奖励按战力分配。' : 'Minimum 1,000 A9; no per-address or per-gate cap. On success, principal and 20% of the reward are claimable at once; the other 80% unlocks on a later success or over 30 days after round 10. Rewards are split by weight.'}</p>
               {!dataReady ? <p className="note" role="status">{lang === 'zh' ? '等待数据恢复后可提交' : 'Submission waits for fresh data'}</p> : null}
               {stakeVal > fuseBalance && wallet.connected ? <p className="note bad">{copy.cmd.toastInsufficientFuse}</p> : null}
               {realWallet ? (

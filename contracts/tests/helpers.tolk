@@ -105,6 +105,7 @@ fun rcStorage(keeper: address, master: address, teamWallet: address): Storage {
             candleCount: CANDLES,
             minQualifiedCandles: MIN_QUALIFIED,
             abortTimeoutSeconds: ABORT_TIMEOUT,
+            fallbackUnlockSeconds: FALLBACK as uint32,
             riskDisclosureVersion: 1,
             configVersion: 1,
         }.toCell(),

@@ -160,11 +160,12 @@ export const ALLOWED_OPCODE_NAMES = [...Object.keys(V11_OPCODES), 'JettonTransfe
 
 /**
  * 时序档位。production = 上主网/测试网正式档（V7：12h + 36h + 24×1h，阈值 16）；
- * fast-cycle = 测试网快测档（10 轮约 3 小时）；rehearsal = 仪式演练档，只校验内部一致性。
+ * fast-cycle = 测试网极速档（10 s K 线，10 轮约 47 分钟）；rehearsal = 仪式演练档，只校验内部一致性。
  */
 export const TIMING_PROFILES = {
-  production: { previewSeconds: 43200, stakeDurationSeconds: 129600, candleSeconds: 3600, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 604800 },
-  'fast-cycle': { previewSeconds: 600, stakeDurationSeconds: 1800, candleSeconds: 60, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 900 },
+  production: { previewSeconds: 43200, stakeDurationSeconds: 129600, candleSeconds: 3600, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 604800, fallbackUnlockSeconds: 2592000 },
+  // extreme-fast testnet drill (10 s candles, ~47 min for 10 rounds); restore production values before mainnet
+  'fast-cycle': { previewSeconds: 10, stakeDurationSeconds: 30, candleSeconds: 10, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 60, fallbackUnlockSeconds: 60 },
   rehearsal: null,
 };
 
@@ -234,6 +235,9 @@ export function validateParams(params) {
     check(Number(timeline.candleCount) === expected.candleCount, profile + '：观察 K 线数量必须为 ' + expected.candleCount);
     check(Number(timeline.minQualifiedCandles) === expected.minQualifiedCandles, profile + '：达标阈值必须为 ' + expected.minQualifiedCandles);
     check(Number(abort.abortTimeoutSeconds) === expected.abortTimeoutSeconds, profile + '：技术终止超时必须为 ' + expected.abortTimeoutSeconds + 's');
+    if (expected.fallbackUnlockSeconds !== undefined && abort.fallbackUnlockSeconds !== undefined) {
+      check(Number(abort.fallbackUnlockSeconds) === expected.fallbackUnlockSeconds, profile + '：压城兜底解锁窗口必须为 ' + expected.fallbackUnlockSeconds + 's');
+    }
   }
   if (profile === 'fast-cycle') {
     check(p.network && p.network.net === 'testnet' && Number(p.network.chainId) === -3, 'fast-cycle 档只允许测试网（network.net=testnet, chainId=-3）');

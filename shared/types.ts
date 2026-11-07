@@ -42,7 +42,7 @@ export interface ProtocolConfig {
   observationSeconds: number;
   /** PREVIEW 等待（结算后到下一轮报名开启），秒；R1 无 PREVIEW */
   previewSeconds: number;
-  /** 单笔最低有效质押，raw units（v10：100,000 A9） */
+  /** 单笔最低有效质押，raw units（v11：1,000 A9） */
   minStakeRaw: string;
   /** 每轮团队额度，raw units（成功轮 RC 直接转团队钱包；失败轮随本轮一起销毁） */
   teamRoundRaw: string;
@@ -214,12 +214,38 @@ export interface RefundLedger {
   claimedRaw: string;
 }
 
+/**
+ * v11 每城拆分（docs/35 §3.4）：本金 + 破城奖励的 20% 立即部分 + 80% 压城部分。
+ * 压城：unlocked = 已解锁累计（后续任一城破城即全部解锁；第 10 城后 30 天线性兜底），
+ * lockedClaimed = 已领压城部分，claimable = 现在可领（未领本金 + 未领即时奖励 + 已解锁未领部分）。
+ */
+export interface RoundPosition {
+  roundId: number;
+  state: RoundState;
+  principalRaw: string;
+  principalClaimed: boolean;
+  /** 破城奖励的 20%（未破城为 "0"） */
+  immediateRaw: string;
+  /** 破城奖励的 80%（压城） */
+  lockedRaw: string;
+  /** 压城中已解锁的累计额 */
+  unlockedRaw: string;
+  /** 压城中已领取的累计额 */
+  lockedClaimedRaw: string;
+  /** 现在可领取的总额 = claimablePrincipalRaw + claimableRewardRaw */
+  claimableRaw: string;
+  claimablePrincipalRaw: string;
+  claimableRewardRaw: string;
+}
+
 export interface MeResponse {
   address: string;
   stakes: StakePosition[];
   claimable: Claimable[];
+  /** v11 每城拆分（与 stakes 同序；只含有仓位的城） */
+  rounds: RoundPosition[];
   refund: RefundLedger;
-  /** 与链上 get_claimable_all 同口径：ClaimAll 现在会付的金额；roundsMask bit r-1 = 第 r 轮，bit 15 = 退款账本 */
+  /** 现在一次领取会付的金额（所有城之和）；roundsMask bit r-1 = 第 r 城（v11 不再有退款账本，bit 15 恒为 0） */
   claimableAll: { principalRaw: string; rewardRaw: string; roundsMask: number };
   totals: { stakedRaw: string; rewardRaw: string; claimedRaw: string };
 }

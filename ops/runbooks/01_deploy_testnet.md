@@ -36,7 +36,7 @@
 | 4 | **测试网 TON**：从测试网 faucet 领取。deployer 建议 ≥ 25 TON；keeper ≥ 2 TON；RC 见 §4 | 钱包余额查询 | 部署者 |
 | 5 | **合约构建与代码哈希**：`cd contracts && acton build && acton check && acton test` 全部通过；代码哈希与 contracts/README §0、§7.1 一致（见下表） | 构建产物哈希比对 | 合约负责人 |
 | 6 | **参数**：v11 参数表已签字，记录参数哈希。`abortTimeoutSeconds` 按档位确定（正式测试网 604800 秒 = 7 天；快速演练档见 drill）；最低质押 1,000 A9 | `node ops/scripts/00_preflight.mjs`（快测档前加 `OPS_PARAMS=ops/config/testnet-fast.params.json`） | 项目方 |
-| 7 | **新建测试网 D1 数据库**。不复用主网库，也不复用 `worker/wrangler.drill.toml` 里的 `a9-drill`（那是旧版 v8.9 配置） | 数据库名与 ID 登记 | 后端 |
+| 7 | **新建测试网 D1 数据库**。不复用主网库，也不复用旧 v8.9 彩排库 `a9-drill`（其配置 `worker/wrangler.drill.toml` 已删除；测试网用 `worker/wrangler.toml` 的 `[env.testnet]`） | 数据库名与 ID 登记 | 后端 |
 | 8 | **Telegram 测试 bot**（BotFather 创建）与 1–2 个测试群 | bot 能收发消息 | 运营 |
 | 9 | **STON.fi 测试网池**（§6） | 池子地址登记 | 运营 |
 
@@ -52,7 +52,7 @@
 | --- | --- |
 | JettonWallet | `0xD06DAA57ED188CE9CB6CA596DD2111347433BF335223AC66C0D713C8E3DB74F4` |
 | JettonMaster | `0x76B56D9A6301223F1201D719E2F4A3FB84E08D7D701CB93BB43C9D0208E5E241` |
-| RoundController | `0x74FCF17AAE8C029033AC0CEA75903BB4E1091464C27C423637BC490833EFE0D1` |
+| RoundController | `0x905F62F5CF3B114E94F195E25319F58A505FBFCD78EA3997AE8E26D285D5C96B` |
 | StakeTicket | `0x0F00D2995452947199CE5887B17C3F0BF502ECAE1D9A439A74A8D32E7EBD3DBC` |
 | JunxiangDistributor | `0x7FD6F461CF14393C3BB0FECB1208EB9B796A974D84B140EE9FCE9B10B14932AF` |
 | ClaimRecord | `0xA74D51786D46FE16A749D92D71D5479A6D10689C5542D3A46D6B7E42FD302C43` |

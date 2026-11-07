@@ -230,6 +230,8 @@ fun main() {
     val teamRoundRaw = coinRawSetting("A9_DEPLOY_TEAM_ROUND_RAW", PARAM_TEAM_ROUND);
     val minStakeRaw = coinRawSetting("A9_DEPLOY_MIN_STAKE_RAW", PARAM_MIN_STAKE);
     val abortTimeoutSeconds = intSetting("A9_TIMING_ABORT_TIMEOUT_SECONDS", PARAM_ABORT_TIMEOUT);
+    // 30 days on mainnet; fast testnet drills use seconds (restore before mainnet)
+    val fallbackUnlockSeconds = intSetting("A9_TIMING_FALLBACK_UNLOCK_SECONDS", 2592000);
 
     if (previewSeconds <= 0 || stakeSeconds <= 0 || candleSeconds <= 0 || candleCount <= 0) {
         Assert.fail("timing values must all be > 0");
@@ -372,6 +374,7 @@ fun main() {
             candleCount: candleCount as uint8,
             minQualifiedCandles: minQualified as uint8,
             abortTimeoutSeconds: abortTimeoutSeconds as uint32,
+            fallbackUnlockSeconds: fallbackUnlockSeconds as uint32,
             riskDisclosureVersion: 1,
             configVersion: 1,
         }.toCell(),

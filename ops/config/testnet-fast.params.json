@@ -13,7 +13,7 @@
       "快测档（fast-cycle）：仅用于测试网演练，让 10 轮在约 11 小时内跑完。其余经济参数与生产档完全一致（82 亿注资、1,000 A9 最低质押、攻城令、军饷分发）。",
       "使用：OPS_PARAMS=ops/config/testnet-fast.params.json node ops/scripts/15_deploy_contracts.mjs --execute（15 会把本文件的时序写进 deploy-emulation 的 A9_TIMING_* 环境变量）。",
       "时序：PREVIEW 600s（10 分钟）+ 报名 1800s（30 分钟）+ 观察 24 根 × 60s = 1440s（24 分钟）= 单轮 3840s；10 轮 38400s。",
-      "技术终止超时 abortTimeoutSeconds = 900s（15 分钟），用于演练 AbortTechnical 路径；可用 A9_TIMING_ABORT_TIMEOUT_SECONDS 覆盖。",
+      "技术终止超时 abortTimeoutSeconds = 60s，用于演练 AbortTechnical 路径；可用 A9_TIMING_ABORT_TIMEOUT_SECONDS 覆盖。",
       "主网禁止使用本文件（validateParams 对 fast-cycle 只允许 testnet / chainId -3）。"
     ],
     "contractsVersion": "v11 (D-43~D-50)"
@@ -130,14 +130,14 @@
     "notes": "目标价由 keeper 的 OpenRound(twap24h) 在开轮交易中锁定；v11 无触价提前关窗。"
   },
   "timeline": {
-    "previewSeconds": 600,
-    "stakeDurationSeconds": 1800,
-    "candleSeconds": 60,
+    "previewSeconds": 10,
+    "stakeDurationSeconds": 30,
+    "candleSeconds": 10,
     "candleCount": 24,
     "minQualifiedCandles": 16,
-    "observationSeconds": 1440,
-    "roundSeconds": 3840,
-    "roundsTotalSeconds": 38400,
+    "observationSeconds": 240,
+    "roundSeconds": 280,
+    "roundsTotalSeconds": 2800,
     "formula": "previewEnd = prevSettledAt + previewSeconds; keeper OpenRound → stakeOpenAt; stakeCloseAt = stakeOpenAt + stakeDurationSeconds（到期后任何人 CloseStaking）; observationStart = stakeCloseAt; observationEnd = observationStart + candleCount × candleSeconds; 第 24 根 K 线提交即判定",
     "boundaryRule": "快测档不做整点取整；关窗即观察（与生产档同规则）"
   },
@@ -161,13 +161,14 @@
     "refundNote": "无效质押（低于 1,000 A9 或受益人非法）：附带 TON ≥ 0.1 时原路退回给转账发起人；不足时不退（v11 没有退款账本，前端必须足额附带 TON）。"
   },
   "techAbort": {
-    "abortTimeoutSeconds": 900,
+    "abortTimeoutSeconds": 60,
     "anyoneCanTrigger": true,
     "refundPrincipalBps": 10000,
     "burnsRewardOnAbort": false,
     "burnsTeamOnAbort": false,
     "tierConsumed": false,
-    "note": "快测档：观察应结束或预告结束后 900s 仍未推进 → 任何人 AbortTechnical（演练用；生产为 604800s）。"
+    "note": "极速测试档：观察应结束或预告结束后 60s 仍未推进 → 任何人 AbortTechnical；第 10 城后压城 80% 在 60s 内线性解锁、最后一笔团队额度 60s 后可释放（生产分别为 604800s / 2592000s，主网前必须恢复）。",
+    "fallbackUnlockSeconds": 60
   },
   "risk": {
     "disclosureVersion": 1,
@@ -490,7 +491,7 @@
       "A9_TIMING_CANDLE_COUNT": "24",
       "A9_TIMING_MIN_QUALIFIED": "16",
       "A9_TIMING_ABORT_TIMEOUT_SECONDS": "900",
-      "A9_TIMING_OBSERVATION_SECONDS": "1440 (optional; must equal candleSeconds*candleCount)"
+      "A9_TIMING_OBSERVATION_SECONDS": "240 (optional; must equal candleSeconds*candleCount)"
     },
     "keeper": "node ops/scripts/keeper-candles.mjs --rc <RC> --signer a9-keeper --rounds 10 --mode mixed（OPS_EXECUTE=1 才广播）",
     "users": "node ops/scripts/fasttest-runner.mjs --rc <RC> --start 2 --end 10（OPS_EXECUTE=1 才广播；需测试钱包）"

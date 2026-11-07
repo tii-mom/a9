@@ -52,6 +52,8 @@ export const CONFIG = {
   abortTimeoutSeconds: 604_800n,
   riskDisclosureVersion: 1n,
   configVersion: 1n,
+  /** 压城兜底解锁窗口（秒）：取 ops/config/testnet-fast.params.json 的 60，区别于主网默认 30 天，以覆盖第 7 槽的读取路径 */
+  fallbackUnlockSeconds: 60n,
 };
 
 /** 时机系数（bps）：首段 1.5 / 中段 1.2 / 末段 1.0。 */
@@ -370,7 +372,9 @@ export async function buildV11Fixture(): Promise<FixtureFile> {
   ]);
   put(ADDR.rc, 'get_current_round', [], [num(currentRound)]);
   put(ADDR.rc, 'get_success_count', [], [num(successCount)]);
-  put(ADDR.rc, 'get_protocol_state', [], [num(carry), num(lastSuccessRound), num(teamPending), num(endAt), num(successCount), num(currentRound)]);
+  put(ADDR.rc, 'get_protocol_state', [], [
+    num(carry), num(lastSuccessRound), num(teamPending), num(endAt), num(successCount), num(currentRound), num(CONFIG.fallbackUnlockSeconds),
+  ]);
   put(ADDR.rc, 'get_jetton_wallet_address', [], [addressItem(ADDR.rcWallet)]);
   put(ADDR.rcWallet, 'get_wallet_data', [], [num(walletBalance), addressItem(ADDR.rc), addressItem(ADDR.jm)]);
   let burned = 0n;

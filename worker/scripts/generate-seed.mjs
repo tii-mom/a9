@@ -532,7 +532,7 @@ const configRows = [
   ['demo_preview_seconds', '90'],
   ['demo_autoplay', '1'],
   // ---- v10（docs/34）：奖励纯按质押比例 ----
-  ['min_stake_raw', (100_000n * TOKEN_SCALE).toString()],
+  ['min_stake_raw', (1_000n * TOKEN_SCALE).toString()],
   ['max_total_stake_raw', (200_000_000n * TOKEN_SCALE).toString()],
   ['ton_usd_e8', '300000000'],
   ['tonconnect_manifest_url', '/tonconnect-manifest.json'],
@@ -723,7 +723,7 @@ let rewardSum = 0n;
 for (const record of r1Records) rewardSum += rewardOf(record.amountRaw);
 const v10Invariant =
   rewardSum <= ROUND_REWARD_RAW &&
-  stakeRecords.every((record) => record.amountRaw >= 100_000n * TOKEN_SCALE) &&
+  stakeRecords.every((record) => record.amountRaw >= 1_000n * TOKEN_SCALE) &&
   stakeRows.every((row) => row[2] === row[3]) &&
   roundRowById.get(1)[17] === q(raw(TEAM_ROUND_TOKENS)) &&
   a0Record.claimed === 1 &&

@@ -38,6 +38,7 @@ const deployEnvDefaults = {
   A9_TIMING_CANDLE_COUNT: params.timeline.candleCount,
   A9_TIMING_MIN_QUALIFIED: params.timeline.minQualifiedCandles,
   A9_TIMING_ABORT_TIMEOUT_SECONDS: params.techAbort.abortTimeoutSeconds,
+  A9_TIMING_FALLBACK_UNLOCK_SECONDS: params.techAbort.fallbackUnlockSeconds ?? 2592000,
   A9_DEPLOY_ROUND_REWARD_RAW: params.rounds.roundRewardRaw,
   A9_DEPLOY_TEAM_ROUND_RAW: params.rounds.teamRoundRaw,
   A9_DEPLOY_MIN_STAKE_RAW: params.stakeLimits.minStakeRaw,
@@ -45,7 +46,7 @@ const deployEnvDefaults = {
 for (const [key, value] of Object.entries(deployEnvDefaults)) {
   if (process.env[key] === undefined) process.env[key] = String(value);
 }
-const TIMING_ENV_KEYS = ['A9_TIMING_PREVIEW_SECONDS', 'A9_TIMING_STAKE_SECONDS', 'A9_TIMING_CANDLE_SECONDS', 'A9_TIMING_CANDLE_COUNT', 'A9_TIMING_MIN_QUALIFIED', 'A9_TIMING_ABORT_TIMEOUT_SECONDS'];
+const TIMING_ENV_KEYS = ['A9_TIMING_PREVIEW_SECONDS', 'A9_TIMING_STAKE_SECONDS', 'A9_TIMING_CANDLE_SECONDS', 'A9_TIMING_CANDLE_COUNT', 'A9_TIMING_MIN_QUALIFIED', 'A9_TIMING_ABORT_TIMEOUT_SECONDS', 'A9_TIMING_FALLBACK_UNLOCK_SECONDS'];
 
 const fromLog = str(args, 'from-log');
 const overrides = {

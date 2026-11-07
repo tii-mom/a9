@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 /** fasttest-runner.mjs — v11 快测 10 轮编排：逐轮质押（含低于 1,000 A9 的退款探针）+ TicketClaim（攻城令领取），记录每轮证据。
  * 用法：OPS_PARAMS=ops/config/testnet-fast.params.json OPS_EXECUTE=1 node ops/scripts/fasttest-runner.mjs --rc <fastRc> --start 2 --end 10
  * 注：v11 没有 Claim / ClaimAll；每人每城一张攻城令，领取 = TicketClaim 发到 RC.get_ticket_address(owner, round)。
@@ -21,7 +22,15 @@ const users = {
   B: { wallet: 'a9-test-b', address: 'kQBL8tlXBXfvBwN_qobNXdM4tpMBpcomOtHre_JsmeXA7ExM' },
   C: { wallet: 'a9-test-c', address: 'kQAhuPFUdpAniiSwgfYalPCi7n6SfL1zcHQMnK5pmpNCXYpH' },
 };
-const master = str(args, 'master') || process.env.A9_FAST_MASTER || 'kQCOYBSzkm5SEpv0g4Wg7NkCuiQGs47HlKPOzzXvff52kX65';
+// Jetton master of THIS deployment: --master > A9_FAST_MASTER > contracts/deploy/jetton-master.addr (written by deploy).
+// Never hard-code: a stale master makes every stake arrive from a foreign jetton wallet (RC exit 104).
+function deployedMaster() {
+  try {
+    return readFileSync(new URL('../../contracts/deploy/jetton-master.addr', import.meta.url), 'utf8').trim().split(/\s+/)[0];
+  } catch { return ''; }
+}
+const master = str(args, 'master') || process.env.A9_FAST_MASTER || deployedMaster();
+if (!master) { console.error('缺少 Jetton master：--master / A9_FAST_MASTER / contracts/deploy/jetton-master.addr'); process.exit(2); }
 const script = resolvePath('ops/scripts/tolk/user_op.tolk');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -112,6 +121,12 @@ while (Date.now() - started < 80 * 60 * 1000) {
       let confirmed = false;
       let actual = 0n;
       for (let attempt = 0; attempt < 5; attempt++) {
+        // Short drill windows: never send a stake that would land after stakeCloseAt (it is only refunded
+        // and burns the player's gas). Keep a 6 s margin for confirmation latency.
+        if (Math.floor(Date.now() / 1000) >= Number(rd.stakeCloseAt) - 6) {
+          log({ event: 'stake-window-closed', roundId: cur, key, attempt: attempt + 1, stakeCloseAt: rd.stakeCloseAt });
+          break;
+        }
         await runUser(key, 'stake', Number(amount), cur, cur * 1000 + ({ A: 1, B: 2, C: 3 })[key]);
         await sleep(2000);
         const readback = await queryUser('stake', users[key].address, cur);
@@ -122,7 +137,7 @@ while (Date.now() - started < 80 * 60 * 1000) {
         if (actual === expected) { confirmed = true; break; }
         await sleep([2000, 4000, 8000, 8000][attempt]);
       }
-      if (!confirmed) { log({ event: 'stake-readback-fail', roundId: cur, key, expected: expectedPosition(amount).toString(), actual: actual.toString() }); process.exit(3); }
+      if (!confirmed) { log({ event: 'stake-readback-fail', roundId: cur, key, expected: expectedPosition(amount).toString(), actual: actual.toString() }); continue; }
       if (amount < MIN_STAKE && wallet) {
         await sleep(4000);
         const after = await walletA9(wallet);

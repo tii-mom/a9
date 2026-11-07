@@ -16,6 +16,7 @@
  */
 import type { Env } from '../env';
 import { pushNewCandleLamps, type CandleLampInput } from '../bot/candle-hook';
+import { runGuardPassAfterObserving, runJunxiangAfterSettlement } from '../social/auto';
 import * as rewards from '../rewards';
 import * as store from '../store';
 import type { BurnRow, CandleRow, RoundRow, StakeRow } from '../store';
@@ -239,6 +240,10 @@ interface TickContext {
   claims: number;
   /** 本 tick 新摄入的 K 线（tick 结束后交给机器人亮灯推送，见 bot/candle-hook.ts） */
   lamps: CandleLampInput[];
+  /** 本 tick 新摄入 RoundSettled 的城号（tick 结束后交给军饷自动重算，见 social/auto.ts） */
+  settled: number[];
+  /** 本 tick 新进入 OBSERVING（攻城期，报名已截止）的城号（tick 结束后触发上一城的守城补贴二次重算，见 social/auto.ts） */
+  observed: number[];
 }
 
 /** 拉取/刷新链上配置（10 分钟缓存），并做 configVersion / configHash 一致性校验。 */
@@ -555,6 +560,7 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[]): Promise<void> {
  */
 async function applyRoundSettled(ctx: TickContext, event: RoundSettledEvent, tx: ChainTx): Promise<void> {
   const { env, now, configFields } = ctx;
+  ctx.settled.push(event.roundId);
   const problems = settlementMismatches(event, configFields);
   if (problems.length) {
     await store.logEvent(env, 'error', 'indexer', 'INDEXER_SETTLEMENT_MISMATCH', 'R' + event.roundId + ' ' + problems.join('；') + ' tx=' + tx.lt);
@@ -654,6 +660,7 @@ async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void
         'chain:last_success_round': String(state.lastSuccessRound),
         'chain:end_at': String(state.endAt),
         'chain:success_count': String(state.successCount),
+        'chain:fallback_unlock_seconds': String(state.fallbackUnlockSeconds),
       },
       now,
     );
@@ -716,6 +723,9 @@ async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void
         teamReleasedRaw = view.teamReleaseConfirmed && pending ? pending : null;
       }
     }
+
+    // 新进入 OBSERVING（StakingClosed / CloseStaking 之后）：报名数据至此已定，上一城的守城补贴可以重算一次
+    if (chainStatusToRoundState(view.status) === 'OBSERVING' && previous?.state !== 'OBSERVING') ctx.observed.push(roundId);
 
     const patch = buildRoundPatch({
       view,
@@ -847,7 +857,7 @@ function pickRoundIds(rounds: RoundRow[], touched: Set<number>, pending: number[
 }
 
 /** tick 主体（租约内执行）。 */
-async function runTick(env: Env, now: number, config: ChainConfig, lamps: CandleLampInput[]): Promise<IndexerTickResult> {
+async function runTick(env: Env, now: number, config: ChainConfig, lamps: CandleLampInput[], settled: number[], observed: number[]): Promise<IndexerTickResult> {
   const kv = await store.getKeyValues(env);
   const nextPollAt = Number(kv.get(HEALTH_KEY.nextPollAt) ?? '0') || 0;
   if (nextPollAt > now) {
@@ -894,6 +904,8 @@ async function runTick(env: Env, now: number, config: ChainConfig, lamps: Candle
     stakes: 0,
     claims: 0,
     lamps,
+    settled,
+    observed,
   };
 
   debugLog(env, 'tick start now=' + now);
@@ -981,14 +993,27 @@ async function runTick(env: Env, now: number, config: ChainConfig, lamps: Candle
  */
 export async function tick(env: Env, now = Date.now(), exec?: { waitUntil(promise: Promise<unknown>): void }): Promise<IndexerTickResult> {
   const lamps: CandleLampInput[] = [];
-  const result = await tickOnce(env, now, lamps);
+  const settled: number[] = [];
+  const observed: number[] = [];
+  const result = await tickOnce(env, now, lamps, settled, observed);
   const push = pushNewCandleLamps(env, lamps).catch(() => 0);
-  if (exec?.waitUntil) exec.waitUntil(push);
-  else await push;
+  // 军饷自动重算（去重 + 永不抛出）：每个新结算的城只跑一次
+  const junxiang = runJunxiangAfterSettlement(env, settled, Date.now()).catch(() => 0);
+  // 守城补贴第二次触发：次城进入 OBSERVING 时重算上一城（去重键 junxiang:R<n>:guard-pass）
+  const guard = runGuardPassAfterObserving(env, observed, Date.now()).catch(() => 0);
+  if (exec?.waitUntil) {
+    exec.waitUntil(push);
+    exec.waitUntil(junxiang);
+    exec.waitUntil(guard);
+  } else {
+    await push;
+    await junxiang;
+    await guard;
+  }
   return result;
 }
 
-async function tickOnce(env: Env, now: number, lamps: CandleLampInput[]): Promise<IndexerTickResult> {
+async function tickOnce(env: Env, now: number, lamps: CandleLampInput[], settled: number[], observed: number[]): Promise<IndexerTickResult> {
   if ((env.DATA_SOURCE ?? '').trim() !== 'chain') {
     return { ok: true, skipped: 'not_chain', pages: 0, writes: 0 };
   }
@@ -1005,7 +1030,7 @@ async function tickOnce(env: Env, now: number, lamps: CandleLampInput[]): Promis
     return { ok: true, skipped: 'lease', pages: 0, writes: 0 };
   }
   try {
-    return await runTick(env, now, config, lamps);
+    return await runTick(env, now, config, lamps, settled, observed);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const kind = (error as { kind?: string }).kind;

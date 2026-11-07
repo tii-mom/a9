@@ -8,7 +8,8 @@ import { SiteFooter } from '../../components/SiteFooter';
 import { SiteHeader } from '../../components/SiteHeader';
 import { connectDemo, disconnect, DEMO_WALLET_ENABLED, useWallet } from '../wallet';
 import { ChainMePanel, JunxiangCard } from '../chain';
-import type { ProtocolConfig, RoundSummary, StakePosition } from '@shared/types';
+import { DEFAULT_MIN_STAKE_TOKENS } from '../chain/protocol';
+import type { ProtocolConfig, RoundPosition, RoundSummary, StakePosition } from '@shared/types';
 import {
   apiErrorText,
   COMMON,
@@ -59,6 +60,13 @@ interface MeDict extends Record<string, unknown> {
   claimEmptyDesc: string;
   claimBoth: string;
   claimNote: string;
+  claimPrincipal: string;
+  claimImmediate: string;
+  claimLocked: string;
+  claimLockedNote: string;
+  claimUnlocked: string;
+  claimRewardHint: string;
+  toastNothing: string;
   historyTitle: string;
   historyDesc: string;
   historyEmpty: string;
@@ -110,11 +118,18 @@ const ZH: MeDict = {
   noStakeThisRound: '本轮你还没有质押。',
   goStake: '前往交易台质押',
   claimTitle: '可领取',
-  claimDesc: '成功轮：本金 + 奖励一次全额领取',
+  claimDesc: '成功轮：本金 + 20% 立即奖励；80% 压城按解锁领取',
   claimEmpty: '暂无可领取',
   claimEmptyDesc: '成功结算后，本金与奖励会出现在这里；失败轮次会直接销毁，不可领取。',
-  claimBoth: '领取本金 + 奖励',
+  claimBoth: '一键领取',
   claimNote: '这些按钮仅更新演示记录，不发送链上交易。',
+  claimPrincipal: '本金',
+  claimImmediate: '立即 20%',
+  claimLocked: '压城 80%',
+  claimLockedNote: '后续任一城破城即全部解锁；否则第 10 城结束后线性解锁。',
+  claimUnlocked: '已解锁',
+  claimRewardHint: '20% 立即 + 已解锁的压城部分',
+  toastNothing: '暂无可领取的资产',
   historyTitle: '历史轮次',
   historyDesc: '你参与过的全部轮次与资金状态',
   historyEmpty: '暂无质押记录',
@@ -137,7 +152,7 @@ const ZH: MeDict = {
     '本轮价格考核失败时，本轮全部已接受质押本金 100% 销毁。',
     '价格由单一 keeper 热钱包提交（无多签、无独立预言机）；keeper 密钥被盗可提交伪造价格，导致本轮被判失败并销毁本金。',
     '价格提交出现技术故障（超时 7 天）时本轮技术终止，全额退回本金，不按市场失败处理。',
-    '单笔最低 100,000 A9。直接转账且低于 100,000 A9、又没有附带足够 GRAM（forward < 0.1）的 A9 不退回。',
+    '单笔最低 {minStake} A9。直接转账且低于 {minStake} A9、又没有附带足够 GRAM（forward < 0.1）的 A9 不退回。',
     '失败轮次永久关闭：不重开、不补发、不回滚。',
     '你的最大本金损失 = 本轮质押数量（可能为 100%）。',
   ],
@@ -176,11 +191,18 @@ const EN: MeDict = {
   noStakeThisRound: 'You have no stake in this round yet.',
   goStake: 'Stake from the trade desk',
   claimTitle: 'Claimable',
-  claimDesc: 'Successful round: principal + reward claimed in full at once',
+  claimDesc: 'Successful round: principal + 20% reward now; 80% unlocks over time',
   claimEmpty: 'Nothing to claim',
   claimEmptyDesc: 'After a successful settlement, principal and reward appear here. A failed round burns them permanently.',
-  claimBoth: 'Claim principal + reward',
+  claimBoth: 'Claim now',
   claimNote: 'These buttons update demo records only and do not send on-chain transactions.',
+  claimPrincipal: 'Principal',
+  claimImmediate: 'Immediate 20%',
+  claimLocked: 'Locked 80%',
+  claimLockedNote: 'Unlocks in full when any later round succeeds; otherwise linearly after round 10.',
+  claimUnlocked: 'Unlocked',
+  claimRewardHint: '20% now + unlocked part of the locked 80%',
+  toastNothing: 'Nothing to claim yet',
   historyTitle: 'Round history',
   historyDesc: 'Every round you joined and the status of your funds',
   historyEmpty: 'No stakes yet',
@@ -203,7 +225,7 @@ const EN: MeDict = {
     'If this round fails the price test, 100% of the principal accepted for this round is burned.',
     'Prices are submitted by a single keeper hot wallet (no multisig, no independent oracle); a stolen keeper key could submit fake prices, failing the round and burning principal.',
     'If price submission stalls (7-day timeout) the round is technically aborted and principal is returned in full; this is not treated as a market failure.',
-    'Minimum stake is 100,000 A9. A direct transfer below 100,000 A9 sent without enough GRAM attached (forward < 0.1) is not refunded.',
+    'Minimum stake is {minStake} A9. A direct transfer below {minStake} A9 sent without enough GRAM attached (forward < 0.1) is not refunded.',
     'A failed round is permanently closed: no reopen, no reissue, no rollback.',
     'Your maximum principal loss equals the amount you staked in this round (up to 100%).',
   ],
@@ -234,9 +256,19 @@ function rewardStatus(
   stake: StakePosition,
   round: RoundSummary | undefined,
   c: typeof COMMON.zh,
+  position: RoundPosition | undefined,
 ): { text: string; tone: 'ok' | 'bad' | 'mute' } {
   if (!round) return { text: '—', tone: 'mute' };
   if (round.state === 'SUCCEEDED' || round.state === 'SETTLING_SUCCESS') {
+    // v11：按 rounds[] 的 20% / 80% 压城口径展示；无拆分数据时退回整体状态
+    if (position) {
+      if (BigInt(position.claimableRewardRaw) > 0n) return { text: c.claimable, tone: 'ok' };
+      const locked = BigInt(position.lockedRaw);
+      if (locked > 0n && BigInt(position.lockedClaimedRaw) < locked) {
+        return { text: `${c.locked} ${Math.round((Number(position.unlockedRaw) / Number(locked)) * 100)}%`, tone: 'mute' };
+      }
+      return { text: c.claimed, tone: 'ok' };
+    }
     return stake.claimed ? { text: c.claimed, tone: 'ok' } : { text: c.claimable, tone: 'ok' };
   }
   if (round.state === 'FAILED_PERMANENT' || round.state === 'SETTLING_FAILURE') return { text: c.destroyed, tone: 'bad' };
@@ -292,38 +324,43 @@ function MeDashboard({
     [leaderboardQuery.data, address],
   );
 
-  // 只展示仍有余额可领的项（本金/奖励都领完后不再占位，直接回到空态）
-  const claimable = (meQuery.data?.claimable ?? []).filter((item) => item.principalRaw !== '0' || item.rewardRaw !== '0');
+  // v11 每城拆分（/api/me rounds[]）：本金 + 20% 立即 + 80% 压城（随解锁可领）
+  const positions = useMemo(() => meQuery.data?.rounds ?? [], [meQuery.data]);
+  const positionById = useMemo(() => new Map(positions.map((item) => [item.roundId, item])), [positions]);
+  // 只展示仍可领或仍有压城未解锁余额的城（全部领完且压城已付清后回到空态）
+  const claimRows = positions.filter(
+    (item) => BigInt(item.claimableRaw || '0') > 0n || (BigInt(item.lockedRaw || '0') > 0n && BigInt(item.lockedClaimedRaw || '0') < BigInt(item.lockedRaw)),
+  );
   const totals = meQuery.data?.totals ?? { stakedRaw: '0', rewardRaw: '0', claimedRaw: '0' };
-  const claimablePrincipal = claimable.reduce((sum, item) => sum + BigInt(item.principalRaw || '0'), 0n).toString();
-  const claimableReward = claimable.reduce((sum, item) => sum + BigInt(item.rewardRaw || '0'), 0n).toString();
-  const pendingCount = claimable.length;
+  const claimablePrincipal = positions.reduce((sum, item) => sum + BigInt(item.claimablePrincipalRaw || '0'), 0n).toString();
+  const claimableReward = positions.reduce((sum, item) => sum + BigInt(item.claimableRewardRaw || '0'), 0n).toString();
+  const pendingCount = claimRows.length;
   const history = useMemo(
     () => [...(meQuery.data?.stakes ?? [])].sort((a, b) => b.roundId - a.roundId),
     [meQuery.data],
   );
 
-  // v10：一次领取本金 + 全额奖励（演示 API 仍按 principal / reward 两次记账）
+  // v11：一次领取 = 本金 + 20% 立即 + 已解锁压城（与 worker handleClaim 一致，单次请求）
   const claim = useCallback(
     async (roundId: number) => {
       if (!demo || chainMode || claiming !== null || !meQuery.data || meQuery.error) return;
-      const item = (meQuery.data.claimable ?? []).find((entry) => entry.roundId === roundId);
-      if (!item) return;
+      const position = positionById.get(roundId);
+      if (!position || BigInt(position.claimableRaw || '0') === 0n) return;
       setClaiming(String(roundId));
       try {
-        let total = 0n;
-        if (item.principalRaw !== '0') total += BigInt((await api.claim({ address, roundId, kind: 'principal' })).amountRaw || '0');
-        if (item.rewardRaw !== '0') total += BigInt((await api.claim({ address, roundId, kind: 'reward' })).amountRaw || '0');
+        // kind 为旧接口的必填字段，服务端不据此分账（金额由 rounds[] 口径决定）
+        const result = await api.claim({ address, roundId, kind: 'principal' });
         meQuery.refresh();
         roundsQuery.refresh();
-        show(`${d.toastClaimOk}${formatToken(total.toString(), decimals)} A9`, 'ok');
+        if (result.claimed) show(`${d.toastClaimOk}${formatToken(result.amountRaw || '0', decimals)} A9`, 'ok');
+        else show(`${d.toastClaimFail}${d.toastNothing}`, 'bad');
       } catch (error) {
         show(`${d.toastClaimFail}${apiErrorText(error as ApiError, lang)}`, 'bad');
       } finally {
         setClaiming(null);
       }
     },
-    [demo, chainMode, claiming, meQuery.data, meQuery.error, address, meQuery.refresh, roundsQuery.refresh, show, d.toastClaimOk, d.toastClaimFail, decimals, lang],
+    [demo, chainMode, claiming, meQuery.data, meQuery.error, positionById, address, meQuery.refresh, roundsQuery.refresh, show, d.toastClaimOk, d.toastClaimFail, d.toastNothing, decimals, lang],
   );
 
   const roundProgress = roundDetailQuery.data;
@@ -341,8 +378,9 @@ function MeDashboard({
       candleHours: hoursOf(config?.candleSeconds, TIMING_FALLBACKS.candleSeconds),
       candleCount: config?.candleCount ?? TIMING_FALLBACKS.candleCount,
       need: config?.minQualifiedCandles ?? TIMING_FALLBACKS.minQualifiedCandles,
+      minStake: formatToken(config?.minStakeRaw ?? (DEFAULT_MIN_STAKE_TOKENS * 1_000_000_000n).toString(), decimals),
     }),
-    [config],
+    [config, decimals],
   );
   const riskItems = useMemo(() => d.risk.map((item) => fillTemplate(item, riskVars)), [d.risk, riskVars]);
 
@@ -376,7 +414,7 @@ function MeDashboard({
         <Stat
           label={d.statClaimReward}
           value={meQuery.data ? `${formatToken(claimableReward, decimals)} A9` : '—'}
-          hint={lang === 'zh' ? '成功轮与本金一起全额领取' : 'Claimed in full with principal'}
+          hint={d.claimRewardHint}
         />
         <Stat label={d.statTotalStaked} value={meQuery.data ? `${formatToken(totals.stakedRaw, decimals)} A9` : '—'} />
         <Stat label={d.statTotalReward} value={meQuery.data ? `${formatToken(totals.rewardRaw, decimals)} A9` : '—'} />
@@ -500,7 +538,7 @@ function MeDashboard({
                     {history.map((stake) => {
                       const round = roundById.get(stake.roundId);
                       const principal = principalStatus(stake, round, c);
-                      const reward = rewardStatus(stake, round, c);
+                      const reward = rewardStatus(stake, round, c, positionById.get(stake.roundId));
                       return (
                         <tr key={`${stake.roundId}-${stake.acceptedAt}`}>
                           <td className="ap-mono">#{stake.roundId}</td>
@@ -533,11 +571,14 @@ function MeDashboard({
                 <ErrorState error={meQuery.error} onRetry={meQuery.refresh} />
               ) : meQuery.loading && !meQuery.data ? (
                 <Loading rows={2} />
-              ) : claimable.length === 0 ? (
+              ) : claimRows.length === 0 ? (
                 <Empty title={d.claimEmpty} desc={d.claimEmptyDesc} />
               ) : (
                 <div className="ap-claim">
-                  {claimable.map((item) => {
+                  {claimRows.map((item) => {
+                    const locked = BigInt(item.lockedRaw || '0');
+                    const unlocked = BigInt(item.unlockedRaw || '0');
+                    const pct = locked > 0n ? Math.min(100, Math.round((Number(unlocked) / Number(locked)) * 100)) : 0;
                     return (
                       <div className="ap-claim-item" key={item.roundId}>
                         <div className="ap-claim-main">
@@ -547,15 +588,37 @@ function MeDashboard({
                           <StatePill state={item.state} />
                         </div>
                         <div>
-                          <div className="lbl">{c.principal}</div>
+                          <div className="lbl">{d.claimPrincipal}</div>
                           <div className="ap-claim-amt">
-                            {formatToken(item.principalRaw, decimals)} <small>A9</small>
+                            {formatToken(item.claimablePrincipalRaw, decimals)} <small>A9</small>
+                          </div>
+                          <div className="ap-muted mono-sm">{item.principalClaimed ? c.claimed : c.claimable}</div>
+                        </div>
+                        <div>
+                          <div className="lbl">{d.claimImmediate}</div>
+                          <div className="ap-claim-amt">
+                            {formatToken(item.immediateRaw, decimals)} <small>A9</small>
+                          </div>
+                          <div className="ap-muted mono-sm">{item.principalClaimed ? c.claimed : c.claimable}</div>
+                        </div>
+                        <div>
+                          <div className="lbl">
+                            {d.claimLocked} · {d.claimUnlocked} {pct}%
+                          </div>
+                          <div className="ap-claim-amt">
+                            {formatToken(item.unlockedRaw, decimals)} / {formatToken(item.lockedRaw, decimals)} <small>A9</small>
+                          </div>
+                          <div className="ap-bar" role="progressbar" aria-label={d.claimLocked} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                            <i style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="ap-muted mono-sm">
+                            {c.claimed}: {formatToken(item.lockedClaimedRaw, decimals)} A9
                           </div>
                         </div>
                         <div>
-                          <div className="lbl">{c.reward}</div>
+                          <div className="lbl">{c.claimable}</div>
                           <div className="ap-claim-amt">
-                            {formatToken(item.rewardRaw, decimals)} <small>A9</small>
+                            {formatToken(item.claimableRaw, decimals)} <small>A9</small>
                           </div>
                         </div>
                         <div className="spacer" />
@@ -563,7 +626,7 @@ function MeDashboard({
                           <button
                             className="btn fire sm"
                             type="button"
-                            disabled={claiming !== null || !demo || !!meQuery.error}
+                            disabled={claiming !== null || !demo || !!meQuery.error || BigInt(item.claimableRaw || '0') === 0n}
                             onClick={() => void claim(item.roundId)}
                           >
                             {claiming === String(item.roundId) ? c.loading : d.claimBoth}
@@ -572,6 +635,7 @@ function MeDashboard({
                       </div>
                     );
                   })}
+                  <p className="note">{d.claimLockedNote}</p>
                   <p className="note">{d.claimNote}</p>
                 </div>
               )}

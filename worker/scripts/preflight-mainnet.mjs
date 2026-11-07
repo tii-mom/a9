@@ -40,7 +40,7 @@ const WORKER = join(ROOT, "worker");
  * 注意：这是审计前的 v11 构建；外部审计若改动代码，必须同步更新这里和 README，并打 tag v11-audit-fixed。
  */
 const BASELINE_HASHES = {
-  RoundController: "74fcf17aae8c029033ac0cea75903bb4e1091464c27c423637bc490833efe0d1",
+  RoundController: "905f62f5cf3b114e94f195e25319f58a505fbfcd78ea3997ae8e26d285d5c96b",
   StakeTicket: "0f00d2995452947199ce5887b17c3f0bf502ecae1d9a439a74a8d32e7ebd3dbc",
   JunxiangDistributor: "7fd6f461cf14393c3bb0fecb1208eb9b796a974d84b140ee9fce9b10b14932af",
   ClaimRecord: "a74d51786d46fe16a749d92d71d5479a6d10689c5542d3a46d6b7e42fd302c43",

@@ -38,7 +38,7 @@ export interface ChainConfig {
   roundCount: number;
   minStakeRaw: bigint;
   maxTotalStakeRaw: bigint;
-  /** 单地址固定硬顶（raw，V6.1 = 20,000,000 A9） */
+  /** 单地址上限（raw）。v11 无单地址上限，合约恒为 0（0 = 不限）；仅当后端下发非零值时才生效 */
   maxStakePerAddressRaw: bigint;
   /** 旧口径（bps），仅为兼容保留；前端校验以 maxStakePerAddressRaw 为准 */
   maxStakePerAddressBps: number;

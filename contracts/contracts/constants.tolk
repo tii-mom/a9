@@ -8,8 +8,6 @@
 const OP_OPEN_ROUND: uint32 = 0x52540001;        // keeper
 const OP_CLOSE_STAKING: uint32 = 0x52540002;     // anyone, after the 36h window
 const OP_SUBMIT_CANDLE: uint32 = 0x52540003;     // keeper
-const OP_CLAIM: uint32 = 0x52540006;             // user: one round (0 = refund ledger)
-const OP_CLAIM_ALL: uint32 = 0x5254000E;         // user: rounds 0..10, one transfer
 const OP_STAKE_DEPOSIT: uint32 = 0x5254000F;     // forward_payload of a TEP-74 transfer
 const OP_ABORT_TECHNICAL: uint32 = 0x52540010;   // anyone, after timeouts
 const OP_RETRY_SETTLEMENT: uint32 = 0x52540015;  // anyone, resend bounced settlement
@@ -70,7 +68,6 @@ const BPS: uint128 = 10000;
 const TIMING_BPS_FIRST: uint128 = 15000;         // first third of the staking window
 const TIMING_BPS_SECOND: uint128 = 12000;
 const TIMING_BPS_LAST: uint128 = 10000;
-const FALLBACK_UNLOCK_SECONDS: uint64 = 2592000;  // 30 days after round 10
 
 // queryId layout for outbound jetton messages:
 //   settlement: SETTLE_TAG | roundId<<8 | action

@@ -168,7 +168,7 @@ export interface ChainRewardPreview {
   unlockedLockedRaw: bigint;
 }
 
-/** get_protocol_state()：6 槽（v11 新增）。 */
+/** get_protocol_state()：7 槽（第 7 槽 fallbackUnlockSeconds 为压城兜底解锁窗口，秒）。 */
 export interface ChainProtocolState {
   carryRaw: bigint;
   lastSuccessRound: number;
@@ -176,6 +176,7 @@ export interface ChainProtocolState {
   endAt: number;
   successCount: number;
   currentRoundId: number;
+  fallbackUnlockSeconds: number;
 }
 
 export interface ChainJettonData {
@@ -296,10 +297,15 @@ export async function getRewardPreview(
   };
 }
 
-/** get_protocol_state()：6 槽。 */
+/** 旧部署 get_protocol_state 只有 6 槽时的兜底解锁窗口默认值（30 天）。与 me-position.ts DEFAULT_FALLBACK_UNLOCK_SECONDS 同值；此处不 import 以免索引器经 me-position 拖入 @shared 类型别名。 */
+const LEGACY_FALLBACK_UNLOCK_SECONDS = 30 * 24 * 3600;
+
+/**
+ * get_protocol_state()：7 槽。旧部署只有 6 槽（无第 7 槽）时，兜底解锁窗口取默认 30 天（2592000 秒）。
+ */
 export async function getProtocolState(client: ChainClient, roundController: string): Promise<ChainProtocolState> {
   const { stack } = await client.runGetMethod(roundController, 'get_protocol_state');
-  if (stack.length < 6) throw new Error('get_protocol_state 槽位不足：' + stack.length + '（期望 6）');
+  if (stack.length < 6) throw new Error('get_protocol_state 槽位不足：' + stack.length + '（期望 7，至少 6）');
   return {
     carryRaw: stackNum(stack[0]),
     lastSuccessRound: stackInt(stack[1], 'lastSuccessRound'),
@@ -307,6 +313,7 @@ export async function getProtocolState(client: ChainClient, roundController: str
     endAt: stackInt(stack[3], 'endAt'),
     successCount: stackInt(stack[4], 'successCount'),
     currentRoundId: stackInt(stack[5], 'currentRoundId'),
+    fallbackUnlockSeconds: stack.length >= 7 ? stackInt(stack[6], 'fallbackUnlockSeconds') : LEGACY_FALLBACK_UNLOCK_SECONDS,
   };
 }
 

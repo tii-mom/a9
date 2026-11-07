@@ -126,7 +126,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ...payload, depositNonce: payload.depositNonce ?? newNonce() }),
     }),
-  claim: (payload: { address: string; roundId: number; kind: 'principal' | 'reward' }) =>
+  claim: (payload: { address: string; roundId: number; kind?: 'principal' | 'reward' }) =>
     request<{ claimed: boolean; amountRaw: string }>(ENDPOINTS.claim, {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -48,8 +48,8 @@ export const DEFAULT_DEMO_CANDLE_SECONDS = 90;
 // v10（docs/00 D-42、docs/34）：奖励纯按质押比例，没有权重 / 邀请 / 连续参与 / 滚存 / 早领 / 解锁池
 // ---------------------------------------------------------------------------
 
-/** 单笔最低有效质押（v10：100,000 A9） */
-export const MIN_STAKE_RAW = 100_000n * TOKEN_SCALE;
+/** 单笔最低有效质押（v11：1,000 A9；chain 模式以链上配置为准） */
+export const MIN_STAKE_RAW = 1_000n * TOKEN_SCALE;
 export const MAX_TOTAL_STAKE_RAW = 200_000_000n * TOKEN_SCALE;
 
 /** 合约 rewardOf：floor(本轮奖励 × 我的质押 / 本轮总质押)。 */

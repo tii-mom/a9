@@ -10,6 +10,8 @@ import { refundBalance } from '../../store';
 import { powerOf } from '../../social/power';
 import { cell } from './cell';
 import { PROTOCOL_CONFIG_KEYS, protocolConfigDigest, type ProtocolConfigFields } from '../config';
+import { getProtocolState } from '../getters';
+import type { ChainClient } from '../chain-client';
 import type { RoundRow } from '../../store';
 
 declare const process: { exit(code: number): never };
@@ -171,6 +173,22 @@ async function main(): Promise<void> {
   const inRef2 = decodeInboundMessage({ opcode: TX_OP.transferNotification, body: cell().u(TX_OP.transferNotification, 32).u(5n, 64).coins(7n).address(owner).u(1, 1).ref(payloadAddr).toBoc() });
   check('msg.transferNotification.beneficiary', !!inRef2 && 'stake' in inRef2 && inRef2.stake?.beneficiary?.raw === owner, 'beneficiary 地址');
   check('msg.removedOps', [0x52540006, 0x5254000e].every((op) => decodeInboundMessage({ opcode: op, body: cell().u(op, 32).u(0n, 64).u(1, 8).toBoc() }) === null), 'Claim / ClaimAll 已从 RC 移除');
+
+  // ---------------- get_protocol_state（第 7 槽 fallbackUnlockSeconds） ----------------
+  const stateOf = (slots: number[]): ChainClient => ({
+    runGetMethod: async () => ({ stack: slots.map((value) => ['num', '0x' + value.toString(16)]), exit_code: 0 }),
+  }) as unknown as ChainClient;
+  const seven = await getProtocolState(stateOf([1000, 2, 3, 4, 5, 6, 60]), '0:' + 'a'.repeat(64));
+  check('getter.protocolState.7slots', seven.fallbackUnlockSeconds === 60 && seven.currentRoundId === 6 && seven.carryRaw === 1000n, 'slot7=fallbackUnlockSeconds');
+  const six = await getProtocolState(stateOf([1000, 2, 3, 4, 5, 6]), '0:' + 'a'.repeat(64));
+  check('getter.protocolState.6slots', six.fallbackUnlockSeconds === 2592000 && six.successCount === 5, '旧部署 6 槽 → 默认 30 天');
+  let shortThrew = false;
+  try {
+    await getProtocolState(stateOf([1, 2, 3]), '0:' + 'a'.repeat(64));
+  } catch {
+    shortThrew = true;
+  }
+  check('getter.protocolState.short', shortThrew, '少于 6 槽抛错');
 
   if (failures.length) { console.error('UNIT FAILURES: ' + failures.length); process.exit(1); }
   console.log('UNIT OK');

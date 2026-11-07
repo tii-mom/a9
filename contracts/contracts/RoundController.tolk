@@ -174,11 +174,12 @@ fun unlockedLocked(s: Storage, roundId: uint8, locked: uint128, now: uint64): ui
     if (s.endAt == 0 || now <= s.endAt) {
         return 0;
     }
+    val window: uint64 = timing(s).fallbackUnlockSeconds as uint64;
     val elapsed: uint64 = now - s.endAt;
-    if (elapsed >= FALLBACK_UNLOCK_SECONDS) {
+    if (elapsed >= window) {
         return locked;
     }
-    return locked * (elapsed as uint128) / (FALLBACK_UNLOCK_SECONDS as uint128);
+    return locked * (elapsed as uint128) / (window as uint128);
 }
 
 fun settleQueryId(roundId: uint8, action: uint8): uint64 {
@@ -514,7 +515,7 @@ fun handleRetrySettlement(roundId: uint8, valueCoins: coins) {
 fun handleReleaseTeam(valueCoins: coins) {
     assert (valueCoins >= MIN_CLAIM_VALUE) throw Errors.NotEnoughValue;
     var s = lazy Storage.load();
-    assert (s.endAt != 0 && now64() >= s.endAt + FALLBACK_UNLOCK_SECONDS) throw Errors.TooEarly;
+    assert (s.endAt != 0 && now64() >= s.endAt + (timing(s).fallbackUnlockSeconds as uint64)) throw Errors.TooEarly;
     val amount = s.teamPendingRaw;
     assert (amount > 0) throw Errors.NothingToClaim;
     s.teamPendingRaw = 0;
@@ -729,6 +730,7 @@ get fun get_protocol_state(): ProtocolStateView {
         endAt: s.endAt,
         successCount: s.successCount,
         currentRoundId: s.currentRoundId,
+        fallbackUnlockSeconds: timing(s).fallbackUnlockSeconds,
     };
 }
 
