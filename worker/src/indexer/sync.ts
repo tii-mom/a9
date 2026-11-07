@@ -53,8 +53,10 @@ import {
   burnRef,
   confirmedBurnedTotal,
   expectedRcWalletBalance,
+  rcWalletWithinDust,
   settlementFromEvent,
   settlementMismatches,
+  technicalAbortBurnRaw,
 } from './ledger';
 import { HEALTH_KEY, markFailure, markHealthy, readChainHealth } from './health';
 import { parseTonAddress } from './address';
@@ -490,7 +492,24 @@ async function applyBatch(ctx: TickContext, rcTxs: ChainTx[]): Promise<void> {
         case EVENT_OP.claimed:
           await applyClaimed(ctx, event, tx);
           break;
+        case EVENT_OP.technicalAborted:
+          // round-10 abort burns the remaining carry; the event carries the exact amount (all abort paths)
+          if (event.roundId === 10 && event.burnRaw > 0n) {
+            const changed = await store.upsertBurnLedger(env, {
+              roundId: 10,
+              kind: 'reward',
+              amountRaw: event.burnRaw.toString(),
+              burnRef: burnRef(10, 'reward'),
+              confirmed: false,
+              txHash: tx.hash ?? null,
+              now: ctx.now,
+            });
+            if (changed) ctx.writes++;
+          }
+          break;
         case EVENT_OP.teamReleased:
+          // roundId = 0 为最后一笔 ReleaseTeam：记入 chain:team_release:R0，对账时从 RC 钱包预期余额中扣除
+          if (event.roundId === 0) await rememberMetric(ctx, teamReleaseKey(0), event.amountRaw.toString());
           await store.logEvent(
             env,
             'info',
@@ -698,8 +717,31 @@ async function refreshRounds(ctx: TickContext, roundIds: number[]): Promise<void
     // 成功轮团队释放：链上确认（已发出且未被退回）才写 team_released_raw；被退回待 RetrySettlement 时清空。
     let burnedRaw: string | null = null;
     let teamReleasedRaw: string | null | undefined;
-    if (view.status === 8 || view.status === 9) {
-      const burns = burnsByRound.get(roundId) ?? [];
+    if (view.status === 8 || view.status === 9 || view.status === 10) {
+      let burns = burnsByRound.get(roundId) ?? [];
+      // 第 10 城技术终止（status 10）：无 RoundSettled 事件，留存滚存整笔销毁的金额取 get_round.rewardBudgetRaw，按 reward 类 burn 入账
+      if (view.status === 10) {
+        const abortBurn = technicalAbortBurnRaw(roundId, view.rewardBudgetRaw);
+        if (abortBurn === null) {
+          if (previous?.state !== 'TECHNICAL_ABORTED' && roundId === 10) {
+            await store.logEvent(env, 'warn', 'indexer', 'INDEXER_ABORT_BURN_UNREADABLE', 'R10 技术终止：getter 无法读出留存滚存销毁额（预告超时路径），需人工核对 burn_ledger');
+            ctx.writes++;
+          }
+        } else if (!burns.some((burn) => burn.kind === 'reward')) {
+          const burnKey = burnRef(roundId, 'reward');
+          const changed = await store.upsertBurnLedger(env, {
+            roundId,
+            kind: 'reward',
+            amountRaw: abortBurn.toString(),
+            burnRef: burnKey,
+            confirmed: false,
+            txHash: null,
+            now,
+          });
+          if (changed) ctx.writes++;
+          burns = [...burns, { id: 0, round_id: roundId, kind: 'reward', amount_raw: abortBurn.toString(), burn_ref: burnKey, confirmed: 0, created_at: now, confirmed_at: null }];
+        }
+      }
       const burnConfirmed = view.rewardBurnConfirmed; // 一笔 burn：三个标志同真同假
       for (const burn of burns) {
         if (burnConfirmed === (burn.confirmed === 1)) continue;
@@ -1126,7 +1168,7 @@ export async function reconcile(env: Env, now = Date.now()): Promise<{ ok: boole
     if (stakeTotal !== view.totalAcceptedStakeRaw && (candles.length > 0 || stakeTotal > 0n)) {
       add(round.round_id, 'totalStake', view.totalAcceptedStakeRaw.toString(), stakeTotal.toString());
     }
-    if (view.status === 8 || view.status === 9) {
+    if (view.status === 8 || view.status === 9 || view.status === 10) {
       const total = view.rewardBurnConfirmed ? confirmedBurnedTotal(burnRowsAll.filter((row) => row.round_id === round.round_id)) : null;
       if (total !== null && round.burned_raw !== null && total.toString() !== round.burned_raw) {
         add(round.round_id, 'burnedRaw', total.toString(), round.burned_raw);
@@ -1164,6 +1206,7 @@ export async function reconcile(env: Env, now = Date.now()): Promise<{ ok: boole
     const refreshed = await store.listRounds(env);
     const claims = await store.listAllClaims(env);
     const refunds = store.refundBalance(await store.listRefundEntries(env));
+    const finalTeamRaw = (await store.getKeyValues(env)).get(teamReleaseKey(0));
     const expected = expectedRcWalletBalance({
       config: fields,
       stakes,
@@ -1171,8 +1214,10 @@ export async function reconcile(env: Env, now = Date.now()): Promise<{ ok: boole
       burns: await store.listBurns(env),
       claims,
       keptRaw: refunds.dust,
+      finalTeamReleasedRaw: finalTeamRaw ? BigInt(finalTeamRaw) : 0n,
     });
-    if (expected !== balance) add(null, 'rcWalletBalance', balance.toString(), expected.toString() + '（公式推导）');
+    // 允许非负尾差（每笔质押至多 2 raw 的向下取整留在 RC）；低于公式值仍报错
+    if (!rcWalletWithinDust(balance, expected, stakes.length)) add(null, 'rcWalletBalance', balance.toString(), expected.toString() + '（公式推导，容差 +' + stakes.length * 2 + ' raw）');
   } catch (error) {
     diffs.push('RC 钱包余额核对失败：' + String(error).slice(0, 120));
   }

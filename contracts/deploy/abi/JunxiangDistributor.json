@@ -426,7 +426,8 @@
       "err_code": 236
     },
     {
-      "kind": "plain_int",
+      "kind": "enum_member",
+      "name": "Errors.BadProof",
       "err_code": 260
     }
   ],

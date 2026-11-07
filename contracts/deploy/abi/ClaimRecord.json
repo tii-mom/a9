@@ -59,6 +59,10 @@
     },
     {
       "kind": "StructRef",
+      "struct_name": "RecordExcessesBack"
+    },
+    {
+      "kind": "StructRef",
       "struct_name": "RecordPay"
     },
     {
@@ -69,6 +73,21 @@
   "struct_instantiations": [],
   "alias_instantiations": [],
   "declarations": [
+    {
+      "kind": "struct",
+      "name": "RecordExcessesBack",
+      "ty_idx": 15,
+      "prefix": {
+        "prefix_num": 3576854235,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
     {
       "kind": "struct",
       "name": "RecordStorage",
@@ -110,7 +129,7 @@
     {
       "kind": "struct",
       "name": "RecordPay",
-      "ty_idx": 15,
+      "ty_idx": 16,
       "prefix": {
         "prefix_num": 1247281156,
         "prefix_len": 32
@@ -137,7 +156,7 @@
     {
       "kind": "struct",
       "name": "RecordView",
-      "ty_idx": 16,
+      "ty_idx": 17,
       "fields": [
         {
           "name": "distributor",
@@ -163,6 +182,9 @@
   "outgoing_messages": [
     {
       "body_ty_idx": 15
+    },
+    {
+      "body_ty_idx": 16
     }
   ],
   "emitted_events": [],
@@ -174,17 +196,14 @@
       "tvm_method_id": 115713,
       "name": "get_record",
       "parameters": [],
-      "return_ty_idx": 16
+      "return_ty_idx": 17
     }
   ],
   "thrown_errors": [
     {
-      "kind": "plain_int",
+      "kind": "enum_member",
+      "name": "Errors.NotDistributor",
       "err_code": 270
-    },
-    {
-      "kind": "plain_int",
-      "err_code": 271
     }
   ],
   "compiler_name": "tolk",

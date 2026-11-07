@@ -32,7 +32,7 @@ fun main(cmd: string, roundId: int, twap: int) {
         return;
     }
     if (op.equalTo("abort-technical")) {
-        net.send(signer.address, createMessage({ bounce: true, value: ton("0.05"), dest: rc!, body: AbortTechnical { queryId: 0 } }));
+        net.send(signer.address, createMessage({ bounce: true, value: ton("0.12"), dest: rc!, body: AbortTechnical { queryId: 0 } }));
         println("abort-technical sent");
         return;
     }

@@ -3,7 +3,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -358,6 +358,19 @@ test('ceremony.dry_run', () => {
   assert(result.out.includes('8200000000000000000'), 'P4 缺少 82 亿断言');
   assert(!existsSync(join(temp, 'ceremony.registry.json')), 'dry-run 不应写登记表');
   return 'P0..P6 DRY_RUN，未写登记表';
+});
+
+section('自测：ABI 一致性（deploy vs build）');
+test('abi.deploy_matches_build', () => {
+  const buildAbiDir = join(BAM_ROOT, 'contracts', 'build', 'abi');
+  const deployAbiDir = join(BAM_ROOT, 'contracts', 'deploy', 'abi');
+  if (!existsSync(buildAbiDir)) return '跳过：contracts/build/abi 不存在（先运行 acton build）';
+  const stale = readdirSync(deployAbiDir).filter((name) => name.endsWith('.json')).filter((name) => {
+    const buildFile = join(buildAbiDir, name);
+    return !existsSync(buildFile) || readFileSync(join(deployAbiDir, name), 'utf8') !== readFileSync(buildFile, 'utf8');
+  });
+  assert(stale.length === 0, 'deploy ABI 与 build ABI 不一致（请 acton build 后复制）：' + stale.join(', '));
+  return 'contracts/deploy/abi 与 contracts/build/abi 逐字节一致';
 });
 
 section('自测：全部脚本语法');

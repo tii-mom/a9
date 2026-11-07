@@ -3,7 +3,7 @@
  * 运行：tsc 编译成 CJS 后 `node <dir>/tools/unit.js`（不参与 worker 运行时）。
  */
 import { buildCandleRow, buildRoundPatch, chainStatusToRoundState } from '../snapshot';
-import { burnRef, confirmedBurnedTotal, expectedRcWalletBalance, settlementFromEvent, settlementMismatches } from '../ledger';
+import { burnRef, confirmedBurnedTotal, expectedRcWalletBalance, rcWalletWithinDust, settlementFromEvent, settlementMismatches, technicalAbortBurnRaw } from '../ledger';
 import { decodeEvent, EVENT_OP } from '../events';
 import { decodeInboundMessage, TX_OP } from '../messages';
 import { refundBalance } from '../../store';
@@ -125,6 +125,22 @@ async function main(): Promise<void> {
     keptRaw: 3n,
   });
   check('ledger.rcWallet', wallet === 8_200_000_000_000_000_000n + 500n + 3n - 120000000000000000n - 820000000000000100n - 50n, wallet.toString());
+
+  // A9-V11-05：最后一笔 ReleaseTeam（roundId 0，1.2 亿）从 RC 预期余额中扣除
+  const walletBase = { config, stakes: [{ amount_raw: '400', source: 'deposit' }] as never, rounds: [] as never, burns: [] as never, claims: [] as never, keptRaw: 0n };
+  const withoutFinal = expectedRcWalletBalance(walletBase);
+  const withFinal = expectedRcWalletBalance({ ...walletBase, finalTeamReleasedRaw: 120000000000000000n });
+  check('ledger.rcWallet.finalTeamRelease', withoutFinal - withFinal === 120000000000000000n, 'R0 ReleaseTeam 扣除 1.2 亿');
+
+  // A9-V11-05：第 10 城技术终止（status 10）留存滚存整笔销毁，金额取 rewardBudgetRaw
+  check('ledger.abortBurn.r10', technicalAbortBurnRaw(10, 700000000000000000n) === 700000000000000000n, '第 10 城观察超时：整笔 budget 入销毁账本');
+  check('ledger.abortBurn.otherRound', technicalAbortBurnRaw(9, 700000000000000000n) === null, '非第 10 城技术终止不销毁');
+  check('ledger.abortBurn.unreadable', technicalAbortBurnRaw(10, 0n) === null, '预告超时（budget 0）无法从 getter 读出金额');
+
+  // A9-V11-05：RC 余额尾差容差（非负，且 ≤ 质押笔数 × 2 raw）
+  check('ledger.dust.zero', rcWalletWithinDust(1000n, 1000n, 3), '零偏差通过');
+  check('ledger.dust.withinAllowance', rcWalletWithinDust(1006n, 1000n, 3) && !rcWalletWithinDust(1007n, 1000n, 3), '3 笔质押容差 6 raw');
+  check('ledger.dust.negativeFails', !rcWalletWithinDust(999n, 1000n, 3), '余额低于公式值仍报错');
 
   const refunds = refundBalance([
     { tx_lt: '1', address: 'a', kind: 'instant', amount_raw: '10', created_at: 0 },

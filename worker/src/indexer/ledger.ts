@@ -77,12 +77,14 @@ export interface RcWalletInput {
   claims: ClaimRow[];
   /** 退款账本：dust = 无效且 TON 不足而留存在 RC 的金额（非即时退回） */
   keptRaw: bigint;
+  /** 最后一笔 ReleaseTeam（TeamReleased roundId = 0）的释放额；未发生时为 0 / 缺省 */
+  finalTeamReleasedRaw?: bigint;
   roundCount?: number;
 }
 
 /**
  * RC 钱包应持有 = 初始注资（10 × (7 亿 + 1.2 亿) = 82 亿）+ 全部入金质押 + 留存的无效质押
- *               − 已释放团队额 − 已确认销毁 − 已领取（本金 + 奖励）。
+ *               − 已释放团队额（含最后一笔 ReleaseTeam） − 已确认销毁 − 已领取（本金 + 奖励）。
  * 攻城令之间的续战（source = restake）只在攻城令间移动价值，不改变 RC 钱包余额。
  */
 export function expectedRcWalletBalance(input: RcWalletInput): bigint {
@@ -93,7 +95,27 @@ export function expectedRcWalletBalance(input: RcWalletInput): bigint {
   }
   total += input.keptRaw;
   for (const round of input.rounds) if (round.team_released_raw) total -= BigInt(round.team_released_raw);
+  total -= input.finalTeamReleasedRaw ?? 0n;
   for (const burn of input.burns) if (burn.confirmed === 1) total -= BigInt(burn.amount_raw);
   for (const claim of input.claims) total -= BigInt(claim.amount_raw);
   return total;
+}
+
+/**
+ * 第 10 城技术终止的留存滚存销毁额（RC handleAbortTechnical：roundId = 10 且 carry > 0 时整笔销毁）。
+ * 没有 RoundSettled 事件，金额取 get_round.rewardBudgetRaw：观察超时路径下 R10 已开轮、carry 已清零，budget 即整笔滚存。
+ * 预告超时路径（R10 从未开轮）budget 为 0，getter 读不出金额 → 返回 null（需人工核对）。
+ */
+export function technicalAbortBurnRaw(roundId: number, rewardBudgetRaw: bigint): bigint | null {
+  if (roundId !== 10 || rewardBudgetRaw <= 0n) return null;
+  return rewardBudgetRaw;
+}
+
+/**
+ * RC 钱包余额核对容差：RC 内的整数向下取整尾差只会让余额高于公式值（每笔质押至多 2 raw）。
+ * 返回 true = 偏差为非负且不超过 2 × 质押笔数。
+ */
+export function rcWalletWithinDust(balance: bigint, expected: bigint, stakeCount: number): boolean {
+  const diff = balance - expected;
+  return diff >= 0n && diff <= BigInt(stakeCount) * 2n;
 }

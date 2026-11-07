@@ -256,6 +256,7 @@ struct (0x52540104) TechnicalAborted {
     roundId: uint8
     reason: uint8
     at: uint64
+    burnRaw: uint128   // round-10 abort burns the remaining carry (0 otherwise); audit A9-V11-05
 }
 
 struct (0x5254010B) StakingClosed {

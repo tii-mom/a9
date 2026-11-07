@@ -53,7 +53,7 @@ export function pendingSettlementActions(view) {
 
 /**
  * RC 钱包余额公式。totals 需要 claimedPrincipalRaw / claimedRewardRaw / refundPendingRaw；
- * 缺任何一项返回 { expected: null, missing: [...] }。
+ * 缺任何一项返回 { expected: null, missing: [...] }。totals.finalTeamReleasedRaw 为最后一笔 ReleaseTeam 额（可选，缺省 0）。
  */
 export function expectedRcVault(params, rounds, totals = {}) {
   const missing = ['claimedPrincipalRaw', 'claimedRewardRaw', 'refundPendingRaw'].filter((key) => totals[key] === undefined || totals[key] === null);
@@ -70,6 +70,9 @@ export function expectedRcVault(params, rounds, totals = {}) {
   const claimedPrincipal = asBigInt(totals.claimedPrincipalRaw);
   const claimedReward = asBigInt(totals.claimedRewardRaw);
   const refundPending = asBigInt(totals.refundPendingRaw);
+  const finalTeam = big(totals.finalTeamReleasedRaw) ?? 0n;
+  released += finalTeam;
+  breakdown.teamReleasedRaw = released;
   const expected = breakdown.fundingRaw + stake - burned - released - claimedPrincipal - claimedReward + refundPending;
   return { expected, missing, breakdown: { ...breakdown, claimedPrincipalRaw: claimedPrincipal, claimedRewardRaw: claimedReward, refundPendingRaw: refundPending } };
 }

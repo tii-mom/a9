@@ -8,7 +8,7 @@
 
 | 合约 | freeze | fixed |
 |---|---|---|
-| RoundController | 0x905F62F5…5C96B | `0xCAD074BAF5B83C3475BE90049B944F8BE3B2D6048F28C2FB6CC77CCB8470C98B` |
+| RoundController | 0x905F62F5…5C96B | `0x1037BACD95A773F713A506A81C8009D7858B6005CFCB97D2A58E7F438FDBD226` |
 | StakeTicket | 0x0F00D299…3DBC | `0xB04B6A611A93401F40B10274D85E72EAAF9624553F546FAC7C4CDCD7555A4F91` |
 | JunxiangDistributor | 0x7FD6F461…32AF | `0x9E07E813F0081B715C084BCF479C35E94BA4A711CAF4844C68112B5565B742D8` |
 | ClaimRecord | 0xA74D5178…2C43 | `0x8DB60A5B92079367C80AAA9856B2CDDABAFB0667F0C1CEC0CBF19359D8388D61` |
@@ -24,7 +24,7 @@
 | 02 | Medium | Medium | 修复：攻城令请求路径的 reserve 与所有发送加 `BOUNCE_ON_ACTION_FAIL`；RC 在计算阶段校验请求最低 TON（0.1 / 续战 0.15），不足即抛错弹回、清 pending；StakeTicket → RC 的请求也加 +16 | RC `handleTicketRequest`/`sendTicketUpdate`/`sendClaimTransfer`/`sendAddStake`；StakeTicket `sendRequest` |
 | 03 | Medium | Low | 修复：无新增额度时把 TON 退回 owner（保留 0.01 存储），不再滞留 | ClaimRecord；测试 audit 03 |
 | 04 | Medium | Low（无代码读取该文件） | 修复：同步 deploy/abi，selftest 增加 build/deploy ABI 一致性检查 | contracts/deploy/abi、ops/scripts/selftest.mjs |
-| 05 | Medium | Medium | 修复：发根余额检查计入 totalPaidRaw；索引器记录第 10 城技术终止销毁与最终团队释放；RC 余额对账允许非负舍入尘埃 | 80_admin_ops.mjs、worker/src/indexer/* |
+| 05 | Medium | Medium | 修复：发根余额检查计入 totalPaidRaw；`TechnicalAborted` 事件新增 `burnRaw`（第 10 城终止销毁额，两条终止路径都可读），索引器据此入账；最终团队释放（roundId 0）计入对账；RC 余额对账允许非负舍入尘埃（每笔质押 ≤ 2 raw） | RC `handleAbortTechnical`、types.tolk、80_admin_ops.mjs、worker/src/indexer/* |
 | 06 | Low | Low | 修复：keeperMinTon 2 → 10，开轮附带 TON 降至 0.05 | mainnet.params.json、fast_admin.tolk |
 | 07 | Low | Low | 修复：证明 cell 必须恰好整 256 位哈希、至多 1 个 ref（BadProof=260） | junxiang.tolk；测试 audit 07 |
 | 08 | Low | Low | 修复：受益人前 3 位必须为 100（addr_std 无 anycast），否则走退款 | RC `handleDeposit`；测试 audit 08 |
@@ -39,3 +39,7 @@ RFP 要求 High/Critical 附可运行 PoC，审计方未提供；项目方以 `t
 1. 01：`handleDeposit` 中 `s.save()` 之后才 reserve + 发送；被留存充值在 `valueCoins < 0.01 TON` 时不记事件（索引器对账因此允许非负尘埃）。
 2. 02：`RESERVE_MODE_BOUNCE_ON_ACTION_FAIL` 与各 `+16` 发送组合的动作阶段语义。
 3. 新增最低值：RC 请求 0.1 / 续战 0.15 TON 低于攻城令侧 0.15 / 0.25（攻城令一跳的 gas 后仍满足）。
+
+## 已知后续（不影响合约）
+
+- `ops/scripts/reconcile.mjs` 读取 worker `/api/stats`，尚未带出最终团队释放额：第 10 城 30 天后执行 ReleaseTeam 之后，运维对账会显示 RC 余额偏差，需在该时间点前补齐（索引器侧已处理）。

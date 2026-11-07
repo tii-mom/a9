@@ -97,6 +97,8 @@ export interface TechnicalAbortedEvent extends EventBase {
   roundId: number;
   reason: number;
   at: number;
+  /** round-10 abort: carry burned (absent in pre-fix events → 0) */
+  burnRaw: bigint;
 }
 
 export interface ClaimedEvent extends EventBase {
@@ -227,6 +229,7 @@ export function decodeEvent(input: RawEventInput): ChainEvent | null {
         roundId: reader.uNumber(8),
         reason: reader.uNumber(8),
         at: reader.uNumber(64),
+        burnRaw: reader.remaining >= 128 ? reader.u(128) : 0n,
       };
     case EVENT_OP.claimed:
       return {

@@ -153,7 +153,7 @@
   "chain": {
     "totalSupplyRaw": "9288500000000000000",
     "rcJettonBalanceRaw": "7930000000000000123",
-    "keeperTonNano": "5000000000",
+    "keeperTonNano": "20000000000",
     "events": [
       {
         "type": "SettlementBounced",

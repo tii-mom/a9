@@ -6,7 +6,7 @@ import { requireConfirm, flag, str } from './lib/cli.mjs';
 import { asBigInt, resolvePath, formatTokens } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveAddress, signerWallet } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
-import { decodeRoundView, findJettonWallet, getTonBalance, runGetMethod } from './lib/ton.mjs';
+import { decodeRoundView, findJettonWallet, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { pendingSettlementActions } from './lib/ledger.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
 
@@ -360,9 +360,24 @@ async function handleJunxiangSetRoot() {
     fail('无法读取分发合约 A9 余额：拒绝在余额未知时发布根（确认 TON Center 可用后重试）');
     process.exit(finish());
   }
-  const shortfall = balance !== null && balance < BigInt(totalRaw);
+  let totalPaidRaw = null;
+  if (execute) {
+    try {
+      const distributorState = await runGetMethod(params, distributor, 'get_distributor');
+      totalPaidRaw = stackItemToBigInt((distributorState.stack || [])[3]);
+    } catch (error) {
+      warn('分发合约 totalPaidRaw 读取失败：' + String(error.message || error));
+    }
+    if (totalPaidRaw === null) {
+      fail('无法读取分发合约 totalPaidRaw（get_distributor）：拒绝在未知已领取额时发布根');
+      process.exit(finish());
+    }
+  }
+  kv('分发合约已领取总额 totalPaidRaw', totalPaidRaw === null ? '（dry-run 不读链；EXECUTE 时强制核对）' : totalPaidRaw.toString() + '（' + formatTokens(totalPaidRaw.toString()) + ' A9）');
+  // 注资差额 = 本期累计总额 − 已领取总额；余额只需覆盖未领取部分
+  const shortfall = balance !== null && balance + (totalPaidRaw ?? 0n) < BigInt(totalRaw);
   if (shortfall) {
-    const message = '分发合约 A9 余额 ' + balance + ' < 本期累计总额 ' + totalRaw + '：先充值再发布根';
+    const message = '分发合约 A9 余额 ' + balance + ' + 已领取 ' + (totalPaidRaw ?? 0n) + ' < 本期累计总额 ' + totalRaw + '：先充值差额再发布根';
     if (execute) { fail(message); process.exit(finish()); }
     warn(message + '（dry-run 继续）');
   }

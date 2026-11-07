@@ -422,9 +422,9 @@
   ],
   "tonBalances": {
     "roundControllerMinTon": 20,
-    "keeperMinTon": 2,
+    "keeperMinTon": 10,
     "junxiangDistributorDeployTon": 1,
-    "note": "RC：每次结算动作（团队转账 / 销毁）约 0.1 TON，领取由用户付 gas；keeper：每轮 OpenRound + 24 根 SubmitCandle，单笔 0.3 TON 上限（多余退回）。分发合约部署时附 1 TON（不需要 TON 运行余额，领取由领取人附带 gas）。"
+    "note": "RC：每次结算动作（团队转账 / 销毁）约 0.1 TON，领取由用户付 gas；keeper：每轮 OpenRound + 24 根 SubmitCandle 约 25 笔，附带 TON 由 RC 留存、不退回（合约无退款逻辑），单笔附带额 ≤ 0.05 TON，单轮约 1.25 TON，keeperMinTon = 10 TON 覆盖约 8 轮的上限预算（10 轮全程上限约 12.5 TON，按 0.01 TON/根计约 2.5 TON）。分发合约部署时附 1 TON（不需要 TON 运行余额，领取由领取人附带 gas）。"
   },
   "deployOrder": [
     "1. 部署 JettonMaster，MintOnce 100 亿到 treasury（同一笔交易关闭铸造）",
@@ -464,7 +464,7 @@
       "P3": "次工作日"
     },
     "rcVaultDriftRaw": "0",
-    "keeperMinTon": 2,
+    "keeperMinTon": 10,
     "settlementBounceAction": "RetrySettlement(roundId)（任何人可调，≥ 0.3 TON）",
     "unexpectedBounceAction": "人工核查（P1）",
     "opsEventWindowMinutes": 15

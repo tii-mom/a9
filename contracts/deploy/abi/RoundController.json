@@ -351,6 +351,10 @@
           "ty_idx": 9
         },
         {
+          "name": "fallbackUnlockSeconds",
+          "ty_idx": 9
+        },
+        {
           "name": "riskDisclosureVersion",
           "ty_idx": 38
         },
@@ -883,6 +887,10 @@
         {
           "name": "at",
           "ty_idx": 11
+        },
+        {
+          "name": "burnRaw",
+          "ty_idx": 20
         }
       ]
     },
@@ -1308,6 +1316,10 @@
         {
           "name": "currentRoundId",
           "ty_idx": 23
+        },
+        {
+          "name": "fallbackUnlockSeconds",
+          "ty_idx": 9
         }
       ]
     },

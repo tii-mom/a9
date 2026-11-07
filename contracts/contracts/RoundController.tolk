@@ -574,9 +574,11 @@ fun handleAbortTechnical() {
     rd.status = STATUS_TECHNICAL_ABORTED;
     rd.settledAt = now;
     s.currentRoundId = roundId;
+    var burned: uint128 = 0;
     if (roundId == MAX_ROUNDS) {
         s.endAt = now;
         if (s.carryRaw > 0) {
+            burned = s.carryRaw;
             var ex = rd.extra.load();
             ex.burnRaw = s.carryRaw;
             rd.extra = ex.toCell();
@@ -590,7 +592,7 @@ fun handleAbortTechnical() {
         s.rounds.set(roundId + 1, previewRound(now + (t.previewSeconds as uint64)));
     }
     s.save();
-    emitExternalEvent(TechnicalAborted { roundId, reason, at: now });
+    emitExternalEvent(TechnicalAborted { roundId, reason, at: now, burnRaw: burned });
 }
 
 // ===========================================================================
