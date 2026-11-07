@@ -29,9 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - uses: pnpm/action-setup@v4   # version comes from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -68,11 +66,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Acton
+      - name: Install Acton 1.1.0 (pinned, audited hashes were built with it)
         run: |
-          if ! command -v acton >/dev/null 2>&1; then
-            curl -fsSL https://raw.githubusercontent.com/ton-blockchain/acton/main/install.sh | sh
-          fi
+          set -euo pipefail
+          url=https://github.com/ton-blockchain/acton/releases/download/v1.1.0/acton-x86_64-unknown-linux-gnu.tar.gz
+          curl -fsSL -o /tmp/acton.tgz "$url"
+          echo "c2e640eacbb5b6ece1c343cab2ab6d2db74643d0706777aad181ed7e6e1bfc16  /tmp/acton.tgz" | sha256sum -c -
+          mkdir -p "$HOME/.acton/bin"
+          tar xzf /tmp/acton.tgz -C "$HOME/.acton/bin"
           export PATH="$HOME/.acton/bin:$PATH"
           acton --version
       - name: acton test
@@ -97,9 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - uses: pnpm/action-setup@v4   # version comes from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -143,9 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - uses: pnpm/action-setup@v4   # version comes from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -165,9 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - uses: pnpm/action-setup@v4   # version comes from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -210,9 +205,7 @@ jobs:
       url: https://a9.lat
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
+      - uses: pnpm/action-setup@v4   # version comes from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 24
