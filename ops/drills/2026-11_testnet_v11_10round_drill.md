@@ -980,3 +980,17 @@ keeper：`--price mock`（测试网无 STON.fi 池），采样 5s；价格 11600
 | 主网保护 | mainnet 参数下 `--mode`/`--price mock` 被拒，`--price pool` 缺 `--pool` 被拒 ✅ |
 | 池读取（主网只读） | STON.fi v2 池 `EQBbsMjy…sNGO`：储备与 STON.fi API 完全一致，价格 $0.4468 ✅ |
 | 修复 | 采样定时器导致进程不退出 → 完成后 `process.exit(0)` |
+
+## 附录 U — 审计修复后测试网回归（2026-11-07，run 4）
+
+实例（修复后代码，RC 0x1037BACD…D226 / StakeTicket 0xB04B6A61…4F91 / Distributor 0x9E07E813…42D8 / ClaimRecord 0x8DB60A5B…8D61）：
+RC `kQAJkMJk64vy_n1Re2AjvZCIy0ZLuS-GYuCxMbOvZke9Gx-G`，master `kQAJwLiSWw56spCD1-5nTj1E_AM25mcq_bfavVxrev8Mb0ms`，distributor `kQB8aeEwnCU2cz63qtXk0EpKhmJ6l8OjOW30CO5i91wbVifr`（部署只给 1 / 0.2 GRAM，验证不依赖合约自有余额）。
+
+| 检查 | 结果 |
+|---|---|
+| R1 三人质押 100k（A/B 早段 ×1.5，C ×1.2）→ 破城 24/24 | 读回全部正确；领取 3/3 成功，攻城令 pending=false ✅ |
+| R1 奖励 | A/B 各 2.5 亿、C 2.0 亿；20% 立即领取：A/B 5,000 万、C 4,000 万（余额 50.2M / 50.2M / 40.2M，含 R2 已销毁的 100k）✅ |
+| R2 三人质押 → 失败 0/24 | 本金 + 奖池一半 + 团队额度销毁；RC A9 余额 = 7,590,000,000（与公式逐位一致）✅ |
+| **A9-V11-01 用户承担事件费** | 6 笔质押 + 3 笔领取 + 48 根 K 线后 RC GRAM 0.9999 → 1.4782（未下降）；分发合约 0.2 → 0.2997 ✅ |
+| 军饷领取（单叶树，24,000 A9） | A 收到 24,000，totalPaid = 24,000 ✅ |
+| **A9-V11-03 重复领取退款** | 重复领取附 0.2 GRAM，净花费 0.0013 GRAM（修复前 0.2 全部滞留）✅ |
