@@ -97,15 +97,18 @@ const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "base-uri 'self'",
   // Cloudflare Web Analytics 由平台注入（无法移除）；若关闭 Analytics 可删除该域
-  "script-src 'self' https://static.cloudflareinsights.com",
+  "script-src 'self' https://telegram.org https://static.cloudflareinsights.com",
   // Google Fonts：原型字体（Big Shoulders Display / IBM Plex Mono / Noto Sans SC）
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: blob:",
+  // TON Connect wallet icons come from each wallet's own CDN
+  "img-src 'self' data: blob: https:",
   "font-src 'self' data: https://fonts.gstatic.com",
-  "connect-src 'self' https://a9.lat https://www.a9.lat https://tonapi.io https://*.tonapi.io https://bridge.tonapi.io wss://bridge.tonapi.io https://tonconnectbridge.mytonwallet.org wss://tonconnectbridge.mytonwallet.org https://app.tonkeeper.com https://web.tonkeeper.com https://tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io https://cloudflareinsights.com",
+  // TON Connect talks to every wallet's own bridge (SSE over https); the list changes, so allow https/wss
+  "connect-src 'self' https: wss:",
   "frame-src 'self' https://app.tonkeeper.com https://web.tonkeeper.com https://mytonwallet.io https://web.mytonwallet.io",
   "object-src 'none'",
-  "frame-ancestors 'none'",
+  // Telegram Web (web.telegram.org) embeds the Mini App in an iframe
+  "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org",
   "form-action 'self'",
   "upgrade-insecure-requests",
 ].join('; ');
@@ -116,7 +119,6 @@ const CONTENT_SECURITY_POLICY = [
 export function finalizeResponse(res: Response, env: Env, request: Request): Response {
   const headers = new Headers(res.headers);
   headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('X-Frame-Options', 'DENY');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');

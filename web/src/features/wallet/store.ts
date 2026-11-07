@@ -211,6 +211,15 @@ function tonManifestUrl(): string {
   }
 }
 
+function twaReturnUrl(): `${string}://${string}` | undefined {
+  const w = window as unknown as { Telegram?: { WebApp?: { initData?: string } } };
+  if (!w.Telegram?.WebApp?.initData) return undefined;
+  const bot = window.location.hostname === 'test.a9.lat'
+    ? 'a9_test_bot'
+    : (import.meta.env.VITE_TG_BOT_USERNAME as string | undefined);
+  return bot ? `https://t.me/${bot}/app` : undefined;
+}
+
 async function loadTonConnect(): Promise<TonConnectLike | null> {
   try {
     const mod = (await import('@tonconnect/ui-react')) as unknown as {
@@ -222,6 +231,8 @@ async function loadTonConnect(): Promise<TonConnectLike | null> {
       manifestUrl: tonManifestUrl(),
       language: 'en',
       uiPreferences: { theme: 'DARK', borderRadius: 'none' },
+      // Inside Telegram: after approving in the wallet, jump straight back into this Mini App.
+      ...(twaReturnUrl() ? { actionsConfiguration: { twaReturnUrl: twaReturnUrl() } } : {}),
     });
     ui.onStatusChange(handleTonWallet, () => {
       /* 单次状态错误不打断 UI，连接失败由 modal 关闭分支处理 */
