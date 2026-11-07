@@ -42,10 +42,16 @@ const deployEnvDefaults = {
   A9_DEPLOY_ROUND_REWARD_RAW: params.rounds.roundRewardRaw,
   A9_DEPLOY_TEAM_ROUND_RAW: params.rounds.teamRoundRaw,
   A9_DEPLOY_MIN_STAKE_RAW: params.stakeLimits.minStakeRaw,
+  A9_DEPLOY_P0_USD_E8: params.price.p0UsdE8,
+  A9_JUNXIANG_PUBLISHER_ADDRESS: junxiangPublisher,
 };
 for (const [key, value] of Object.entries(deployEnvDefaults)) {
   if (process.env[key] === undefined) process.env[key] = String(value);
 }
+// Fast drill timing is refused by deploy-emulation on a real network unless A9_ALLOW_FAST_TIMING=1.
+// Grant it only for testnet params that declare a fastCycle profile; never on mainnet.
+if (networkName(params) === 'mainnet') delete process.env.A9_ALLOW_FAST_TIMING;
+else if (params.fastCycle && process.env.A9_ALLOW_FAST_TIMING === undefined) process.env.A9_ALLOW_FAST_TIMING = '1';
 const TIMING_ENV_KEYS = ['A9_TIMING_PREVIEW_SECONDS', 'A9_TIMING_STAKE_SECONDS', 'A9_TIMING_CANDLE_SECONDS', 'A9_TIMING_CANDLE_COUNT', 'A9_TIMING_MIN_QUALIFIED', 'A9_TIMING_ABORT_TIMEOUT_SECONDS', 'A9_TIMING_FALLBACK_UNLOCK_SECONDS'];
 
 const fromLog = str(args, 'from-log');

@@ -195,6 +195,12 @@ fun requireActive(addr: address, name: string, expectedCode: cell, needed: coins
     }
 }
 
+// Real deploys write deploy/<name>.addr (read by ops tooling); local emulation writes
+// deploy/<name>.emulation.addr so a rehearsal never clobbers the live addresses.
+fun addrFile(name: string): string {
+    return net.isBroadcasting() ? format("deploy/{}.addr", name) : format("deploy/{}.emulation.addr", name);
+}
+
 fun main() {
     val masterTon = deployTon("A9_DEPLOY_TON_JETTON_MASTER", 5);
     val rcTon = deployTon("A9_DEPLOY_TON_ROUND_CONTROLLER", 5);
@@ -229,6 +235,7 @@ fun main() {
     val roundRewardRaw = coinRawSetting("A9_DEPLOY_ROUND_REWARD_RAW", PARAM_ROUND_REWARD);
     val teamRoundRaw = coinRawSetting("A9_DEPLOY_TEAM_ROUND_RAW", PARAM_TEAM_ROUND);
     val minStakeRaw = coinRawSetting("A9_DEPLOY_MIN_STAKE_RAW", PARAM_MIN_STAKE);
+    val p0UsdE8 = coinRawSetting("A9_DEPLOY_P0_USD_E8", PARAM_P0);
     val abortTimeoutSeconds = intSetting("A9_TIMING_ABORT_TIMEOUT_SECONDS", PARAM_ABORT_TIMEOUT);
     // 30 days on mainnet; fast testnet drills use seconds (restore before mainnet)
     val fallbackUnlockSeconds = intSetting("A9_TIMING_FALLBACK_UNLOCK_SECONDS", 2592000);
@@ -280,6 +287,17 @@ fun main() {
     val deployer = scripts.wallet("deployer");
     val admin = scripts.wallet("admin");
     // keeper / team default to the deployer wallet; team wallet must be explicit on a real network
+    // On a real network every immutable role and P0 must be explicit (no silent deployer defaults).
+    if (net.isBroadcasting()) {
+        if (env<address>("A9_KEEPER_ADDRESS") == null) { Assert.fail("A9_KEEPER_ADDRESS must be set when broadcasting with --net"); }
+        if (env<address>("A9_JUNXIANG_PUBLISHER_ADDRESS") == null) { Assert.fail("A9_JUNXIANG_PUBLISHER_ADDRESS must be set when broadcasting with --net"); }
+        if (env<string>("A9_DEPLOY_P0_USD_E8") == null) { Assert.fail("A9_DEPLOY_P0_USD_E8 must be set when broadcasting with --net"); }
+        // Fast drill timing is testnet-only: refuse it unless explicitly allowed (never set this on mainnet).
+        val fastTiming = stakeSeconds < 3600 || abortTimeoutSeconds < 86400 || fallbackUnlockSeconds < 86400;
+        if (fastTiming && intSetting("A9_ALLOW_FAST_TIMING", 0) != 1) {
+            Assert.fail("fast drill timing detected; set A9_ALLOW_FAST_TIMING=1 only for testnet drills");
+        }
+    }
     val keeper = env<address>("A9_KEEPER_ADDRESS") ?? deployer.address;
     val teamEnv = env<address>("A9_TEAM_WALLET_ADDRESS");
     if (teamEnv == null && net.isBroadcasting()) {
@@ -295,7 +313,7 @@ fun main() {
     println("  keeper             = {} [{}]", keeper, env<address>("A9_KEEPER_ADDRESS") == null ? "default: deployer" : "env");
     println("  teamWallet         = {} [{}]", teamWallet, teamEnv == null ? "default: deployer" : "env");
     println("  junxiangPublisher  = {} [{}]", junxiangPublisher, publisherEnv == null ? "default: keeper" : "env");
-    println("  p0UsdE8            = {}", PARAM_P0);
+    println("  p0UsdE8            = {} [{}]", p0UsdE8, intSource("A9_DEPLOY_P0_USD_E8"));
     println("  priceMultiplier    = 2");
     println("  roundRewardRaw     = {} [{}]", roundRewardRaw, intSource("A9_DEPLOY_ROUND_REWARD_RAW"));
     println("  teamRoundRaw       = {} [{}]", teamRoundRaw, intSource("A9_DEPLOY_TEAM_ROUND_RAW"));
@@ -319,7 +337,7 @@ fun main() {
         };
         val masterInit = ContractState { code: build("JettonMaster"), data: masterStorage.toCell() };
         masterAddress = AutoDeployAddress { stateInit: masterInit }.calculateAddress();
-        fs.writeString("deploy/jetton-master.addr", format("{}\n", masterAddress));
+        fs.writeString(addrFile("jetton-master"), format("{}\n", masterAddress));
         net.send(deployer.address, createMessage({
             bounce: false,
             value: masterTon,
@@ -350,7 +368,7 @@ fun main() {
         masterAddress = resumeMaster!;
         println("reusing JettonMaster at {}", masterAddress);
         requireActive(masterAddress, "JettonMaster(resume)", build("JettonMaster"), 0 as coins);
-        fs.writeString("deploy/jetton-master.addr", format("{}\n", masterAddress));
+        fs.writeString(addrFile("jetton-master"), format("{}\n", masterAddress));
         val masterData = net.runGetMethod<JettonDataReply>(masterAddress, "get_jetton_data");
         if (masterData.totalSupply != PARAM_TOTAL_SUPPLY) {
             Assert.fail("resume master totalSupply mismatch: expected 100e9 A9 already minted");
@@ -365,7 +383,7 @@ fun main() {
             teamWallet,
         }.toCell(),
         econ: ProtocolEcon {
-            p0UsdE8: PARAM_P0,
+            p0UsdE8,
             roundRewardRaw,
             teamRoundRaw,
             minStakeRaw,
@@ -416,7 +434,7 @@ fun main() {
             ),
         );
     }
-    fs.writeString("deploy/round-controller.addr", format("{}\n", rcAddress));
+    fs.writeString(addrFile("round-controller"), format("{}\n", rcAddress));
     println("RC Jetton Wallet     = {}", rcWallet);
 
     // --- 5. Fund RC: 10 rounds of reward + 10 rounds of team quota ----------
@@ -465,7 +483,7 @@ fun main() {
         body: TopUpTons {},
     })).waitForTrace();
     requireActive(distAddress, "JunxiangDistributor", build("JunxiangDistributor"), distTon);
-    fs.writeString("deploy/junxiang-distributor.addr", format("{}\n", distAddress));
+    fs.writeString(addrFile("junxiang-distributor"), format("{}\n", distAddress));
     println("JunxiangDistributor deployed at {}", distAddress);
     val distWallet = net.runGetMethod<address>(masterAddress, "get_wallet_address", [distAddress]);
     println("Distributor Jetton Wallet = {} (not funded by deploy; ops funds it before junxiang-set-root)", distWallet);
@@ -503,6 +521,6 @@ fun main() {
     println("  junxiangPublisher  = {}", junxiangPublisher);
     println("  keeper             = {}", keeper);
     println("  teamWallet         = {}", teamWallet);
-    println("  address files      = deploy/jetton-master.addr, deploy/round-controller.addr, deploy/junxiang-distributor.addr");
+    println("  address files      = deploy/<name>.addr (emulation: deploy/<name>.emulation.addr)");
     println("TODO (ops): seed extra TON gas balance on RC if needed (RC >= 20 TON recommended).");
 }
