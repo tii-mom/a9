@@ -14,6 +14,16 @@ import type {
   Trade,
 } from '@shared/types';
 import { ENDPOINTS } from '@shared/types';
+import type {
+  SocialBindRequest,
+  SocialBindResponse,
+  SocialLeaderboardResponse,
+  SocialMeResponse,
+  SocialSquadCreateRequest,
+  SocialSquadJoinRequest,
+  SocialSquadResponse,
+} from '@shared/types';
+import type { GateState, LeaderboardScope, LeaderboardType } from '../features/social/types';
 
 function newNonce(): string {
   const c = globalThis.crypto as Crypto | undefined;
@@ -30,9 +40,43 @@ export class ApiError extends Error {
   }
 }
 
+/** 登录会话桥：钱包模块注册，请求层据此给 POST 附加 Authorization（避免 api.ts 反向依赖钱包模块）。 */
+export interface AuthBridge {
+  /** 当前钱包的有效会话 token；没有则 null */
+  token(): string | null;
+  /** 写请求发出时没有会话（仅用于提示「签名登录」，不阻止请求） */
+  missingSession(): void;
+}
+
+let authBridge: AuthBridge = { token: () => null, missingSession: () => undefined };
+
+export function setAuthBridge(bridge: AuthBridge): void {
+  authBridge = bridge;
+}
+
+export interface AuthChallenge {
+  /** 形如 a9-auth:<nonce>，作为 TON Connect ton_proof 的 payload */
+  payload: string;
+  /** 毫秒时间戳 */
+  expiresAt: number;
+}
+
+export interface AuthSession {
+  token: string;
+  address: string;
+  /** 毫秒时间戳 */
+  expiresAt: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set('content-type', 'application/json');
+  // POST 默认带会话 token（调用方显式传了 Authorization 的，如管理端，保持不变）
+  if ((init?.method ?? 'GET').toUpperCase() === 'POST' && !headers.has('authorization')) {
+    const token = authBridge.token();
+    if (token) headers.set('authorization', `Bearer ${token}`);
+    else if (path !== '/api/auth/session') authBridge.missingSession(); // 登录请求本身不算「写操作缺会话」
+  }
   const res = await fetch(path, { ...init, headers, credentials: 'same-origin' });
   let body: ApiResponse<T> | null = null;
   try {
@@ -53,6 +97,11 @@ function adminHeaders(token: string): HeadersInit {
 
 export const api = {
   health: () => request<HealthResponse>(ENDPOINTS.health),
+  /** 登录挑战（不绑定地址，10 分钟一次性） */
+  authChallenge: () => request<AuthChallenge>('/api/auth/challenge'),
+  /** 用 TON Connect 回传的 ton_proof 换取会话 token（7 天） */
+  authSession: (payload: { address: string; proof: unknown }) =>
+    request<AuthSession>('/api/auth/session', { method: 'POST', body: JSON.stringify(payload) }),
   config: () => request<ProtocolConfig>(ENDPOINTS.config),
   stats: () => request<ProtocolStats>(ENDPOINTS.stats),
   rounds: () => request<RoundSummary[]>(ENDPOINTS.rounds),
@@ -77,7 +126,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ...payload, depositNonce: payload.depositNonce ?? newNonce() }),
     }),
-  claim: (payload: { address: string; roundId: number; kind: 'principal' | 'reward' }) =>
+  claim: (payload: { address: string; roundId: number; kind?: 'principal' | 'reward' }) =>
     request<{ claimed: boolean; amountRaw: string }>(ENDPOINTS.claim, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -189,3 +238,60 @@ export function useQuery<T>(fn: () => Promise<T>, deps: unknown[] = [], opts: { 
 }
 
 export type { Claimable };
+
+/* ------------------------------------------------------------------ */
+/* 社交层（Telegram 小程序 / X 拉新）：/api/social/*                     */
+/* 写接口（bind / squads / join）请求体必须带 wallet；鉴权为会话 token        */
+/* （Authorization: Bearer，由请求层自动附加）或 TON Proof（body.proof 或      */
+/* X-Ton-Proof 头）。无会话且无 proof 时，仅 demo 且 DEMO_ALLOW_UNSIGNED_WRITES=true 放行。 */
+/* ------------------------------------------------------------------ */
+
+export const socialApi = {
+  me: (wallet: string) => request<SocialMeResponse>(`/api/social/me?wallet=${encodeURIComponent(wallet)}`),
+  /** Telegram 身份只通过 body.tgInitData 传递（服务端校验），不再发送 tgUserId。 */
+  bind: (body: SocialBindRequest) =>
+    request<SocialBindResponse>('/api/social/bind', { method: 'POST', body: JSON.stringify(body) }),
+  createSquad: (body: SocialSquadCreateRequest) =>
+    request<SocialSquadResponse>('/api/social/squads', { method: 'POST', body: JSON.stringify(body) }),
+  joinSquad: (code: string, body: SocialSquadJoinRequest) =>
+    request<SocialSquadResponse>(`/api/social/squads/${encodeURIComponent(code)}/join`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  leaderboard: (query: { type: LeaderboardType; scope: LeaderboardScope; round?: number }) => {
+    const params = new URLSearchParams({ type: query.type, scope: query.scope });
+    if (query.round !== undefined) params.set('round', String(query.round));
+    return request<SocialLeaderboardResponse>(`/api/social/leaderboard?${params.toString()}`);
+  },
+  gate: () => request<GateState>('/api/social/gate'),
+};
+
+/* ------------------------------------------------------------------ */
+/* 军饷（累计清单，v11）：/api/social/payout/*（只读，无需会话）          */
+/* ------------------------------------------------------------------ */
+
+/** GET /api/social/payout/latest：最新累计清单的摘要（root 与链上 get_distributor().root 比对）。 */
+export interface PayoutLatest {
+  listId: number;
+  root: string;
+  fromRound: number;
+  toRound: number;
+  leafCount: number;
+  totalRaw: string;
+  createdAt: number;
+}
+
+/** GET /api/social/payout/proof?wallet=：该钱包在最新清单中的终身累计金额与证明（proof 自底向上）。 */
+export interface PayoutProof {
+  listId: number;
+  root: string;
+  cumulativeRaw: string;
+  proof: string[];
+  index: number;
+  leafCount: number;
+}
+
+export const payoutApi = {
+  latest: () => request<PayoutLatest>('/api/social/payout/latest'),
+  proof: (wallet: string) => request<PayoutProof>(`/api/social/payout/proof?wallet=${encodeURIComponent(wallet)}`),
+};

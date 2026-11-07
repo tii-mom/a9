@@ -32,14 +32,19 @@ import {
 import * as state from './state';
 import * as store from './store';
 import * as views from './views';
-import * as rewards from './rewards';
-import { clientIp, enforceRateLimit, issueAuthNonce, requireWriteAuth } from './tonproof';
+import { clientIp, createAuthSession, enforceRateLimit, issueAuthChallenge, issueAuthNonce, requireWriteAuth } from './tonproof';
 import { notImplemented, oraclePaused } from './http';
 import { reconcile as indexerReconcile, tick as indexerTick } from './indexer';
 import { parseTonAddress } from './indexer/address';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 import type { ReconcileResult } from './state';
 import type { Env as WorkerEnv } from './env';
+import { handleSocialRequest } from './social';
+import { handleTelegramWebhook, pushSquadDigest } from './bot';
+import { loadGateForBot } from './social-bot-wiring';
+import { handleAdminPayoutBuild } from './social/payout';
+import { computeRoundJunxiang } from './social/runner';
+import { runWeeklyPayoutBuild } from './social/auto';
 
 export type { Env };
 
@@ -145,9 +150,9 @@ async function handleStake(request: Request, env: Env, st: ReconcileResult): Pro
 }
 
 /**
- * 演示领取（v10 合约同口径）：Claim(roundId) = 本金 + 全额奖励一次领完；all=true 等价 ClaimAll。
- * 可领：SUCCEEDED（本金 + 奖励）/ TECHNICAL_ABORTED（只退本金）；FAILED_PERMANENT 无可领。
- * demo 没有退款账本（入参校验失败直接拒绝），所以 roundsMask 不会出现 bit 15。
+ * 演示领取（v11 同口径）：每城一次领取「未领本金 + 20% 立即奖励 + 已解锁的压城部分」；all=true 逐城领取全部。
+ * 可领：SUCCEEDED（本金 + 20%，之后压城解锁增量）/ TECHNICAL_ABORTED（只退本金）；FAILED_PERMANENT 无可领。
+ * v11 没有退款账本，roundsMask 不会出现 bit 15。kind 字段保留兼容（web 旧调用），不再区分本金与奖励。
  */
 async function handleClaim(request: Request, env: Env, st: ReconcileResult): Promise<Response> {
   const body = await readJsonBody(request);
@@ -175,27 +180,38 @@ async function handleClaim(request: Request, env: Env, st: ReconcileResult): Pro
   const myStakes = (await store.listStakesForAddress(env, address)).filter((row) => roundIds.includes(row.round_id));
   if (!all && !myStakes.length) throw notFound('该地址在本轮没有质押记录');
 
+  // v11 demo：每城的「现在可领」与 /api/me 的 rounds[] 同口径（views.buildMe），每次领取写一条 claim_events 流水；
+  // 流水键 demo:<now>:<round> 保证同一次请求重放幂等，压城未解锁部分留待后续领取。
+  const me = await views.buildMe(env, st, address);
+  const positions = me.rounds.filter((item) => roundIds.includes(item.roundId));
   let mask = 0;
   let principalTotal = 0n;
   let rewardTotal = 0n;
   let alreadyClaimed = false;
-  for (const roundId of roundIds) {
-    const round = st.rounds.find((item) => item.round_id === roundId);
+  for (const position of positions) {
+    const round = st.rounds.find((item) => item.round_id === position.roundId);
     if (!round || (round.state !== 'SUCCEEDED' && round.state !== 'TECHNICAL_ABORTED')) continue;
-    const rows = myStakes.filter((row) => row.round_id === roundId);
-    if (!rows.length) continue;
-    if (rows.every((row) => row.principal_claimed === 1)) {
-      alreadyClaimed = true;
+    const principal = toBigInt(position.claimablePrincipalRaw);
+    const reward = toBigInt(position.claimableRewardRaw);
+    if (principal + reward === 0n) {
+      if (position.principalClaimed) alreadyClaimed = true;
       continue;
     }
-    const principal = rows.reduce((sum, row) => sum + toBigInt(row.amount_raw), 0n);
-    const reward = rewards.rewardOfAddress(round, address, st.stakeRows, st.rewardRows);
-    const recorded = await store.recordRoundClaim(env, { roundId, address, principalRaw: principal, rewardRaw: reward, claimedAt: st.now });
+    const recorded = await store.recordClaimEvent(env, {
+      txLt: 'demo:' + st.now + ':' + position.roundId,
+      roundId: position.roundId,
+      address,
+      principalRaw: principal,
+      rewardRaw: reward,
+      claimedAt: st.now,
+    });
     if (!recorded) {
       alreadyClaimed = true;
       continue;
     }
-    mask |= 1 << (roundId - 1);
+    const fullyUnlocked = toBigInt(position.unlockedRaw) >= toBigInt(position.lockedRaw);
+    await store.markStakesClaimed(env, position.roundId, address, { principal: true, reward: fullyUnlocked });
+    mask |= 1 << (position.roundId - 1);
     principalTotal += principal;
     rewardTotal += reward;
   }
@@ -295,14 +311,14 @@ async function handleAdmin(
 }
 
 /** FIX-7：廉价路由分类（不触碰 DB）。null = 404（未知路径/方法）。 */
-type D1Scope = 'admin' | 'stake' | 'claim' | 'nonce';
+type D1Scope = 'admin' | 'stake' | 'claim' | 'nonce' | 'session';
 
 interface RoutePlan {
   requiresState: boolean;
   requiresAdmin: boolean;
   d1Scope: D1Scope | null;
   cacheable: boolean;
-  cheap: 'none' | 'nonce' | 'health' | 'version';
+  cheap: 'none' | 'nonce' | 'challenge' | 'session' | 'health' | 'version';
   badRequestMessage?: string;
   /** B1：chain 模式必须返回 501 的本地写接口（链上状态只能由合约/索引器决定） */
   chainForbiddenMessage?: string;
@@ -360,6 +376,12 @@ function classifyRoute(method: string, url: URL): RoutePlan | null {
 
   if (parts[0] === 'auth' && parts.length === 2 && parts[1] === 'nonce') {
     return isGet ? routePlan({ requiresState: false, cheap: 'nonce', d1Scope: 'nonce' }) : null;
+  }
+  if (parts[0] === 'auth' && parts.length === 2 && parts[1] === 'challenge') {
+    return isGet ? routePlan({ requiresState: false, cheap: 'challenge', d1Scope: 'nonce' }) : null;
+  }
+  if (parts[0] === 'auth' && parts.length === 2 && parts[1] === 'session') {
+    return isPost ? routePlan({ requiresState: false, cheap: 'session', d1Scope: 'session' }) : null;
   }
 
   if (parts[0] === 'rounds' && parts.length >= 2 && parts.length <= 3) {
@@ -564,6 +586,12 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     const address = parseAddress(url.searchParams.get('address'));
     return withReconciled(okResponse(await issueAuthNonce(env, address, now)), false);
   }
+  if (plan.cheap === 'challenge') {
+    return withReconciled(okResponse(await issueAuthChallenge(env, now)), false);
+  }
+  if (plan.cheap === 'session') {
+    return withReconciled(okResponse(await createAuthSession(request, env, now)), false);
+  }
   if (plan.cheap === 'health') {
     const db = await store.dbPing(env);
     const dataSource = (env.DATA_SOURCE ?? 'demo') === 'chain' ? 'chain' : 'demo';
@@ -616,6 +644,58 @@ export default {
     try {
       const url = new URL(request.url);
       const isApi = url.pathname === '/api' || url.pathname.startsWith('/api/');
+      // v11 social layer (docs/35 §4): /api/social/*, /s/:code, /og/:code.png — already finalized.
+      const social = await handleSocialRequest(request, env, ctx);
+      if (social) {
+        logRequest(request, social.status, started);
+        return social;
+      }
+      // v11 军饷 admin: build the cumulative payout list / (re)compute one round's rows
+      if (request.method.toUpperCase() === 'POST' && url.pathname === '/api/admin/payout/build') {
+        const r = finalizeResponse(await handleAdminPayoutBuild(request, env, Date.now()), env, request);
+        logRequest(request, r.status, started);
+        return r;
+      }
+      if (request.method.toUpperCase() === 'POST' && url.pathname === '/api/admin/junxiang/compute') {
+        requireAdmin(request, env);
+        const roundId = Number(url.searchParams.get('round'));
+        if (!Number.isInteger(roundId) || roundId < 1 || roundId > 10) throw new ApiError('BAD_REQUEST', 'round 必须是 1..10');
+        const rows = await computeRoundJunxiang(env as never, roundId, Date.now());
+        const r = finalizeResponse(okResponse({ roundId, rows: rows.length }), env, request);
+        logRequest(request, r.status, started);
+        return r;
+      }
+      if (url.pathname === '/tonconnect-manifest.json') {
+        // Per-host manifest: the wallet signs ton_proof for the manifest's domain, so it must match
+        // the host the user is on (test.a9.lat on testnet, a9.lat in production).
+        const r = new Response(JSON.stringify({ url: url.origin, name: 'A9', iconUrl: `${url.origin}/a9-icon-192.png` }), {
+          headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' },
+        });
+        logRequest(request, r.status, started);
+        return r;
+      }
+      if (url.pathname === '/api/admin/tg/setup' && request.method.toUpperCase() === 'POST') {
+        // Registers this Worker's webhook + the "开战" menu button with Telegram (token stays a secret).
+        requireAdmin(request, env);
+        const e = env as unknown as { TG_BOT_TOKEN?: string; TG_WEBHOOK_SECRET?: string };
+        if (!e.TG_BOT_TOKEN || !e.TG_WEBHOOK_SECRET) throw new ApiError('BAD_REQUEST', 'TG secrets missing');
+        const tgApi = (m: string, body: unknown) => fetch(`https://api.telegram.org/bot${e.TG_BOT_TOKEN}/${m}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        }).then((x) => x.json());
+        const webhook = await tgApi('setWebhook', {
+          url: `${url.origin}/api/tg/webhook`, secret_token: e.TG_WEBHOOK_SECRET, allowed_updates: ['message', 'callback_query'],
+        });
+        const menu = await tgApi('setChatMenuButton', { menu_button: { type: 'web_app', text: '开战', web_app: { url: `${url.origin}/app` } } });
+        const info = await tgApi('getWebhookInfo', {});
+        const r = finalizeResponse(okResponse({ webhook, menu, info }), env, request);
+        logRequest(request, r.status, started);
+        return r;
+      }
+      if (url.pathname === '/api/tg/webhook' && request.method.toUpperCase() === 'POST') {
+        const tg = await handleTelegramWebhook(request, env, { gateSource: () => loadGateForBot(env) });
+        logRequest(request, tg.status, started);
+        return tg;
+      }
       if (!isApi) {
         // FIX-7：静态 GET 也有内存级 IP 限流（不写 D1）
         if (memoryLimitExceeded(env, request, 'static', Date.now())) {
@@ -652,6 +732,18 @@ export default {
     ctx.waitUntil(
       (async () => {
         try {
+          // v11: every 6h during 攻城, each squad group gets a ranking digest (bot no-ops otherwise)
+          try {
+            const d = new Date();
+            if (d.getUTCMinutes() === 0 && d.getUTCHours() % 6 === 0) {
+              const gate = await loadGateForBot(env);
+              if (gate) await pushSquadDigest(env, gate);
+            }
+          } catch (e) {
+            console.error('[bot] digest failed', e instanceof Error ? e.message : String(e));
+          }
+          // v11 军饷：周一 00:00 UTC 构建一次累计清单（D1 去重；只记账不上链，见 social/auto.ts）。永不抛出。
+          await runWeeklyPayoutBuild(env as never, Date.now());
           const auto = await state.autoplay(env);
           const st = await state.reconcile(env);
           await state.refreshDemoMarket(env, st);
@@ -667,7 +759,7 @@ export default {
               }
             } else {
               try {
-                const result = await indexerTick(env, st.now);
+                const result = await indexerTick(env, st.now, { waitUntil: ctx.waitUntil.bind(ctx) });
                 if (!result.ok) {
                   try {
                     await store.logEvent(

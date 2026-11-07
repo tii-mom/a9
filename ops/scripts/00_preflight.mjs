@@ -60,7 +60,12 @@ if (!mnemonic) {
     blocking.push('raw-private-key');
   }
 }
-// v10：没有 admin；keeper 与 teamWallet 写入 RC 初始数据（部署后永久不可改），部署前必须确定。
+// v11：没有 admin；keeper 与 teamWallet 写入 RC 初始数据（部署后永久不可改），部署前必须确定。
+// junxiangPublisher 写入军饷分发合约，缺省时同 keeper（deploy-emulation 行为一致）。
+const publisherEnvName = params.roles.junxiangPublisher.env;
+if (!process.env[publisherEnvName] && !(registry.wallets.junxiangPublisher && registry.wallets.junxiangPublisher.address)) {
+  info('junxiangPublisher 未单独指定：军饷 publisher 将与 keeper 相同（' + publisherEnvName + ' 可覆盖）');
+}
 for (const [key, envName] of [['keeper', params.roles.keeper.env], ['teamWallet', params.roles.teamWallet.env], ['treasury', params.network.deployer.treasuryAddressEnv]]) {
   const fromEnv = process.env[envName] || '';
   const fromRegistry = registry.wallets[key] && registry.wallets[key].address;

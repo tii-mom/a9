@@ -71,6 +71,20 @@ fun sendWithInboundValue(jettonWallet: address, body: cell) {
     out.send(SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
 }
 
+// User-initiated transfer after reserveToncoinsOnBalance(original − inbound): carries the rest of
+// the inbound value, so external events emitted earlier in the same transaction are paid by the
+// user, never by the contract's own balance.
+fun sendWithReservedBalance(jettonWallet: address, body: cell) {
+    val out = createMessage({
+        bounce: BounceMode.Only256BitsOfBody,
+        value: 0,
+        dest: jettonWallet,
+        body,
+    });
+    // SAFETY: callers reserve the contract's original balance minus this message's value first.
+    out.send(SEND_MODE_CARRY_ALL_BALANCE);
+}
+
 fun emitExternalEvent<T>(body: T): void {
     createExternalLogMessage({
         dest: createAddressNone(),

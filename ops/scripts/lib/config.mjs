@@ -1,4 +1,4 @@
-/** 参数加载、V7 时间 + v10 合约（D-42）不变量校验、原始单位换算、配置哈希。 */
+/** 参数加载、v11 合约（docs/35 / contracts/README §5）不变量校验、原始单位换算、配置哈希。 */
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 export const OPS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const BAM_ROOT = resolve(OPS_ROOT, '..');
 export const DEFAULT_PARAMS = join(OPS_ROOT, 'config', 'testnet.params.json');
+export const FAST_PARAMS = join(OPS_ROOT, 'config', 'testnet-fast.params.json');
 export const DEFAULT_REGISTRY = join(OPS_ROOT, 'config', 'testnet.registry.json');
 export const TEMPLATE_REGISTRY = join(OPS_ROOT, 'config', 'testnet.registry.template.json');
 export const RECORDS_DIR = process.env.OPS_RECORDS_DIR ? resolve(process.env.OPS_RECORDS_DIR) : join(OPS_ROOT, 'records');
@@ -46,7 +47,7 @@ export function loadParams(path = process.env.OPS_PARAMS || DEFAULT_PARAMS) {
   // Network fuse: an explicit OPS_NETWORK must match the params file declaration.
   const explicit = process.env.OPS_NETWORK;
   if (process.env.OPS_EXECUTE === '1' && explicit && explicit !== declared) {
-    throw new Error('网络保险丝：OPS_NETWORK=' + explicit + ' 与参数文件声明 network=' + declared + ' 不一致，拒绝执行');
+    throw new Error('网络保险丝：OPS_NETWORK=' + explicit + ' 与参数文件声明 network=' + declared + ' 拒绝执行');
   }
   // Mainnet extra confirmation. Address format alone cannot identify a network
   // (TON friendly address is network-agnostic), so the params declaration is the source of truth.
@@ -65,9 +66,11 @@ export function stableStringify(value) {
 
 /** 协议关键参数子集（用于配置哈希/公示；不含工具链与生成时间戳）。 */
 export function protocolSubset(params) {
-  const keys = ['token', 'supply', 'rounds', 'price', 'timeline', 'stakeLimits', 'techAbort', 'risk', 'permissions'];
+  const keys = ['token', 'supply', 'rounds', 'price', 'timeline', 'stakeLimits', 'techAbort', 'risk', 'permissions', 'junxiang'];
   const subset = {};
   for (const key of keys) subset[key] = params[key];
+  // 时序档位进入哈希：快测档与生产档的配置哈希必须不同
+  subset.timingProfile = timingProfileOf(params);
   return subset;
 }
 
@@ -117,22 +120,25 @@ export function expectedLadder(params) {
   return ladder;
 }
 
-/** v10 入站 opcode（contracts/README §4.1）+ 标准 Jetton opcode。 */
-export const V10_OPCODES = {
+/** v11 入站 / 事件 opcode（contracts/README §5）+ 标准 Jetton opcode + 军饷分发。 */
+export const V11_OPCODES = {
   OpenRound: '0x52540001',
   CloseStaking: '0x52540002',
   SubmitCandle: '0x52540003',
-  Claim: '0x52540006',
-  ClaimAll: '0x5254000E',
   StakeDeposit: '0x5254000F',
   AbortTechnical: '0x52540010',
   RetrySettlement: '0x52540015',
+  ReleaseTeam: '0x52540016',
+  TicketClaim: '0x52540303',
+  TicketRestake: '0x52540304',
   JettonTransferNotification: '0x7362D09C',
   TopUpTons: '0xD372158C',
+  JunxiangSetRoot: '0x4A580001',
+  JunxiangClaim: '0x4A580002',
 };
 
-/** v10 事件（contracts/README §4.3）。 */
-export const V10_EVENTS = {
+/** v11 事件（contracts/README §5.4）+ 军饷事件。 */
+export const V11_EVENTS = {
   TargetPriceSet: '0x52540101',
   RoundSettled: '0x52540102',
   DepositAccepted: '0x52540103',
@@ -143,10 +149,29 @@ export const V10_EVENTS = {
   DepositRefunded: '0x5254010F',
   SettlementBounced: '0x52540110',
   UnexpectedBounce: '0x52540111',
+  Restaked: '0x52540112',
+  TeamReleased: '0x52540113',
+  JunxiangRootPublished: '0x4A580101',
+  JunxiangClaimed: '0x4A580102',
 };
 
-/** params.permissions.opcodes 允许出现的键：v10 入站消息 + 标准 TEP-74 Jetton opcode（其余一律视为已删除的旧消息）。 */
-export const ALLOWED_OPCODE_NAMES = [...Object.keys(V10_OPCODES), 'JettonTransfer', 'JettonBurn', 'JettonBurnNotification'];
+/** params.permissions.opcodes 允许出现的键：v11 入站消息 + 标准 TEP-74 Jetton opcode（其余一律视为已删除的旧消息，如 Claim / ClaimAll）。 */
+export const ALLOWED_OPCODE_NAMES = [...Object.keys(V11_OPCODES), 'JettonTransfer', 'JettonBurn', 'JettonBurnNotification'];
+
+/**
+ * 时序档位。production = 上主网/测试网正式档（V7：12h + 36h + 24×1h，阈值 16）；
+ * fast-cycle = 测试网极速档（10 s K 线、90 s 攻城期，10 轮约 57 分钟）；rehearsal = 仪式演练档，只校验内部一致性。
+ */
+export const TIMING_PROFILES = {
+  production: { previewSeconds: 43200, stakeDurationSeconds: 129600, candleSeconds: 3600, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 604800, fallbackUnlockSeconds: 2592000 },
+  // extreme-fast testnet drill (10 s candles, ~47 min for 10 rounds); restore production values before mainnet
+  'fast-cycle': { previewSeconds: 10, stakeDurationSeconds: 90, candleSeconds: 10, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 60, fallbackUnlockSeconds: 60 },
+  rehearsal: null,
+};
+
+export function timingProfileOf(params) {
+  return (params && params.meta && params.meta.timingProfile) || 'production';
+}
 
 /** @returns {{errors: string[], warnings: string[]}} */
 export function validateParams(params) {
@@ -196,64 +221,77 @@ export function validateParams(params) {
   check(p.price.targetMode === 'LOCK_AT_OPEN', 'targetMode 必须为 LOCK_AT_OPEN（V6）');
   check(String(p.price.tierRule).includes('tier = 1 + successfulRounds'), 'tier 规则必须为 1 + 已成功轮数');
 
+  // ---- 时序：档位约束 + 内部一致性 ----
+  const profile = timingProfileOf(p);
   const timeline = p.timeline;
-  check(Number(timeline.previewSeconds) === 43200, 'PREVIEW 必须为 12h（43200）');
-  check(Number(timeline.stakeDurationSeconds) === 129600, '报名窗口必须为 36h（129600）');
-  check(Number(timeline.candleSeconds) === 3600, 'K 线周期必须为 1h（3600）');
-  check(Number(timeline.candleCount) === 24, '观察 K 线数量必须为 24');
-  check(Number(timeline.minQualifiedCandles) === 16, '达标阈值必须为 16');
+  const abort = p.techAbort;
+  if (!(profile in TIMING_PROFILES)) {
+    errors.push('meta.timingProfile 必须为 ' + Object.keys(TIMING_PROFILES).join(' / ') + '（当前 ' + profile + '）');
+  } else if (TIMING_PROFILES[profile]) {
+    const expected = TIMING_PROFILES[profile];
+    check(Number(timeline.previewSeconds) === expected.previewSeconds, profile + '：PREVIEW 必须为 ' + expected.previewSeconds + 's');
+    check(Number(timeline.stakeDurationSeconds) === expected.stakeDurationSeconds, profile + '：报名窗口必须为 ' + expected.stakeDurationSeconds + 's');
+    check(Number(timeline.candleSeconds) === expected.candleSeconds, profile + '：K 线周期必须为 ' + expected.candleSeconds + 's');
+    check(Number(timeline.candleCount) === expected.candleCount, profile + '：观察 K 线数量必须为 ' + expected.candleCount);
+    check(Number(timeline.minQualifiedCandles) === expected.minQualifiedCandles, profile + '：达标阈值必须为 ' + expected.minQualifiedCandles);
+    check(Number(abort.abortTimeoutSeconds) === expected.abortTimeoutSeconds, profile + '：技术终止超时必须为 ' + expected.abortTimeoutSeconds + 's');
+    if (expected.fallbackUnlockSeconds !== undefined && abort.fallbackUnlockSeconds !== undefined) {
+      check(Number(abort.fallbackUnlockSeconds) === expected.fallbackUnlockSeconds, profile + '：压城兜底解锁窗口必须为 ' + expected.fallbackUnlockSeconds + 's');
+    }
+  }
+  if (profile === 'fast-cycle') {
+    check(p.network && p.network.net === 'testnet' && Number(p.network.chainId) === -3, 'fast-cycle 档只允许测试网（network.net=testnet, chainId=-3）');
+    check(Number(timeline.roundsTotalSeconds) <= 12 * 3600, 'fast-cycle 10 轮应在 12 小时内跑完（roundsTotalSeconds ≤ 43200）');
+  }
   check(
     Number(timeline.observationSeconds) === Number(timeline.candleCount) * Number(timeline.candleSeconds),
     'observationSeconds 必须等于 candleCount × candleSeconds'
   );
   check(
     Number(timeline.roundSeconds) === Number(timeline.previewSeconds) + Number(timeline.stakeDurationSeconds) + Number(timeline.observationSeconds),
-    '单轮时长必须为 12h + 36h + 24h = 72h'
+    '单轮时长必须为 预告 + 报名 + 观察'
   );
-  check(Number(timeline.roundsTotalSeconds) === Number(timeline.roundSeconds) * 10, '10 轮总时长必须为 30 天');
+  check(Number(timeline.roundsTotalSeconds) === Number(timeline.roundSeconds) * 10, '10 轮总时长必须为单轮 × 10');
+  check(Number(timeline.minQualifiedCandles) <= Number(timeline.candleCount) && Number(timeline.minQualifiedCandles) * 2 > Number(timeline.candleCount), '达标阈值必须 ≤ 观察根数且 > 根数的一半');
+  check(Number(abort.abortTimeoutSeconds) > 0, 'techAbort.abortTimeoutSeconds 必须 > 0');
 
+  // ---- 质押：v11 无上限，最低 1,000 A9 ----
   const limits = p.stakeLimits;
-  check(asBigInt(limits.minStakeTokens) === 100000n, '单笔最低质押必须为 100,000 A9（v10 / D-42）');
+  check(asBigInt(limits.minStakeTokens) === 1000n, '单笔最低质押必须为 1,000 A9（v11）');
   check(asBigInt(limits.minStakeRaw) === asBigInt(limits.minStakeTokens) * 10n ** 9n, 'minStakeRaw 不一致');
-  check(Number(limits.maxStakePerAddressBps) === 1000, '单地址上限 bps 必须为 1000');
-  check(
-    asBigInt(limits.maxStakePerAddressRaw) === 20000000000000000n,
-    '单地址固定硬顶必须为 20,000,000 A9'
-  );
-  check(Number(limits.maxStakePerAddressTokens) === 20000000, 'maxStakePerAddressTokens 必须为 20,000,000');
-  check(asBigInt(limits.maxTotalStakeTokens) === 200000000n, '本轮总质押上限必须为 2 亿 A9');
-  check(asBigInt(limits.maxTotalStakeRaw) === asBigInt(limits.maxTotalStakeTokens) * 10n ** 9n, 'maxTotalStakeRaw 不一致');
+  check(Number(limits.maxStakePerAddressBps) === 0, 'v11 无单地址上限：maxStakePerAddressBps 必须为 0');
+  check(asBigInt(limits.maxStakePerAddressRaw) === 0n, 'v11 无单地址上限：maxStakePerAddressRaw 必须为 0');
+  check(asBigInt(limits.maxTotalStakeRaw) === 0n, 'v11 无本轮总额上限：maxTotalStakeRaw 必须为 0');
   check(limits.cancelStakeAllowed === false, '不允许取消质押');
-  check(asBigInt(limits.stakeForwardTonMinNano ?? '0') >= 100000000n, '质押 forward_ton_amount 下限必须 ≥ 0.1 TON（v10）');
+  check(asBigInt(limits.stakeForwardTonMinNano ?? '0') >= 100000000n, '质押 forward_ton_amount 下限必须 ≥ 0.1 TON');
+  check(asBigInt(limits.ticketClaimTonMinNano ?? '0') >= 150000000n, 'TicketClaim 最低附带 TON 必须 ≥ 0.15');
+  check(asBigInt(limits.ticketRestakeTonMinNano ?? '0') >= 250000000n, 'TicketRestake 最低附带 TON 必须 ≥ 0.25');
 
   check(
     asBigInt(p.rounds.rcFundingRaw ?? '0') === asBigInt(p.rounds.rewardPoolRaw) + asBigInt(p.rounds.teamPoolRaw),
-    'rcFundingRaw 必须等于 70 亿奖励 + 12 亿团队 = 82 亿（v10：团队额度在 RC 钱包）'
+    'rcFundingRaw 必须等于 70 亿奖励 + 12 亿团队 = 82 亿（团队额度在 RC 钱包）'
   );
   check(String(p.rounds.rcFundingForwardTonNano) === '0', 'RC 注资 forward_ton_amount 必须为 0（否则被当作质押退回）');
 
-  const abort = p.techAbort;
-  check(Number(abort.abortTimeoutSeconds) === 7 * 86400, '技术终止超时必须为 7 天（v10 统一）');
-  check(Number(abort.observationTimeoutSeconds) === 7 * 86400 && Number(abort.previewTimeoutSeconds) === 7 * 86400, '观察超时 / 预告超时必须为 7 天');
-  check(!('pauseSeconds' in abort), 'v10 没有预言机暂停，techAbort.pauseSeconds 应删除');
   check(abort.anyoneCanTrigger === true, '技术终止必须任何人可触发');
   check(Number(abort.refundPrincipalBps) === 10000, '技术终止必须退 100% 本金');
   check(abort.burnsRewardOnAbort === false && abort.burnsTeamOnAbort === false, '技术终止不得销毁奖励/团队额度');
   check(abort.tierConsumed === false, '技术终止不得消耗档位');
 
   const opcodes = p.permissions.opcodes;
-  for (const [name, code] of Object.entries(V10_OPCODES)) {
+  for (const [name, code] of Object.entries(V11_OPCODES)) {
     check(String(opcodes[name] || '').toUpperCase() === code.toUpperCase(), 'opcode ' + name + ' 必须为 ' + code);
   }
   for (const name of Object.keys(opcodes)) {
-    check(ALLOWED_OPCODE_NAMES.includes(name), 'opcode ' + name + ' 不在 v10 ABI 中（contracts/README §4.1），应删除');
+    check(ALLOWED_OPCODE_NAMES.includes(name), 'opcode ' + name + ' 不在 v11 ABI 中（contracts/README §5），应删除');
   }
   const events = p.permissions.events || {};
-  for (const [name, code] of Object.entries(V10_EVENTS)) {
+  for (const [name, code] of Object.entries(V11_EVENTS)) {
     check(String(events[name] || '').toUpperCase() === code.toUpperCase(), 'event ' + name + ' 必须为 ' + code);
   }
-  check(p.roles && p.roles.keeper && p.roles.teamWallet, 'roles 必须包含 keeper 与 teamWallet（v10 无 admin）');
-  check(Object.keys(p.roles || {}).every((key) => ['keeper', 'treasury', 'teamWallet', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'].includes(key)), 'roles 只允许 keeper / treasury / teamWallet / 营销 / 流动性 / 内盘（v10 无 admin）');
+  check(p.roles && p.roles.keeper && p.roles.teamWallet && p.roles.junxiangPublisher, 'roles 必须包含 keeper / teamWallet / junxiangPublisher（v11 无 admin）');
+  const ROLE_KEYS = ['keeper', 'treasury', 'teamWallet', 'junxiangPublisher', 'marketingWallet', 'liquidityWallet', 'teamInternalWallet'];
+  check(Object.keys(p.roles || {}).every((key) => ROLE_KEYS.includes(key)), 'roles 只允许 ' + ROLE_KEYS.join(' / ') + '（v11 无 admin）');
 
   const ids = p.deployPlan.map((item) => item.id);
   check(new Set(ids).size === ids.length, 'deployPlan 存在重复 step id');
@@ -265,9 +303,10 @@ export function validateParams(params) {
 
   if (p.toolchain.pinned === false) warnings.push('工具链未 pin 版本：执行真实部署前必须锁定 Acton/Tolk 版本并回填 toolchain.pinned=true');
   if (p.toolchain.pinned === true && !p.toolchain.pinnedVersion) warnings.push('toolchain.pinnedVersion 为空：请记录实际 Acton/Tolk 版本');
-  if (Number(p.tonBalances.roundControllerMinTon) < 5) warnings.push('RC TON 余额目标低于 contracts/README §5 建议的 5 TON');
+  if (Number(p.tonBalances.roundControllerMinTon) < 5) warnings.push('RC TON 余额目标低于 contracts/README §6 建议的 5 TON');
   if (!(Number(p.tonBalances.keeperMinTon) > 0)) warnings.push('tonBalances.keeperMinTon 未设置：keeper 钱包 gas 无下限告警');
   if (Number(p.price.priceMultiplier) === 2) warnings.push('2× 已定档（D-33）：docs/13 的 EV 负值数据保留作为风险披露');
+  if (profile === 'fast-cycle') warnings.push('fast-cycle 快测档：仅用于测试网演练（10 轮约 ' + (Number(timeline.roundsTotalSeconds) / 3600).toFixed(1) + ' 小时），不得用于主网');
 
   return { errors, warnings };
 }

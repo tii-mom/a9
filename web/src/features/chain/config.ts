@@ -6,13 +6,8 @@
 import type { ApiError } from '../../lib/api';
 import { api, useQuery } from '../../lib/api';
 import type { DataSource, ProtocolConfig } from '@shared/types';
-import { base64Decode, base64UrlEncode } from './address';
-import {
-  DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
-  DEFAULT_MAX_TOTAL_STAKE_TOKENS,
-  DEFAULT_MIN_STAKE_TOKENS,
-  DEFAULT_TOKEN_DECIMALS,
-} from './protocol';
+import { base64Decode, base64UrlEncode, parseTonAddress } from './address';
+import { DEFAULT_MIN_STAKE_TOKENS, DEFAULT_TOKEN_DECIMALS } from './protocol';
 
 export type ChainNetwork = 'mainnet' | 'testnet';
 export type ChainDisabledReason = 'no-config' | 'demo' | 'no-contracts';
@@ -34,6 +29,8 @@ export interface ChainConfig {
   jettonMaster: string | null;
   /** v10：团队收款钱包（RC 成功轮直接转入） */
   teamWallet: string | null;
+  /** 军饷分发合约（JUNXIANG_DISTRIBUTOR_ADDRESS）；未配置、占位符或非法时为 null，领取入口隐藏 */
+  junxiangDistributor: string | null;
   /** v10：唯一 keeper（开轮 / 提交价格） */
   keeper: string | null;
   riskDisclosureVersion: number;
@@ -41,7 +38,7 @@ export interface ChainConfig {
   roundCount: number;
   minStakeRaw: bigint;
   maxTotalStakeRaw: bigint;
-  /** 单地址固定硬顶（raw，V6.1 = 20,000,000 A9） */
+  /** 单地址上限（raw）。v11 无单地址上限，合约恒为 0（0 = 不限）；仅当后端下发非零值时才生效 */
   maxStakePerAddressRaw: bigint;
   /** 旧口径（bps），仅为兼容保留；前端校验以 maxStakePerAddressRaw 为准 */
   maxStakePerAddressBps: number;
@@ -76,6 +73,17 @@ function parseBpsExtra(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 && parsed <= 10000 ? Math.floor(parsed) : fallback;
 }
 
+/** 地址型配置：占位符（含 `__`）或无法解析时视为未配置。 */
+export function usableAddressOrNull(value: string | null): string | null {
+  if (!value || value.includes('__')) return null;
+  try {
+    parseTonAddress(value);
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 /** 后端配置 → 前端链上配置。 */
 export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
   const decimals = config?.token.decimals ?? DEFAULT_TOKEN_DECIMALS;
@@ -87,14 +95,9 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
   const roundController = config?.contracts.roundController?.trim() || null;
   const jettonMaster = config?.contracts.jettonMaster?.trim() || null;
 
-  // 限额：与合约公式一致——perAddressCap = maxTotalStakeRaw × maxStakePerAddressBps / 10000
-  // （V6.1 定稿：200,000,000 × 1000 / 10000 = 20,000,000 A9 固定硬顶，不是动态比例）
-  const maxTotalStakeRaw = parseRawExtra(contractExtra(config, 'maxTotalStakeRaw'), DEFAULT_MAX_TOTAL_STAKE_TOKENS * tokenUnit);
-  const maxStakePerAddressBps = parseBpsExtra(
-    contractExtra(config, 'maxStakePerAddressBps'),
-    DEFAULT_MAX_STAKE_PER_ADDRESS_BPS,
-  );
-  const derivedPerAddressCap = (maxTotalStakeRaw * BigInt(maxStakePerAddressBps)) / 10000n;
+  // 限额：v11 没有单轮总量 / 单地址上限（docs/35 D-48）。合约返回的 0 表示「不限」，这里统一为 0n。
+  const maxTotalStakeRaw = 0n;
+  const derivedPerAddressCap = 0n;
 
   let disabledReason: ChainDisabledReason | null = null;
   if (!config) disabledReason = 'no-config';
@@ -115,6 +118,7 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     roundController,
     jettonMaster,
     teamWallet: contractExtra(config, 'teamWallet'),
+    junxiangDistributor: usableAddressOrNull(contractExtra(config, 'junxiangDistributor')),
     keeper: contractExtra(config, 'keeper') ?? contractExtra(config, 'adminOwner'),
     riskDisclosureVersion: config?.riskDisclosureVersion ?? 1,
     tokenDecimals: decimals,
@@ -122,7 +126,7 @@ export function deriveChainConfig(config: ProtocolConfig | null): ChainConfig {
     minStakeRaw: parseRawExtra(contractExtra(config, 'minStakeRaw'), DEFAULT_MIN_STAKE_TOKENS * tokenUnit),
     maxTotalStakeRaw,
     maxStakePerAddressRaw: parseRawExtra(contractExtra(config, 'maxStakePerAddressRaw'), derivedPerAddressCap),
-    maxStakePerAddressBps,
+    maxStakePerAddressBps: 0,
     dataSource: config?.dataSource ?? 'demo',
     tonConnectManifestUrl: config?.tonConnectManifestUrl ?? null,
   };

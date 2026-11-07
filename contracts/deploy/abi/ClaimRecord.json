@@ -1,0 +1,211 @@
+{
+  "abi_schema_version": "1.0",
+  "contract_name": "ClaimRecord",
+  "author": "A9 Protocol",
+  "version": "1.0.0",
+  "description": "A9 junxiang per-wallet claimed amount.",
+  "unique_types": [
+    {
+      "kind": "void"
+    },
+    {
+      "kind": "int"
+    },
+    {
+      "kind": "slice"
+    },
+    {
+      "kind": "cell"
+    },
+    {
+      "kind": "builder"
+    },
+    {
+      "kind": "bool"
+    },
+    {
+      "kind": "coins"
+    },
+    {
+      "kind": "address"
+    },
+    {
+      "kind": "intN",
+      "n": 32
+    },
+    {
+      "kind": "uintN",
+      "n": 32
+    },
+    {
+      "kind": "intN",
+      "n": 64
+    },
+    {
+      "kind": "uintN",
+      "n": 64
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordAdvance"
+    },
+    {
+      "kind": "uintN",
+      "n": 128
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordStorage"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordExcessesBack"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordPay"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordView"
+    }
+  ],
+  "struct_instantiations": [],
+  "alias_instantiations": [],
+  "declarations": [
+    {
+      "kind": "struct",
+      "name": "RecordExcessesBack",
+      "ty_idx": 15,
+      "prefix": {
+        "prefix_num": 3576854235,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RecordStorage",
+      "ty_idx": 14,
+      "fields": [
+        {
+          "name": "distributor",
+          "ty_idx": 7
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "claimedRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RecordAdvance",
+      "ty_idx": 12,
+      "prefix": {
+        "prefix_num": 1247281155,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "cumulativeRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RecordPay",
+      "ty_idx": 16,
+      "prefix": {
+        "prefix_num": 1247281156,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 13
+        },
+        {
+          "name": "cumulativeRaw",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RecordView",
+      "ty_idx": 17,
+      "fields": [
+        {
+          "name": "distributor",
+          "ty_idx": 7
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "claimedRaw",
+          "ty_idx": 13
+        }
+      ]
+    }
+  ],
+  "incoming_messages": [
+    {
+      "body_ty_idx": 12
+    }
+  ],
+  "incoming_external": [],
+  "outgoing_messages": [
+    {
+      "body_ty_idx": 15
+    },
+    {
+      "body_ty_idx": 16
+    }
+  ],
+  "emitted_events": [],
+  "storage": {
+    "storage_ty_idx": 14
+  },
+  "get_methods": [
+    {
+      "tvm_method_id": 115713,
+      "name": "get_record",
+      "parameters": [],
+      "return_ty_idx": 17
+    }
+  ],
+  "thrown_errors": [
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotDistributor",
+      "err_code": 270
+    }
+  ],
+  "compiler_name": "tolk",
+  "compiler_version": "1.4.1"
+}

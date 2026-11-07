@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-/** 80 — keeper / 运维操作（v10）：开轮、关窗、K 线、技术终止、结算重试（默认 dry-run；无 admin）。 */
+/** 80 — keeper / 运维操作（v11）：开轮、关窗、K 线、技术终止、结算重试、释放团队额度、军饷周根（默认 dry-run；无 admin）。 */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { requireConfirm, flag, str } from './lib/cli.mjs';
-import { resolvePath } from './lib/config.mjs';
+import { asBigInt, resolvePath, formatTokens } from './lib/config.mjs';
 import { bootstrap, finish, printNextSteps, resolveAddress, signerWallet } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
-import { decodeRoundView, getTonBalance, runGetMethod } from './lib/ton.mjs';
+import { decodeRoundView, findJettonWallet, getTonBalance, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
 import { pendingSettlementActions } from './lib/ledger.mjs';
 import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs';
 
 const { args, execute, params, registry } = bootstrap({
   id: '80',
-  title: 'keeper / 运维操作（v10）',
+  title: 'keeper / 运维操作（v11）',
   dependsOn: ['register'],
 });
 
@@ -22,18 +22,21 @@ const action = str(args, 'action', str(args, '_', '') ? String(args._[0]) : 'sta
 const roundId = Number(str(args, 'round', '0'));
 const opcodes = params.permissions.opcodes;
 const CANDLE_SECONDS = Number(params.timeline.candleSeconds);
+const ABORT_TIMEOUT_TEXT = params.techAbort.abortTimeoutSeconds + 's（' + params.meta.timingProfile + ' 档）';
 
 const ACTIONS = {
   status: { op: null, mutating: false, desc: '读取协议/轮次状态（只读）' },
   'open-round': { op: opcodes.OpenRound, mutating: true, signer: 'keeper', desc: '开轮（仅 keeper）：预告结束后，锁定 target = max(P0×2^tier, 2×开窗 24h TWAP)' },
-  'close-staking': { op: opcodes.CloseStaking, mutating: true, signer: 'anyone', desc: '关报名（任何人）：36h 报名窗口到期后才可调' },
+  'close-staking': { op: opcodes.CloseStaking, mutating: true, signer: 'anyone', desc: '关报名（任何人）：报名窗口到期后才可调' },
   'submit-candle': { op: opcodes.SubmitCandle, mutating: true, signer: 'keeper', desc: '提交 1h K 线（仅 keeper，body 0x52540003）；第 24 根提交即判定' },
-  'abort-technical': { op: opcodes.AbortTechnical, mutating: true, signer: 'anyone', desc: '技术终止（任何人）：观察应结束后 7 天未判定，或预告结束后 7 天未开轮' },
+  'abort-technical': { op: opcodes.AbortTechnical, mutating: true, signer: 'anyone', desc: '技术终止（任何人）：观察应结束后 ' + ABORT_TIMEOUT_TEXT + ' 仍未判定，或预告结束后仍未开轮' },
   'retry-settlement': { op: opcodes.RetrySettlement, mutating: true, signer: 'anyone', desc: '重试结算动作（任何人，≥ 0.3 TON）：出现 SettlementBounced 事件后对该轮调用' },
+  'release-team': { op: opcodes.ReleaseTeam, mutating: true, signer: 'anyone', desc: '释放最后一笔团队额度（任何人，≥ 0.1 TON）：第 10 城结束 30 天后才可调' },
+  'junxiang-set-root': { op: opcodes.JunxiangSetRoot, mutating: true, signer: 'publisher', desc: '军饷周根（分发合约 publisher）：先充值分发合约 A9 钱包 ≥ 本期累计总额，再发布 root；listId 严格递增' },
 };
 
 const FORBIDDEN = {
-  'modify-target': '禁止：v10 没有 admin，任何人都不能修改已开轮目标价（D-42）',
+  'modify-target': '禁止：v11 没有 admin，任何人都不能修改已开轮目标价（D-42）',
   'cancel-stake': '禁止：不存在取消质押通道；技术终止轮的本金由用户自行 Claim',
   'manual-refund': '禁止：没有任何人能转移用户质押本金或提走 RC 资金（D-42）',
   'set-code': '禁止：RoundController 不可升级（无代理/setCode）',
@@ -56,13 +59,20 @@ if (FORBIDDEN[action]) {
 }
 const spec = ACTIONS[action];
 if (!spec) {
-  fail('未知动作：' + action + '（v10 只保留：' + Object.keys(ACTIONS).join(', ') + '）');
+  fail('未知动作：' + action + '（v11 只保留：' + Object.keys(ACTIONS).join(', ') + '）');
   finish({ 结果: 'UNKNOWN_ACTION' });
   process.exit(1);
 }
 kv('说明', spec.desc);
 kv('opcode', spec.op || '（只读）');
-if (spec.signer) kv('谁可以发', spec.signer === 'keeper' ? 'keeper（A9_SIGNER_WALLET 必须是 keeper 钱包）' : '任何人');
+if (spec.signer) {
+  const who = {
+    keeper: 'keeper（A9_SIGNER_WALLET 必须是 keeper 钱包）',
+    publisher: 'junxiangPublisher（A9_SIGNER_WALLET 必须是分发合约 publisher；缺省同 keeper）',
+    anyone: '任何人',
+  };
+  kv('谁可以发', who[spec.signer] || spec.signer);
+}
 if (!controller) {
   fail('RoundController 未登记：先完成部署或 --adopt');
   process.exit(finish());
@@ -109,8 +119,11 @@ if (action === 'retry-settlement') {
   detail('RetrySettlement 任何人可触发；入口要求消息 value ≥ 0.3 TON（admin_op 统一按 0.3 TON 发送）。触发依据：SettlementBounced(roundId, action) 事件。');
 }
 if (action === 'abort-technical') {
-  detail('技术终止的合法条件：观察应结束后 7 天仍未判定，或预告结束后 7 天仍未开轮（keeper 失联）。');
-  detail('不满足条件时合约会拒绝；任何地址均可触发。终止轮本金可领，7 亿奖励 + 1.2 亿团队额度留在 RC。');
+  detail('技术终止的合法条件：观察应结束后 ' + ABORT_TIMEOUT_TEXT + ' 仍未判定，或预告结束后仍未开轮（keeper 失联）。');
+  detail('不满足条件时合约会拒绝；任何地址均可触发。终止轮本金经攻城令领取；奖励与团队额度整笔滚入下一城（D-39）。');
+}
+if (action === 'release-team') {
+  detail('ReleaseTeam：第 10 城结束 30 天后，任何人可调用一次，把最后一笔待发团队额度（1.2 亿）转给 teamWallet（≥ 0.1 TON）。');
 }
 if (spec.signer === 'keeper') detail('该动作只接受 keeper 签名：A9_SIGNER_WALLET 必须是登记表 wallets.keeper 对应的 Acton 钱包，否则合约报 NotKeeper。');
 
@@ -298,14 +311,115 @@ if (action === 'submit-candle') {
   await handleSubmitCandles();
 }
 
+/**
+ * 军饷周根（junxiang-set-root）：publisher 发布 SetRoot(listId, root)。
+ * 运维规则（contracts/README §7.1）：发布前分发合约 A9 钱包余额必须 ≥ 本期累计总额，否则领取 jetton 转账 bounce。
+ * 本函数在 EXECUTE 前校验余额；DRY-RUN 只打印计划（余额不足只提示）。
+ */
+async function handleJunxiangSetRoot() {
+  const listRaw = str(args, 'list');
+  const rootRaw = str(args, 'root');
+  const totalRaw = str(args, 'total');
+  if (!listRaw || !/^[0-9]+$/.test(listRaw) || Number(listRaw) < 1 || Number(listRaw) > 4294967295) {
+    fail('--list <listId> 必填：1..4294967295，且必须大于分发合约当前 listId（链上严格递增）');
+    process.exit(finish());
+  }
+  let root;
+  try {
+    root = normalizeDigest(rootRaw);
+  } catch (error) {
+    fail('--root 必填：' + String(error.message || error));
+    process.exit(finish());
+  }
+  if (!totalRaw || !/^[0-9]+$/.test(totalRaw)) {
+    fail('--total <cumulativeRaw> 必填：本期累计总额（raw，1 A9 = 1e9）；用于发布前核对分发合约 A9 余额');
+    process.exit(finish());
+  }
+  const distributor = resolveAddress(registry, params, 'junxiangDistributor', 'junxiang-distributor.addr');
+  if (!distributor) {
+    fail('JunxiangDistributor 未登记：先完成 15 整体部署（或登记 deploy/junxiang-distributor.addr）');
+    process.exit(finish());
+  }
+  const jettonMaster = resolveAddress(registry, params, 'jettonMaster', 'jetton-master.addr');
+  kv('JunxiangDistributor', distributor);
+  kv('listId', listRaw);
+  kv('root', root);
+  kv('本期累计总额（raw）', totalRaw + '（' + formatTokens(totalRaw) + ' A9）');
+
+  let balance = null;
+  if (jettonMaster && execute) {
+    try {
+      const wallet = await findJettonWallet(params, jettonMaster, distributor);
+      balance = wallet && wallet.balanceRaw ? asBigInt(wallet.balanceRaw, 'distributor balance') : null;
+    } catch (error) {
+      warn('分发合约 A9 余额读取失败：' + String(error.message || error));
+    }
+  }
+  kv('分发合约 A9 余额', balance === null ? (execute ? '（未读取）' : '（dry-run 不读链；EXECUTE 时强制核对）') : formatTokens(balance.toString()) + ' A9');
+  if (execute && balance === null) {
+    fail('无法读取分发合约 A9 余额：拒绝在余额未知时发布根（确认 TON Center 可用后重试）');
+    process.exit(finish());
+  }
+  let totalPaidRaw = null;
+  if (execute) {
+    try {
+      const distributorState = await runGetMethod(params, distributor, 'get_distributor');
+      totalPaidRaw = stackItemToBigInt((distributorState.stack || [])[3]);
+    } catch (error) {
+      warn('分发合约 totalPaidRaw 读取失败：' + String(error.message || error));
+    }
+    if (totalPaidRaw === null) {
+      fail('无法读取分发合约 totalPaidRaw（get_distributor）：拒绝在未知已领取额时发布根');
+      process.exit(finish());
+    }
+  }
+  kv('分发合约已领取总额 totalPaidRaw', totalPaidRaw === null ? '（dry-run 不读链；EXECUTE 时强制核对）' : totalPaidRaw.toString() + '（' + formatTokens(totalPaidRaw.toString()) + ' A9）');
+  // 注资差额 = 本期累计总额 − 已领取总额；余额只需覆盖未领取部分
+  const shortfall = balance !== null && balance + (totalPaidRaw ?? 0n) < BigInt(totalRaw);
+  if (shortfall) {
+    const message = '分发合约 A9 余额 ' + balance + ' + 已领取 ' + (totalPaidRaw ?? 0n) + ' < 本期累计总额 ' + totalRaw + '：先充值差额再发布根';
+    if (execute) { fail(message); process.exit(finish()); }
+    warn(message + '（dry-run 继续）');
+  }
+
+  const rendered = substitute(commandTemplate(params, 'junxiangSetRoot'), {
+    contractsDir: params.toolchain.contractsDir,
+    signerWallet: signer,
+    junxiangDistributor: distributor,
+    listId: listRaw,
+    rootHex: root,
+  });
+  section('执行计划');
+  detail('dest=' + distributor + ' op=junxiang-set-root opcode=0x4a580001 listId=' + listRaw + ' signer=' + signer);
+  detail('命令：' + rendered);
+  if (!execute) {
+    detail('dry-run：不广播。真实执行：OPS_EXECUTE=1 OPS_CONFIRM=YES node scripts/80_admin_ops.mjs --action junxiang-set-root --list ' + listRaw + ' --root ' + root + ' --total ' + totalRaw);
+    printNextSteps(['先确认分发合约 A9 余额 ≥ 累计总额，再发布；发布后用 get_distributor 核对 listId 与 root。']);
+    process.exit(finish({ 结果: 'DRY_RUN', 动作: action }));
+  }
+  const result = runCommand(rendered, { execute: true });
+  if (result.status !== 0) {
+    fail('军饷根发布失败（exit ' + result.status + '）：' + (result.stderr || result.stdout).slice(0, 500));
+    process.exit(finish({ 结果: 'FAILED', 动作: action }));
+  }
+  ok('军饷根已提交：listId=' + listRaw + '（等待链上确认后用 get_distributor 核对）');
+  registry.notes = Array.isArray(registry.notes) ? registry.notes : (registry.notes ? [String(registry.notes)] : []);
+  registry.notes.push(new Date().toISOString() + ' junxiang-set-root listId=' + listRaw + ' total=' + totalRaw);
+  process.exit(finish({ 结果: 'SUBMITTED', 动作: action }));
+}
+
+if (action === 'junxiang-set-root') {
+  await handleJunxiangSetRoot();
+}
+
 const extraParts = [];
 if (action === 'open-round') {
   const twap = str(args, 'twap24h', '0');
   extraParts.push(twap);
   detail('admin_op 位置参数：open-round <roundId> <twap24h>；target = max(P0×2^tier, 2×TWAP24h)，TWAP24h 由 keeper 提供。');
 }
-if (action === 'close-staking') extraParts.push('0'); // v10 忽略 twap1h
-if (action === 'abort-technical' || action === 'retry-settlement') extraParts.push('0');
+if (action === 'close-staking') extraParts.push('0'); // v11 忽略 twap1h
+if (action === 'abort-technical' || action === 'retry-settlement' || action === 'release-team') extraParts.push('0');
 detail('dest=' + controller + ' op=' + action + ' round=' + (roundId || 0) + ' value/extra=' + (extraParts.join(' ') || '（无）') + ' signer=' + signer);
 
 if (!hasCommand(params, 'adminOp')) {

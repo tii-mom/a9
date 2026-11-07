@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * verify_deployment — 部署验收（v10）：离线不变量 + 链上只读核对（--offline 跳过网络）。
+ * verify_deployment — 部署验收（v11）：离线不变量 + 链上只读核对（--offline 跳过网络）。
+ * v11 追加：RC 的 StakeTicket code hash；军饷分发合约（JunxiangDistributor）的激活、code hash、publisher、Jetton Wallet 推导。
  *
  * 默认 STRICT（严格）模式：开轮前必检项必须全部 PASS——协议配置 17 项 + 5 个地址槽（keeper /
  * jettonMaster / RC 钱包 / teamWallet）、RC 与 Jetton Wallet code hash、RC 钱包推导一致、
@@ -138,7 +139,7 @@ if (!offline) {
     });
   }
 
-  // v10：RC 在链上自行推导 Jetton Wallet；master.get_wallet_address(RC) 与 RC.get_jetton_wallet_address() 必须一致
+  // v11：RC 在链上自行推导 Jetton Wallet；master.get_wallet_address(RC) 与 RC.get_jetton_wallet_address() 必须一致
   if (jettonMaster && controller) {
     await netCheck('jetton.wallet.rc', async () => {
       const wallet = await findJettonWallet(params, jettonMaster, controller);
@@ -223,7 +224,7 @@ if (!offline) {
       const shapeOk = stack.length >= 22;
       addRequired('rc.get_protocol_config.shape', gateStatus(shapeOk), '栈长度 ' + stack.length + '（期望 ≥22）' + (shapeOk ? '' : '：配置项无法比对'));
       if (!shapeOk) return;
-      // v10 槽位（沿用 v8.9 形状）：0、1 = keeper，2 = jettonMaster，3 = RC 钱包，4 = teamWallet
+      // v11 槽位（沿用 v8 形状，ProtocolConfigView 字段顺序未变）：0、1 = keeper，2 = jettonMaster，3 = RC 钱包，4 = teamWallet
       for (const [index, key, expected] of [[0, 'keeper', keeper], [1, 'keeper.oracleSlot', keeper], [2, 'jettonMaster', jettonMaster], [3, 'stakingJettonWallet', rcWallet], [4, 'teamWallet', teamWallet]]) {
         const result = sameAddress(stack[index], expected);
         addRequired('rc.address.' + key, gateStatus(result.same), '链上 ' + result.onchain + ' vs registry ' + result.expected);
@@ -269,6 +270,64 @@ if (!offline) {
   }
 }
 
+// v11：军饷分发合约（JunxiangDistributor + ClaimRecord）与 RC 的 StakeTicket 代码哈希（contracts/README §6、§7.1）。
+// 分发合约不在部署时注资：这里只核对代码、publisher、钱包推导与余额（余额仅提示，周根发布前由运维充值）。
+if (!offline) {
+  const guard = async (name, fn) => {
+    try { await fn(); } catch (error) { add(check(name, strict ? CHECK_STATUS.FAIL : CHECK_STATUS.WARN, '读取失败：' + String(error.message || error).slice(0, 200))); }
+  };
+  const distributorAddr = resolveContractAddress(registry, 'junxiangDistributor');
+  const distributorWalletAddr = resolveContractAddress(registry, 'junxiangDistributorJettonWallet');
+  const publisher = resolveWalletAddress(registry, 'junxiangPublisher') || keeper;
+  section('链上只读核对（v11：攻城令 / 军饷分发）');
+  if (controller) {
+    await guard('rc.ticket_code_hash', async () => {
+      const expectedHash = loadBuildCodeHash('StakeTicket');
+      const result = await runGetMethod(params, controller, 'get_ticket_code_hash');
+      const actual = stackItemToBigInt((result.stack || [])[0]);
+      const actualHex = actual === null ? null : actual.toString(16).padStart(64, '0').slice(-64).toLowerCase();
+      addRequired('rc.ticket_code_hash', gateStatus(Boolean(actualHex && expectedHash && actualHex === expectedHash)), actualHex
+        ? '链上 0x' + actualHex + ' vs contracts/build ' + (expectedHash || '?') + '（攻城令地址由它推导）'
+        : 'getter 返回值无法解析为 uint256');
+    });
+  }
+  if (distributorAddr) {
+    await guard('account.junxiangDistributor', async () => {
+      const info = await getAddressInformation(params, distributorAddr);
+      const state = String(info.state || 'unknown');
+      addRequired('account.junxiangDistributor', gateStatus(state === 'active'), 'state=' + state + ' balance=' + info.balance);
+      const actual = hexFromCodeHashField(info) || codeHashViaActon(distributorAddr);
+      const expected = loadBuildCodeHash('JunxiangDistributor');
+      addRequired('junxiang.distributor.code_hash', gateStatus(Boolean(actual && expected && actual === expected)), actual
+        ? '链上 ' + actual + ' vs contracts/build ' + (expected || '?')
+        : '无法读取线上 code hash');
+    });
+    await guard('junxiang.distributor.publisher', async () => {
+      const result = await runGetMethod(params, distributorAddr, 'get_distributor');
+      const stack = result.stack || [];
+      const onchainPublisher = addressFromStackItem(stack[0]);
+      const expectedPublisher = publisher ? parseAddress(publisher) : null;
+      const samePublisher = Boolean(onchainPublisher && expectedPublisher && expectedPublisher.ok
+        && onchainPublisher.wc === expectedPublisher.workchain && onchainPublisher.hashHex.toLowerCase() === expectedPublisher.hashHex.toLowerCase());
+      addRequired('junxiang.distributor.publisher', gateStatus(samePublisher), '链上 publisher ' + (onchainPublisher ? onchainPublisher.wc + ':' + onchainPublisher.hashHex : '无法解析') + ' vs registry/keeper ' + (publisher || '未登记'));
+      const listId = stackItemToBigInt(stack[2]);
+      const total = stackItemToBigInt(stack[3]);
+      add(check('junxiang.distributor.state', CHECK_STATUS.PASS, 'listId=' + (listId === null ? '?' : listId.toString()) + ' totalPaidRaw=' + (total === null ? '?' : total.toString()) + '（未发布周根时 listId=0）'));
+    });
+    await guard('junxiang.distributor.jetton_wallet', async () => {
+      if (!jettonMaster) return;
+      const wallet = await findJettonWallet(params, jettonMaster, distributorAddr);
+      const viaMaster = wallet ? wallet.address : canonicalViaActon(jettonMaster, distributorAddr);
+      const registryOk = Boolean(viaMaster && distributorWalletAddr && addressEquals(viaMaster, distributorWalletAddr));
+      addRequired('junxiang.distributor.jetton_wallet', gateStatus(registryOk), 'master.get_wallet_address(distributor)=' + (viaMaster || '未解析') + '；registry=' + (distributorWalletAddr || '未登记'));
+      if (viaMaster) {
+        const balance = await getJettonWalletBalance(params, viaMaster);
+        add(check('junxiang.distributor.balance', CHECK_STATUS.PASS, (balance === null ? '未读取' : formatTokens(balance.toString()) + ' A9') + '（发布任一周根前必须 ≥ 本期累计总额；未发布时为 0 属正常）'));
+      }
+    });
+  }
+}
+
 section('验收结果');
 
 // 必检项覆盖审计：即使没有 FAIL，也必须确认「关键分支真的执行过」，防止栈异常跳过后静默通过。
@@ -276,10 +335,15 @@ const REQUIRED_FAMILIES = [
   { key: 'rc.get_protocol_config.shape', min: 1, label: 'get_protocol_config 结构' },
   { key: 'rc.config.', min: 17, label: '协议配置 17 项', prefix: true },
   { key: 'rc.jetton_wallet_code_hash', min: 1, label: 'Jetton Wallet code hash' },
+  { key: 'rc.ticket_code_hash', min: 1, label: 'StakeTicket code hash（攻城令）' },
   { key: 'rc.round1.shape', min: 1, label: 'get_round(1) 结构' },
   { key: 'rc.address.', min: 5, label: 'keeper / jettonMaster / RC 钱包 / teamWallet 地址比对', prefix: true },
   { key: 'jetton.wallet.rc', min: 1, label: 'RC 钱包推导一致' },
   { key: 'rc.vault.balance', min: 1, label: 'RC 82 亿注资' },
+  { key: 'account.junxiangDistributor', min: 1, label: '军饷分发合约已激活' },
+  { key: 'junxiang.distributor.code_hash', min: 1, label: '军饷分发合约 code hash' },
+  { key: 'junxiang.distributor.publisher', min: 1, label: '军饷 publisher 一致' },
+  { key: 'junxiang.distributor.jetton_wallet', min: 1, label: '军饷分发 Jetton Wallet 推导一致' },
 ];
 if (offline) {
   info('OFFLINE：链上必检项未执行（离线验收不构成开轮依据，开轮前必须再跑 --online）。');

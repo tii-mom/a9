@@ -10,9 +10,10 @@
  */
 
 export { ChainMePanel } from './ChainMePanel';
+export { JunxiangCard } from './JunxiangCard';
+export type { JunxiangCardProps } from './JunxiangCard';
+export { prepareJunxiangClaimTransaction, buildClaimJunxiangBody, buildProofCell } from './junxiang';
 export type { ChainMePanelProps } from './ChainMePanel';
-export { RefundClaimPanel } from './RefundClaimPanel';
-export type { RefundClaimPanelProps } from './RefundClaimPanel';
 export { TxStatusView } from './TxStatus';
 export type { TxStatusProps } from './TxStatus';
 
@@ -26,7 +27,7 @@ export type {
   ChainTxResult,
   ChainTxState,
   SubmitStakeParams,
-  SubmitClaimParams,
+  SubmitTicketParams,
   UseChainTx,
 } from './useChainTx';
 
@@ -40,22 +41,25 @@ export {
   ACCEPT_FULL_PRINCIPAL_BURN,
   DEFAULT_FORWARD_TON_NANO,
   DEFAULT_STAKE_MESSAGE_TON_NANO,
-  DEFAULT_CLAIM_MESSAGE_TON_NANO,
+  DEFAULT_TICKET_CLAIM_TON_NANO,
+  DEFAULT_TICKET_RESTAKE_TON_NANO,
+  DEFAULT_MIN_STAKE_TOKENS,
   MIN_STAKE_TON_BALANCE,
   MIN_CLAIM_TON_BALANCE,
-  nextDepositNonce,
+  MIN_RESTAKE_TON_BALANCE,
+  TIMING_BPS,
+  IMMEDIATE_REWARD_BPS,
   nextQueryId,
   EVENT_OPCODES,
   GET_METHODS,
-  REFUND_ROUND_ID,
 } from './protocol';
 
 export {
   buildStakePayloadCell,
   buildJettonTransferCell,
-  buildClaimPayloadCell,
+  buildTicketPayloadCell,
 } from './payload';
-export type { StakePayloadParams, JettonTransferParams, ClaimPayloadParams } from './payload';
+export type { StakePayloadParams, JettonTransferParams, TicketPayloadParams } from './payload';
 export { beginCell, serializeCellToBoc, toBocBase64, parseBocBase64, CellSlice } from './cell';
 export type { ChainCell, ParsedCell } from './cell';
 export { parseTonAddress, toFriendlyAddress, toRawAddress, shortenAddress, looksLikeRawAddress } from './address';
@@ -67,22 +71,29 @@ export type { ChainErrorCode } from './errors';
 
 export {
   prepareStakeTransaction,
-  prepareClaimTransaction,
-  prepareClaimRefundTransaction,
+  prepareTicketClaimTransaction,
+  prepareTicketRestakeTransaction,
   validateStake,
   validateClaim,
+  validateRestake,
   tonBalanceToNumber,
 } from './transactions';
 export type {
-  ClaimKind,
   PreparedTx,
   TonConnectMessage,
   TonConnectTxRequest,
   WalletContext,
 } from './transactions';
 
-export { resolveJettonWalletAddress, fetchRecentTransactions, waitForTransaction, fetchRefundLedger, parseRefundLedgerStack } from './rpc';
-export type { OnchainTx, RefundLedgerView, ResolvedJettonWallet, WaitForTxOptions, WaitForTxResult } from './rpc';
+export {
+  resolveJettonWalletAddress,
+  fetchRecentTransactions,
+  waitForTransaction,
+  fetchTicketAddress,
+  fetchTicketState,
+  fetchRewardPreview,
+} from './rpc';
+export type { OnchainTx, TicketStateView, RewardPreviewView, ResolvedJettonWallet, WaitForTxOptions, WaitForTxResult } from './rpc';
 export {
   decodeStakePayload,
   decodeJettonNotification,

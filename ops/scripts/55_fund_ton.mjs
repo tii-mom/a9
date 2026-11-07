@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** 55 — TON gas 充值（v10）：RoundController ≥ roundControllerMinTon、keeper 钱包 ≥ keeperMinTon。 */
+/** 55 — TON gas 充值（v11）：RoundController ≥ roundControllerMinTon、keeper 钱包 ≥ keeperMinTon。 */
 
 import { requireConfirm, str } from './lib/cli.mjs';
 import { bootstrap, finish, printNextSteps, resolveAddress, resolveWalletAddress, signerWallet } from './lib/step.mjs';

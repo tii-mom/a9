@@ -37,6 +37,8 @@ export interface Env {
   DEMO_ALLOW_UNSIGNED_WRITES?: string;
   /** ton_proof 允许的 domain（逗号分隔，大小写不敏感） */
   TON_PROOF_DOMAINS?: string;
+  /** 会话 token（HMAC-SHA256）签名密钥，wrangler secret 注入；缺失时 POST /api/auth/session 返回 500 */
+  SESSION_SECRET?: string;
   /** 限流阈值：每个 IP+路径 每分钟请求数（默认 30；admin/stake/claim） */
   RATE_LIMIT_PER_MINUTE?: string;
   /** /api/auth/nonce 单独更低配额（默认 10/min） */
@@ -56,6 +58,8 @@ export interface Env {
   /** 'mainnet' | 'testnet' */
   CHAIN_NETWORK?: string;
   ROUND_CONTROLLER_ADDRESS?: string;
+  /** v11 军饷分发合约（可选；未配置或占位符时前端隐藏领取入口） */
+  JUNXIANG_DISTRIBUTOR_ADDRESS?: string;
   /** v10：团队收款钱包（与 get_protocol_config 的 teamVault 槽比对） */
   TEAM_WALLET_ADDRESS?: string;
   /** v10：唯一 keeper（与 get_protocol_config 的 admin/oracle 槽比对） */

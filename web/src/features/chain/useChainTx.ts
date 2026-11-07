@@ -11,17 +11,17 @@ import type { ChainConfig } from './config';
 import { explorerTxUrl } from './config';
 import { decodeJettonNotification } from './decode';
 import { ChainError, chainError, exitCodeError, toChainError } from './errors';
-import { RECEIPT_POLL_INTERVAL_MS, RECEIPT_TIMEOUT_MS, REFUND_ROUND_ID } from './protocol';
+import { RECEIPT_POLL_INTERVAL_MS, RECEIPT_TIMEOUT_MS } from './protocol';
 import { matchesUserAction, resolveJettonWalletAddress, waitForTransaction } from './rpc';
 import { saveChainTx, type StoredChainTx } from './storage';
 import {
-  prepareClaimRefundTransaction,
-  prepareClaimTransaction,
   prepareStakeTransaction,
+  prepareTicketClaimTransaction,
+  prepareTicketRestakeTransaction,
   validateClaim,
+  validateRestake,
   validateStake,
   type ChainTxKind,
-  type ClaimKind,
   type PreparedTx,
   type TonConnectTxRequest,
   type WalletContext,
@@ -80,12 +80,14 @@ export interface ChainTxOptions {
 export interface SubmitStakeParams {
   round: RoundSummary;
   amountRaw: bigint;
-  myStakeRaw?: bigint;
+  /** 受益人（一键上车）；缺省 = 本人 */
+  beneficiary?: string | null;
 }
 
-export interface SubmitClaimParams {
-  kind: ClaimKind;
-  roundId?: number | null;
+/** 攻城令操作（领取 / 一键续战）：轮次 + 该轮攻城令地址（由 RPC get_ticket_address 给出）。 */
+export interface SubmitTicketParams {
+  roundId: number;
+  ticketAddress: string;
 }
 
 interface RunContext {
@@ -108,18 +110,18 @@ export interface UseChainTx {
   state: ChainTxState;
   busy: boolean;
   submitStake: (params: SubmitStakeParams) => Promise<ChainTxResult | null>;
-  submitClaim: (params: SubmitClaimParams) => Promise<ChainTxResult | null>;
-  /** 领取退款账本（Claim{roundId:0}） */
-  submitClaimRefund: () => Promise<ChainTxResult | null>;
+  /** 攻城令领取：本金（+ 立即 20%）与已解锁的压城奖励 */
+  submitTicketClaim: (params: SubmitTicketParams) => Promise<ChainTxResult | null>;
+  /** 攻城令一键续战：本金滚入当前攻城城（仅攻城窗口内、本金未领取） */
+  submitTicketRestake: (params: SubmitTicketParams) => Promise<ChainTxResult | null>;
   recheck: () => Promise<ChainTxResult | null>;
   reset: () => void;
 }
 
 const KIND_LABEL: Record<ChainTxKind, string> = {
-  stake: '质押',
-  claim: '领取本金 + 奖励',
-  claimAll: '合并领取',
-  claimRefund: '取回 A9',
+  stake: '攻城上车',
+  ticketClaim: '领取本金 + 奖励',
+  ticketRestake: '一键续战',
 };
 
 const activeWallets = new Set<string>();
@@ -291,13 +293,7 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     async (params: SubmitStakeParams) => {
       const { chain, wallet } = optionsRef.current;
       return begin('stake', { roundId: params.round.roundId, amountRaw: params.amountRaw.toString() }, async () => {
-        validateStake({
-          chain,
-          wallet,
-          round: params.round,
-          amountRaw: params.amountRaw,
-          myStakeRaw: params.myStakeRaw,
-        });
+        validateStake({ chain, wallet, round: params.round, amountRaw: params.amountRaw });
         if (!chain.roundController || !chain.jettonMaster) throw chainError('CHAIN_NOT_CONFIGURED');
         const jettonWallet = await resolveJettonWalletAddress({
           chain,
@@ -311,12 +307,16 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
           amountRaw: params.amountRaw,
           riskDisclosureVersion: chain.riskDisclosureVersion,
           jettonWalletFriendly: jettonWallet.friendly,
+          beneficiary: params.beneficiary ?? null,
         });
-        const nonce = prepared.meta.depositNonce ? BigInt(prepared.meta.depositNonce) : null;
+        const userRaw = toRawAddress(parseTonAddress(wallet.address));
+        const roundId = params.round.roundId;
+        const amount = params.amountRaw;
+        // 身份 + 轮次 + 金额匹配 transfer_notification（v11 无 depositNonce）
         const match = (tx: import('./rpc').OnchainTx): boolean => {
           const notification = decodeJettonNotification(tx.inBody);
           if (!notification?.stake) return false;
-          return nonce !== null && notification.stake.depositNonce === nonce;
+          return notification.stake.roundId === roundId && notification.amountRaw === amount && (notification.sender ? toRawAddress(notification.sender) : null) === userRaw;
         };
         return { kind: 'stake', prepared, match } satisfies RunContext;
       });
@@ -324,51 +324,35 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     [begin],
   );
 
-  const submitClaim = useCallback(
-    async (params: SubmitClaimParams) => {
+  const submitTicketClaim = useCallback(
+    async (params: SubmitTicketParams) => {
       const { chain, wallet } = optionsRef.current;
-      return begin(params.kind, { roundId: params.kind === 'claimAll' ? 0 : Number(params.roundId ?? 0) }, async () => {
+      return begin('ticketClaim', { roundId: params.roundId }, async () => {
         validateClaim({ chain, wallet });
-        const prepared = prepareClaimTransaction({
-          chain,
-          wallet,
-          kind: params.kind,
-          roundId: params.roundId ?? 0,
-        });
-        const expectedOp = prepared.meta.opcode;
-        const expectedRound = prepared.meta.roundId ?? 0;
+        const prepared = prepareTicketClaimTransaction({ chain, wallet, roundId: params.roundId, ticketAddress: params.ticketAddress });
         const userRaw = toRawAddress(parseTonAddress(wallet.address));
         const match = (tx: import('./rpc').OnchainTx): boolean =>
-          matchesUserAction(tx, {
-            sourceRaw: userRaw,
-            op: expectedOp,
-            roundId: expectedRound,
-            // 快速重试时区分本次与上一笔：必须带本次 queryId
-            queryId: queryIdOf(prepared),
-          });
-        return { kind: params.kind, prepared, match } satisfies RunContext;
+          matchesUserAction(tx, { sourceRaw: userRaw, op: prepared.meta.opcode, queryId: queryIdOf(prepared) });
+        return { kind: 'ticketClaim', prepared, match } satisfies RunContext;
       });
     },
     [begin],
   );
 
-  const submitClaimRefund = useCallback(async () => {
-    const { chain, wallet } = optionsRef.current;
-    return begin('claimRefund', { roundId: REFUND_ROUND_ID }, async () => {
-      validateClaim({ chain, wallet });
-      const prepared = prepareClaimRefundTransaction({ chain, wallet });
-      const userRaw = toRawAddress(parseTonAddress(wallet.address));
-      // FIX-5：身份匹配必须带本次 queryId；成功判定由 waitForTransaction 的 aborted/exit_code 门负责
-      const match = (tx: import('./rpc').OnchainTx): boolean =>
-        matchesUserAction(tx, {
-          sourceRaw: userRaw,
-          op: prepared.meta.opcode,
-          roundId: REFUND_ROUND_ID,
-          queryId: queryIdOf(prepared),
-        });
-      return { kind: 'claimRefund', prepared, match } satisfies RunContext;
-    });
-  }, [begin]);
+  const submitTicketRestake = useCallback(
+    async (params: SubmitTicketParams) => {
+      const { chain, wallet } = optionsRef.current;
+      return begin('ticketRestake', { roundId: params.roundId }, async () => {
+        validateRestake({ chain, wallet });
+        const prepared = prepareTicketRestakeTransaction({ chain, wallet, roundId: params.roundId, ticketAddress: params.ticketAddress });
+        const userRaw = toRawAddress(parseTonAddress(wallet.address));
+        const match = (tx: import('./rpc').OnchainTx): boolean =>
+          matchesUserAction(tx, { sourceRaw: userRaw, op: prepared.meta.opcode, queryId: queryIdOf(prepared) });
+        return { kind: 'ticketRestake', prepared, match } satisfies RunContext;
+      });
+    },
+    [begin],
+  );
 
   const recheck = useCallback(async () => {
     const saved = recoveryRef.current;
@@ -391,8 +375,8 @@ export function useChainTx(options: ChainTxOptions): UseChainTx {
     state,
     busy,
     submitStake,
-    submitClaim,
-    submitClaimRefund,
+    submitTicketClaim,
+    submitTicketRestake,
     recheck,
     reset,
   };

@@ -3,7 +3,7 @@ import { formatToken, shortAddress } from '../../lib/format';
 import { useLang } from '../../lib/lang';
 import { connect, connectDemo, disconnect, refreshBalances, resetDemoWallet } from './store';
 import { DEMO_WALLET_ENABLED } from './flags';
-import { useWalletStore } from './useWallet';
+import { useWallet, useWalletStore } from './useWallet';
 import './wallet.css';
 
 const TOKEN_DECIMALS = 9;
@@ -35,6 +35,9 @@ interface Dict {
   fallbackUnavailable: string;
   fallbackFailed: string;
   disconnectHint: string;
+  signInPrompt: string;
+  signInHint: string;
+  signInAction: string;
 }
 
 const DICT: Record<'zh' | 'en', Dict> = {
@@ -65,6 +68,9 @@ const DICT: Record<'zh' | 'en', Dict> = {
     fallbackUnavailable: '当前无法使用 TON Connect。请重试，或主动选择演示。',
     fallbackFailed: '连接失败，仍未连接钱包。请重试。',
     disconnectHint: '断开后地址与余额将被清空。',
+    signInPrompt: '签名登录',
+    signInHint: '写操作需要先用钱包签名确认身份，签名一次可用 7 天。',
+    signInAction: '去签名',
   },
   en: {
     connect: 'Connect',
@@ -93,6 +99,9 @@ const DICT: Record<'zh' | 'en', Dict> = {
     fallbackUnavailable: 'TON Connect is unavailable. Retry or choose demo explicitly.',
     fallbackFailed: 'Connection failed. No wallet connected. Please retry.',
     disconnectHint: 'Disconnecting clears the address and balances.',
+    signInPrompt: 'Sign in',
+    signInHint: 'Writes need a one-time wallet signature to confirm your identity. It lasts 7 days.',
+    signInAction: 'Sign now',
   },
 };
 
@@ -107,6 +116,7 @@ export function WalletButton() {
   const { lang } = useLang();
   const d = DICT[lang];
   const wallet = useWalletStore();
+  const { signIn } = useWallet();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -185,8 +195,16 @@ export function WalletButton() {
   const fuseBalance = wallet.fuseBalance ? `${formatToken(wallet.fuseBalance, TOKEN_DECIMALS)} A9` : null;
   const notice = fallbackText(wallet.notice, d);
 
+  // 写操作在无会话时发出过，才提示签名登录（不打扰只读浏览）
+  const showSignInPrompt = connected && wallet.mode === 'ton' && wallet.signInRequested && !wallet.hasSession;
+
   const node = (
     <div className="wl" ref={rootRef}>
+      {showSignInPrompt && (
+        <button className="btn fire sm wl-signin" type="button" title={d.signInHint} onClick={() => { setOpen(false); signIn(); }}>
+          {d.signInPrompt}
+        </button>
+      )}
       <button
         className={`btn ${connected ? 'ghost' : 'fire'} sm wl-trigger`}
         type="button"
@@ -229,6 +247,14 @@ export function WalletButton() {
           ) : (
             <>
               {wallet.mode === 'demo' ? <div className="wl-notice">{d.demoHint}</div> : null}
+              {showSignInPrompt ? (
+                <div className="wl-notice" role="status">
+                  <span>{d.signInHint}</span>{' '}
+                  <button className="wl-link" type="button" onClick={() => { setOpen(false); signIn(); }}>
+                    {d.signInAction}
+                  </button>
+                </div>
+              ) : null}
               <div className="wl-kv">
                 <span>{d.address}</span>
                 <code title={wallet.address ?? ''}>{shortAddress(wallet.address ?? '', 8, 6)}</code>

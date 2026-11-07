@@ -1,19 +1,22 @@
 {
-  "说明": "人工填写模板（v10）：所有地址必须由项目方/部署者提供并确认。钱包地址用 node ops/scripts/00_preflight.mjs 检查后写入 ops/config/testnet.registry.json 的 wallets；合约地址由 15_deploy_contracts.mjs 解析登记（或 10/30 的 --adopt）。",
+  "说明": "人工填写模板（v11）：所有地址必须由项目方/部署者提供并确认。钱包地址用 node ops/scripts/00_preflight.mjs 检查后写入 ops/config/testnet.registry.json 的 wallets；合约地址由 15_deploy_contracts.mjs 解析登记（或 30 的 --adopt）。",
   "network": "testnet",
   "chainId": -3,
   "paramsDigest": "（由 60_verify_and_register.mjs 自动写入）",
   "contracts": {
-    "jettonMaster": "（15 整体部署或 10 分步部署后登记）",
+    "jettonMaster": "（15 整体部署后登记）",
     "jettonMasterTreasuryWallet": "（可自动解析）",
     "roundController": "（15 整体部署后登记；无 admin、不可升级）",
     "roundControllerJettonWallet": "（15 部署时由 RC.get_jetton_wallet_address 与 master.get_wallet_address(RC) 双重核对；托管 82 亿 + 质押本金）",
-    "teamWalletJettonWallet": "（teamWallet 首次收到团队额度后可解析）"
+    "teamWalletJettonWallet": "（teamWallet 首次收到团队额度后可解析）",
+    "junxiangDistributor": "（15 整体部署时登记；累计默克尔分发合约，无 admin）",
+    "junxiangDistributorJettonWallet": "（分发合约的 A9 钱包：部署后不注资，每次发布新根前由运维充值）"
   },
   "wallets": {
     "keeper": "（keeper 热钱包：OpenRound / SubmitCandle；写入 RC 初始数据，永久不可更换；只放 gas）",
     "treasury": "（一次性铸造 100 亿的接收地址；注资 RC 82 亿并分配 8/5/5 后归零）",
-    "teamWallet": "（团队收款钱包；写入 RC 初始数据，成功轮由 RC 直接转 1.2 亿；不公开）",
+    "teamWallet": "（团队收款钱包；写入 RC 初始数据，破城轮 RC 转 1.2 亿；不公开）",
+    "junxiangPublisher": "（军饷 publisher 热钱包：发布周根；默认与 keeper 相同，只放 gas；写入分发合约，部署后不可改）",
     "marketingWallet": "（营销 5 亿热钱包；不公开）",
     "liquidityWallet": "（流动性 5 亿热钱包；不公开）",
     "teamInternalWallet": "（团队内盘管理钱包；公开可查）"

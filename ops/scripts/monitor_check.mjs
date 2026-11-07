@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * monitor_check — 监控检查与告警（v10）：worker 健康、K 线缺失、报名/判定超时、结算退回（SettlementBounced →
+ * monitor_check — 监控检查与告警（v11）：worker 健康、K 线缺失、报名/判定超时、结算退回（SettlementBounced →
  * RetrySettlement）、UnexpectedBounce、一笔销毁金额、团队释放、供应量漂移、RC 钱包公式、keeper gas、运维事件。
  *
  * 数据源：--snapshot <json>（离线）或 worker API；--chain 额外读链上（RC 事件、get_round 结算标志、RC 钱包余额、keeper TON）。
@@ -8,12 +8,12 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asBigInt, loadAndValidate } from './lib/config.mjs';
+import { asBigInt, loadAndValidate, RECORDS_DIR, networkName } from './lib/config.mjs';
 import { loadRegistry } from './lib/registry.mjs';
-import { expectedRcVault, expectedSettlement, pendingSettlementActions } from './lib/ledger.mjs';
+import { expectedRcVault, expectedSettlementFor, pendingSettlementActions } from './lib/ledger.mjs';
 import { fetchRcEvents, getJettonWalletBalance, getRoundView, getTonBalance } from './lib/ton.mjs';
 import { section, kv, ok, fail, warn, info, table, summary, detail } from './lib/log.mjs';
 
@@ -163,13 +163,13 @@ for (const round of rounds) {
     }
     if (round.observationEnd && now > Number(round.observationEnd) + GRACE_MS) {
       const abortable = now > Number(round.observationEnd) + ABORT_MS;
-      add('round.' + roundId + '.settle_overdue', abortable ? 'P0' : 'P1', 'R' + roundId + ' 观察结束未判定', abortable ? '已超过 7 天：任何人可 AbortTechnical（本金可领）' : 'observationEnd 已过 1h 仍为 OBSERVING：keeper 未提交满 24 根 K 线', RB + '#P1');
+      add('round.' + roundId + '.settle_overdue', abortable ? 'P0' : 'P1', 'R' + roundId + ' 观察结束未判定', abortable ? '已超过技术终止超时：任何人可 AbortTechnical（本金经攻城令领取）' : 'observationEnd 已过 1h 仍为 OBSERVING：keeper 未提交满 24 根 K 线', RB + '#P1');
     }
   }
   if (['STAKING_OPEN', 'OBSERVING'].includes(state) && (round.updatedAt || 0) && now - Number(round.updatedAt) > 15 * 60000) {
     add('round.' + roundId + '.stale', 'P2', 'R' + roundId + ' 数据 15 分钟未更新', '前端/索引可能停更', RB + '#P2');
   }
-  const settlement = expectedSettlement(params, state, round.totalAcceptedStakeRaw);
+  const settlement = expectedSettlementFor(params, rounds, round);
   if (settlement) {
     const burned = round.burnedRaw === null || round.burnedRaw === undefined ? null : asBigInt(round.burnedRaw);
     if (burned !== null && burned !== settlement.burnRaw) {
@@ -217,14 +217,14 @@ if (chain) {
       const drift = asBigInt(chain.rcJettonBalanceRaw) - vault.expected;
       // 正偏差 = 零头 / 奖励尾差（合约内留存，允许）；负偏差 = 资金缺口
       record('rc.vault', drift >= 0n, () => add('rc.vault.drift', 'P0', 'RC 钱包余额低于公式值', 'actual=' + chain.rcJettonBalanceRaw + ' expected=' + vault.expected + ' drift=' + drift, RB + '#reconcile'));
-      if (drift > 0n) info('RC 钱包比公式多 ' + drift + ' raw（低于 10 万零头 / 奖励尾差，留在 RC，属预期）');
+      if (drift > 0n) info('RC 钱包比公式多 ' + drift + ' raw（奖励按战力分配的向下取整尾差，留在 RC，属预期）');
     }
   }
 }
 
 if (stats.nextStakeOpenAt && now > Number(stats.nextStakeOpenAt) + GRACE_MS) {
   const abortable = now > Number(stats.nextStakeOpenAt) + ABORT_MS;
-  add('next_round.overdue', abortable ? 'P0' : 'P1', '下一轮未按预告开启', abortable ? '预告结束已超过 7 天：任何人可 AbortTechnical（keeper 失联）' : 'nextStakeOpenAt 已过 1h：keeper 未发 OpenRound', 'runbooks/03_monitoring_alerting.md#P1');
+  add('next_round.overdue', abortable ? 'P0' : 'P1', '下一轮未按预告开启', abortable ? '预告结束已超过技术终止超时：任何人可 AbortTechnical（keeper 失联）' : 'nextStakeOpenAt 已过 1h：keeper 未发 OpenRound', 'runbooks/03_monitoring_alerting.md#P1');
 }
 
 if (data.admin) {
@@ -238,6 +238,47 @@ if (data.admin) {
   if (warnings.length) add('ops.warn_events', 'P2', '运维/keeper 操作告警', warnings.length + ' 条 warn 事件', 'runbooks/04_key_custody_admin.md#incident');
   if (recent.length && !errors.length && !warnings.length) add('ops.activity', 'P3', '运维/keeper 操作活动', recent.length + ' 条事件（近 ' + windowMinutes + ' 分钟），确认是否为计划内操作', 'runbooks/04_key_custody_admin.md#audit');
   checks.push({ name: 'ops.events', ok: errors.length === 0 });
+}
+
+// ---- keeper liveness / price sampler / keeper alert events (from ops/records, same host as the keeper) ----
+{
+  const net = networkName(params);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const hbFile = RECORDS_DIR + '/keeper-heartbeat-' + net + '.json';
+  const heartbeatMaxSec = Number(getArg('heartbeat-max', '300'));
+  if (existsSync(hbFile)) {
+    const hb = JSON.parse(readFileSync(hbFile, 'utf8'));
+    const age = nowSec - Number(hb.t || 0);
+    record('keeper.heartbeat', age <= heartbeatMaxSec, () => add('keeper.down', 'P0', 'keeper 心跳停止（可能掉线）', '最后心跳 ' + age + 's 前（> ' + heartbeatMaxSec + 's）；K 线/开轮会停，超时将触发技术终止', RB + '#P0'));
+    if (hb.priceSamplesFile && existsSync(hb.priceSamplesFile)) {
+      const lines = readFileSync(hb.priceSamplesFile, 'utf8').trim().split('\n');
+      let lastT = 0;
+      try { lastT = JSON.parse(lines[lines.length - 1]).t; } catch { /* torn line */ }
+      const sampleAge = nowSec - lastT;
+      const maxAge = Math.max(300, 5 * Number(hb.sampleSec || 60));
+      record('price.sampling', sampleAge <= maxAge, () => add('price.sampling_stale', 'P0', '价格采样停止', '最新样本 ' + sampleAge + 's 前（> ' + maxAge + 's）；STON.fi 池或 toncenter 读取失败，K 线 TWAP 覆盖率会下降', RB + '#P0'));
+    }
+  } else if (getArg('expect-keeper')) {
+    add('keeper.down', 'P0', 'keeper 心跳文件不存在', hbFile + ' 缺失：keeper 未启动', RB + '#P0');
+  }
+  // keeper alert events (lines with "alert":true) in its latest log within the ops window
+  const windowSec = Number(thresholds.opsEventWindowMinutes || 15) * 60;
+  const logs = existsSync(RECORDS_DIR) ? readdirSync(RECORDS_DIR).filter((f) => f.startsWith('keeper-candles-') && f.endsWith('.jsonl')).map((f) => RECORDS_DIR + '/' + f) : [];
+  const latest = logs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  if (latest) {
+    const P0_EVENTS = new Set(['price-unavailable', 'open-blocked-low-coverage']);
+    const seen = new Map();
+    for (const line of readFileSync(latest, 'utf8').split('\n')) {
+      if (!line.includes('"alert":true')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (nowSec - Math.floor(Date.parse(e.at) / 1000) <= windowSec) seen.set(e.event, e);
+      } catch { /* skip */ }
+    }
+    for (const [event, e] of seen) {
+      add('keeper.' + event, P0_EVENTS.has(event) ? 'P0' : 'P1', 'keeper 告警：' + event, JSON.stringify(e).slice(0, 300), RB + (P0_EVENTS.has(event) ? '#P0' : '#P1'));
+    }
+  }
 }
 
 const sorted = alerts.sort((a, b) => (levelRank[b.level] || 0) - (levelRank[a.level] || 0));
@@ -257,16 +298,30 @@ if (jsonOut) {
   kv('P3（次工作日）', counts.P3);
 }
 
-if (notify && alerts.length) {
+if (notify) {
   const token = process.env[params.notifications.telegram.botTokenEnv];
   const chatId = process.env[params.notifications.telegram.chatIdEnv];
   if (!token || !chatId) {
+    if (alerts.length)
     warn('--notify 需要 ' + params.notifications.telegram.botTokenEnv + ' 与 ' + params.notifications.telegram.chatIdEnv + '（未设置，跳过发送）');
   } else {
-    const lines = sorted.map((alert) => '[' + alert.level + '] ' + alert.title + ' — ' + alert.detail);
+    const stateFile = RECORDS_DIR + '/monitor-notify-state-' + networkName(params) + '.json';
+    const repeatSec = Number(getArg('repeat-min', '30')) * 60;
+    let state = {};
+    try { state = JSON.parse(readFileSync(stateFile, 'utf8')); } catch { /* first run */ }
+    const tNow = Math.floor(Date.now() / 1000);
+    const due = sorted.filter((a) => !state[a.id] || tNow - state[a.id] >= repeatSec);
+    const active = new Set(sorted.map((a) => a.id));
+    const recovered = Object.keys(state).filter((id) => !active.has(id));
+    const next = {};
+    for (const a of sorted) next[a.id] = due.includes(a) ? tNow : state[a.id];
+    writeFileSync(stateFile, JSON.stringify(next));
+    const lines = due.map((alert) => '[' + alert.level + '] ' + alert.title + ' — ' + alert.detail).concat(recovered.map((id) => '[已恢复] ' + id));
+    if (!lines.length) { if (sorted.length) ok('告警均已发送过（' + repeatSec / 60 + ' 分钟内不重复）'); }
+    else {
     const text = 'A9 ' + (params.__net || 'testnet') + ' 告警\n' + new Date().toISOString() + '\n' + lines.join('\n');
     try {
-      const response = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      const response = await fetch((process.env.OPS_TELEGRAM_API || 'https://api.telegram.org') + '/bot' + token + '/sendMessage', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 3900), disable_web_page_preview: true }),
@@ -276,6 +331,7 @@ if (notify && alerts.length) {
       else warn('Telegram 发送失败：HTTP ' + response.status);
     } catch (error) {
       warn('Telegram 发送异常：' + String(error.message || error));
+    }
     }
   }
 }

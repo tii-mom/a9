@@ -15,7 +15,7 @@ import { beginCell, CellSlice, parseBocBase64, toBocBase64 } from './cell';
 import type { ChainConfig } from './config';
 import { decodeUserAction } from './decode';
 import { chainError, ChainError } from './errors';
-import { GET_METHODS, REFUND_ROUND_ID } from './protocol';
+import { GET_METHODS } from './protocol';
 
 export interface ResolvedJettonWallet {
   raw: string;
@@ -71,7 +71,7 @@ function apiKeyHeaders(chain: ChainConfig): Record<string, string> {
 /* Jetton Wallet 解析                                                  */
 /* ------------------------------------------------------------------ */
 
-function rawFromStackValue(value: unknown): string | null {
+export function rawFromStackValue(value: unknown): string | null {
   if (typeof value !== 'string' || !value.trim()) return null;
   const text = value.trim();
   if (looksLikeRawAddress(text)) return toRawAddress(parseTonAddress(text));
@@ -368,140 +368,156 @@ function sleep(ms: number): Promise<void> {
 /* v8.7 退款账本（round 0 = A9-CRIT-02 refund ledger）                  */
 /* ------------------------------------------------------------------ */
 
-export interface RefundLedgerView {
-  /** 可领回金额（raw units，十进制字符串，>= 0） */
+/* ------------------------------------------------------------------ *
+ * 攻城令（StakeTicket，v11）链上读取：每人每城一个合约，仓位以它为准。
+ * get_ticket_address(owner, roundId) 由 RC 推导地址；get_ticket_data / get_reward_preview 读状态与奖励。
+ * 读取失败必须抛错：「读不到」与「真的是 0」必须区分，UI 不得把 RPC 失败显示成 0。
+ * ------------------------------------------------------------------ */
+
+export interface TicketStateView {
+  ticketAddress: string;
   amountRaw: string;
-  /** 合约 StakePosition.principalClaimed */
-  principalClaimed: boolean;
+  weightRaw: string;
+  principalDone: boolean;
+  lockedClaimedRaw: string;
+  pending: boolean;
 }
 
-/** 解析 toncenter stack 的 num（支持 hex / 十进制 / 负数）→ bigint；失败 null。 */
-function stackNum(item: unknown): bigint | null {
-  if (!item || typeof item !== 'object') return null;
-  const record = item as { type?: unknown; value?: unknown };
-  if (record.type !== undefined && record.type !== 'num' && record.type !== 'int') return null;
-  const raw = record.value;
-  if (typeof raw === 'number' && Number.isFinite(raw)) return BigInt(Math.trunc(raw));
-  if (typeof raw !== 'string') return null;
-  const text = raw.trim();
-  if (!text) return null;
-  try {
-    if (/^-?0x[0-9a-fA-F]+$/.test(text)) return BigInt(text);
-    if (/^-?\d+$/.test(text)) return BigInt(text);
-    return null;
-  } catch {
-    return null;
+export interface RewardPreviewView {
+  rewardRaw: string;
+  immediateRaw: string;
+  lockedRaw: string;
+  unlockedLockedRaw: string;
+}
+
+/** owner 入参的几种编码（toncenter 对 slice / cell 的接受度不同，依次尝试）。 */
+export function ownerStackArgs(owner: TonAddress): { type: 'slice' | 'cell'; value: string }[][] {
+  const ownerRaw = toRawAddress(owner);
+  const ownerBoc = toBocBase64(beginCell().writeAddress(owner).end());
+  return [
+    [{ type: 'slice', value: ownerBoc }],
+    [{ type: 'slice', value: ownerRaw }],
+    [{ type: 'cell', value: ownerBoc }],
+  ];
+}
+
+export interface GetterCall {
+  items: unknown[];
+  exitCode: number;
+}
+
+export async function callGetter(chain: ChainConfig, address: string, method: string, stack: unknown[]): Promise<GetterCall> {
+  const response = (await fetchJson(chain.toncenterBaseUrl + '/api/v2/runGetMethod', {
+    method: 'POST',
+    headers: apiKeyHeaders(chain),
+    body: { address, method, stack },
+  })) as ToncenterRunResult;
+  if (!response?.ok) throw chainError('NETWORK_ERROR', 'toncenter runGetMethod 失败', method);
+  const items = response.result?.stack;
+  if (!Array.isArray(items)) throw chainError('NETWORK_ERROR', method + ' 返回无法解析', method);
+  return { items, exitCode: response.result?.exit_code ?? -1 };
+}
+
+/** toncenter 栈数字（{type:'num', value:'0x…' | '…'}）→ bigint；无法解析返回 null。 */
+export function stackNum(item: unknown): bigint | null {
+  const value = (item as { value?: unknown } | undefined)?.value;
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') return BigInt(value);
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      return BigInt(value.trim());
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
-function stackBool(item: unknown): boolean | null {
-  if (typeof item === 'boolean') return item;
-  if (item && typeof item === 'object' && typeof (item as { value?: unknown }).value === 'boolean') {
-    return Boolean((item as { value?: unknown }).value);
-  }
-  const num = stackNum(item);
-  return num === null ? null : num !== 0n;
+function requireNum(item: unknown, label: string): bigint {
+  const value = stackNum(item);
+  if (value === null) throw chainError('NETWORK_ERROR', label + ' 无法解析');
+  return value;
 }
 
-/** 兼容 tuple 返回：value 数组或 { elements: [...] }。 */
-function stackItems(item: unknown): unknown[] | null {
-  if (!item || typeof item !== 'object') return null;
-  const value = (item as { value?: unknown }).value;
-  if (Array.isArray(value)) return value;
-  const elements = value !== null && typeof value === 'object' ? (value as { elements?: unknown }).elements : undefined;
-  if (Array.isArray(elements)) return elements;
-  const outer = (item as { elements?: unknown }).elements;
-  return Array.isArray(outer) ? outer : null;
-}
-
-/**
- * 解析 RC.get_user_stake(0, owner) 的 stack：
- * StakePosition{amountRaw, lastDepositNonce, principalClaimed, rewardClaimed, weight, rewardState}
- * toncenter 可能返回 tuple（stack[0].value/elements 为字段数组）或扁平 6 项。
- */
-export function parseRefundLedgerStack(stack: unknown): RefundLedgerView | null {
-  if (!Array.isArray(stack) || stack.length === 0) return null;
-  const tupleItems = stackItems(stack[0]);
-  const items = tupleItems ?? stack;
-  const amount = stackNum(items[0]);
-  if (amount === null || amount < 0n) return null;
-  const claimed = stackBool(items[2]);
-  return { amountRaw: amount.toString(), principalClaimed: claimed === true };
-}
-
-const refundLedgerCache = new Map<string, { at: number; view: RefundLedgerView }>();
-const REFUND_LEDGER_CACHE_MS = 15_000;
-
-/**
- * 读取退款账本可领金额（Claim{roundId:0}）。
- *
- * 走 toncenter runGetMethod: RC.get_user_stake(0, owner)。
- * **读取失败必须抛错**——「读不到」和「真的是 0」必须区分，UI 不得把 RPC 失败显示成 0。
- * TODO: 若后续 worker /api/me 暴露 refund 字段，应迁移到后端统一口径（本函数可退役）。
- */
-export async function fetchRefundLedger(params: {
-  chain: ChainConfig;
-  owner: string;
-  signal?: AbortSignal;
-  cacheTtlMs?: number;
-}): Promise<RefundLedgerView> {
-  const { chain, owner } = params;
+/** 攻城令地址：RC.get_ticket_address(owner, roundId)。 */
+export async function fetchTicketAddress(params: { chain: ChainConfig; owner: string; roundId: number }): Promise<string> {
+  const { chain, owner, roundId } = params;
   if (!chain.configured || !chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
-  const cacheTtl = params.cacheTtlMs ?? REFUND_LEDGER_CACHE_MS;
-  const key = chain.network + '|' + chain.roundController + '|' + owner;
-  const cached = refundLedgerCache.get(key);
-  if (cached && Date.now() - cached.at < cacheTtl) return cached.view;
-
-  let ownerAddress;
+  let ownerAddress: TonAddress;
   try {
     ownerAddress = parseTonAddress(owner);
   } catch {
     throw chainError('BAD_CONFIG', '钱包地址不合法', owner);
   }
-  const ownerRaw = toRawAddress(ownerAddress);
-  const ownerFriendly = toFriendlyAddress(ownerAddress, chain.network === 'testnet', true);
-  const ownerBoc = toBocBase64(beginCell().writeAddress(ownerAddress).end());
-  const method = GET_METHODS.roundController.userStake;
-  const stackVariants: { type: 'slice' | 'cell'; value: string }[][] = [
-    [{ type: 'slice', value: ownerRaw }],
-    [{ type: 'slice', value: ownerFriendly }],
-    [{ type: 'slice', value: ownerBoc }],
-    [{ type: 'cell', value: ownerBoc }],
-  ];
-
+  const method = GET_METHODS.roundController.ticketAddress;
   let lastError: ChainError | null = null;
-  for (const ownerArg of stackVariants) {
+  for (const ownerArg of ownerStackArgs(ownerAddress)) {
     try {
-      const response = (await fetchJson(chain.toncenterBaseUrl + '/api/v2/runGetMethod', {
-        method: 'POST',
-        headers: apiKeyHeaders(chain),
-        signal: params.signal,
-        body: {
-          address: chain.roundController,
-          method,
-          stack: [{ type: 'num', value: '0x' + REFUND_ROUND_ID.toString(16) }, ...ownerArg],
-        },
-      })) as ToncenterRunResult;
-      if (!response?.ok) {
-        lastError = chainError('NETWORK_ERROR', 'toncenter runGetMethod 失败', method);
+      const call = await callGetter(chain, chain.roundController, method, [{ type: 'num', value: '0x' + roundId.toString(16) }, ...ownerArg]);
+      if (call.exitCode !== 0) {
+        lastError = chainError('NETWORK_ERROR', method + ' exit_code=' + call.exitCode, method);
         continue;
       }
-      const exitCode = response.result?.exit_code ?? -1;
-      if (exitCode !== 0) {
-        lastError = chainError('NETWORK_ERROR', 'get_user_stake(0) exit_code=' + exitCode, method);
-        continue;
-      }
-      const parsed = parseRefundLedgerStack(response.result?.stack);
-      if (parsed) {
-        refundLedgerCache.set(key, { at: Date.now(), view: parsed });
-        return parsed;
-      }
-      lastError = chainError('NETWORK_ERROR', 'get_user_stake(0) 返回无法解析', method);
+      const value = (call.items[0] as { value?: unknown } | undefined)?.value;
+      const raw = rawFromStackValue(value);
+      if (raw) return raw;
+      lastError = chainError('NETWORK_ERROR', method + ' 返回无法解析', method);
     } catch (error) {
       lastError = error instanceof ChainError ? error : chainError('NETWORK_ERROR', error instanceof Error ? error.message : String(error), method);
     }
   }
-  throw lastError ?? chainError('NETWORK_ERROR', '无法读取退款账本', method);
+  throw lastError ?? chainError('NETWORK_ERROR', '无法推导攻城令地址', method);
+}
+
+const ticketCache = new Map<string, { at: number; view: TicketStateView | null }>();
+const TICKET_CACHE_MS = 10_000;
+
+/**
+ * 攻城令状态：get_ticket_data（8 槽）。攻城令未部署（从未上车）返回 null；其余读取失败抛错。
+ */
+export async function fetchTicketState(params: { chain: ChainConfig; owner: string; roundId: number; signal?: AbortSignal }): Promise<TicketStateView | null> {
+  const { chain, owner, roundId } = params;
+  const key = chain.network + '|' + owner + '|' + roundId;
+  const cached = ticketCache.get(key);
+  if (cached && Date.now() - cached.at < TICKET_CACHE_MS) return cached.view;
+  const ticketAddress = await fetchTicketAddress({ chain, owner, roundId });
+  const call = await callGetter(chain, ticketAddress, GET_METHODS.ticket.ticketData, []);
+  if (call.exitCode === -13) {
+    // 账户未部署：该轮没有上车记录
+    ticketCache.set(key, { at: Date.now(), view: null });
+    return null;
+  }
+  if (call.exitCode !== 0 || call.items.length < 8) {
+    throw chainError('NETWORK_ERROR', 'get_ticket_data exit_code=' + call.exitCode, GET_METHODS.ticket.ticketData);
+  }
+  const view: TicketStateView = {
+    ticketAddress,
+    amountRaw: requireNum(call.items[3], 'amountRaw').toString(),
+    weightRaw: requireNum(call.items[4], 'weightRaw').toString(),
+    principalDone: requireNum(call.items[5], 'principalDone') !== 0n,
+    lockedClaimedRaw: requireNum(call.items[6], 'lockedClaimedRaw').toString(),
+    pending: requireNum(call.items[7], 'pending') !== 0n,
+  };
+  ticketCache.set(key, { at: Date.now(), view });
+  return view;
+}
+
+/** RC.get_reward_preview(roundId, weightRaw)：本金之外的奖励拆分（4 槽）。 */
+export async function fetchRewardPreview(params: { chain: ChainConfig; roundId: number; weightRaw: bigint }): Promise<RewardPreviewView> {
+  const { chain, roundId, weightRaw } = params;
+  if (!chain.configured || !chain.roundController) throw chainError('CHAIN_NOT_CONFIGURED');
+  const method = GET_METHODS.roundController.rewardPreview;
+  const call = await callGetter(chain, chain.roundController, method, [
+    { type: 'num', value: '0x' + roundId.toString(16) },
+    { type: 'num', value: '0x' + weightRaw.toString(16) },
+  ]);
+  if (call.exitCode !== 0 || call.items.length < 4) throw chainError('NETWORK_ERROR', method + ' exit_code=' + call.exitCode, method);
+  return {
+    rewardRaw: requireNum(call.items[0], 'rewardRaw').toString(),
+    immediateRaw: requireNum(call.items[1], 'immediateRaw').toString(),
+    lockedRaw: requireNum(call.items[2], 'lockedRaw').toString(),
+    unlockedLockedRaw: requireNum(call.items[3], 'unlockedLockedRaw').toString(),
+  };
 }
 
 export interface WaitForTxOptions {

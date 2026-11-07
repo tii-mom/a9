@@ -79,6 +79,47 @@ custom_domain = true
 #      CHAIN_NETWORK != mainnet / 地址或哈希仍是占位符 → 直接 fail（除显式 allow_demo_deploy）。
 #   GitHub Variables（PROD_ROUND_CONTROLLER_ADDRESS 等）会在部署时通过 --var 注入真实值。
 # ===========================================================================
+[env.testnet]
+# v11 测试网演练（ops/drills/2026-11_testnet_v11_10round_drill.md）。独立 Worker 名与独立 D1，
+# 绑定 test.a9.lat 子域名（workers.dev 保留作备用），绝不复用 demo 或 production 的数据库。
+name = "a9-testnet"
+workers_dev = true
+routes = [ { pattern = "test.a9.lat", custom_domain = true } ]   # testnet subdomain only; never the production a9.lat routes
+
+[env.testnet.vars]
+DATA_SOURCE = "chain"
+CHAIN_NETWORK = "testnet"
+DEMO_AUTOPLAY = "false"
+DEMO_ALLOW_UNSIGNED_WRITES = "false"
+TONCENTER_V2_URL = "https://testnet.toncenter.com/api/v2"
+TONCENTER_V3_URL = "https://testnet.toncenter.com/api/v3"
+# 部署后由 deploy-emulation 输出的 deploy/*.addr 填入（地址非机密）
+ROUND_CONTROLLER_ADDRESS = "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt"
+TEAM_WALLET_ADDRESS = "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr"
+KEEPER_ADDRESS = "kQB2_JOvF0Aqp6AHmQIy9HdORKL8-kUmbjsBIuTsp7meN-Qb"
+JETTON_MASTER_ADDRESS = "kQActKc_feFVN7n95a_yrCCtd9SACBCN2zBinFq2dXijx374"
+JUNXIANG_DISTRIBUTOR_ADDRESS = "kQBKpzusd8LanpLhoSsYg3U64C1zKgJ0sXVSmipkNWltViNi"
+STONFI_POOL_ADDRESS = ""
+TG_BOT_USERNAME = "a9_test_bot"
+ORACLE_CONFIG_VERSION = "1"
+ORACLE_CONFIG_HASH = ""
+ALLOWED_ORIGINS = "https://test.a9.lat,https://a9-testnet.348421501.workers.dev,http://localhost:5173"
+TON_PROOF_DOMAINS = "test.a9.lat,a9-testnet.348421501.workers.dev,localhost"
+RATE_LIMIT_PER_MINUTE = "60"
+RATE_LIMIT_NONCE_PER_MINUTE = "10"
+RATE_LIMIT_READ_PER_MINUTE = "120"
+RATE_LIMIT_STATIC_PER_MINUTE = "600"
+VERSION = "1.1.0-testnet"
+EDGE_CACHE_SECONDS = "1"
+TONCONNECT_MANIFEST_URL = "/tonconnect-manifest.json"
+# secrets（wrangler secret put --env testnet）：SESSION_SECRET、ADMIN_TOKEN、TG_BOT_TOKEN、TG_WEBHOOK_SECRET
+
+[[env.testnet.d1_databases]]
+binding = "DB"
+database_name = "a9-testnet-run2"
+# 先执行 wrangler d1 create a9-testnet，把返回的 id 填在这里（id 非机密）
+database_id = "0d61caf7-583c-420c-8123-178ec13d4611"
+
 [env.production]
 # 与顶层同名，确保部署覆盖现有 Worker（保留 a9.lat / www 自定义域名）
 name = "fuse-protocol"
@@ -98,8 +139,14 @@ ROUND_CONTROLLER_ADDRESS = "0:__ROUND_CONTROLLER_ADDRESS__"
 TEAM_WALLET_ADDRESS = "0:__TEAM_WALLET_ADDRESS__"
 KEEPER_ADDRESS = "0:__KEEPER_ADDRESS__"
 JETTON_MASTER_ADDRESS = "0:__JETTON_MASTER_ADDRESS__"
+JUNXIANG_DISTRIBUTOR_ADDRESS = "0:__JUNXIANG_DISTRIBUTOR_ADDRESS__"
 ORACLE_CONFIG_VERSION = "1"
 ORACLE_CONFIG_HASH = "__ORACLE_CONFIG_HASH__"
+# 正式机器人用户名（不带 @），CI 用 GitHub Variable PROD_TG_BOT_USERNAME 注入
+TG_BOT_USERNAME = "__TG_BOT_USERNAME__"
+# 主网 STON.fi A9 池地址：建池后填入（为空则守城补贴关闭）
+STONFI_POOL_ADDRESS = ""
+# 生产 secrets（wrangler secret put --env production）：ADMIN_TOKEN、TONCENTER_API_KEY、TG_BOT_TOKEN、TG_WEBHOOK_SECRET
 
 # 生产安全 / 限流 / 展示参数（与 demo 段一致的公共项）
 ALLOWED_ORIGINS = "https://a9.lat,https://www.a9.lat"

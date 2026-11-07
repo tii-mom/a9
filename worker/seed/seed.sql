@@ -48,7 +48,7 @@ INSERT OR REPLACE INTO config (key, value, updated_at) VALUES
   ('demo_stake_seconds', '900', 1793974061023),
   ('demo_preview_seconds', '90', 1793974061023),
   ('demo_autoplay', '1', 1793974061023),
-  ('min_stake_raw', '100000000000000', 1793974061023),
+  ('min_stake_raw', '1000000000000', 1793974061023),
   ('max_total_stake_raw', '200000000000000000', 1793974061023),
   ('ton_usd_e8', '300000000', 1793974061023),
   ('tonconnect_manifest_url', '/tonconnect-manifest.json', 1793974061023),

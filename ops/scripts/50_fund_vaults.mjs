@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 50 — 注资与初始分配（v10）：RC 82 亿（70 亿奖励 + 12 亿团队，forward_ton_amount = 0）；
+ * 50 — 注资与初始分配（v11）：RC 82 亿（70 亿奖励 + 12 亿团队，forward_ton_amount = 0）；
  * --all 时再分配内盘 8 亿 / 流动性 5 亿 / 营销 5 亿。
  * deploy-emulation 通常已完成 RC 注资：RC 钱包余额已达 82 亿时只核对登记、不重复转账。
  */

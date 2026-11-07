@@ -19,6 +19,8 @@ fun main(roundId: int, candleIndex: int) {
     val periodStart = envInt("A9_PERIOD_START");
     val periodEnd = envInt("A9_PERIOD_END");
     val twap = envInt("A9_TWAP_E8");
+    // sha256 of the price samples behind this candle (decimal uint256); 0 in test drills
+    val digest = env<int>("A9_DIGEST_DEC") ?? 0;
     net.send(signer.address, createMessage({
         bounce: true,
         value: ton("0.01"),
@@ -30,7 +32,7 @@ fun main(roundId: int, candleIndex: int) {
             periodStart: periodStart as uint32,
             periodEnd: periodEnd as uint32,
             twapPriceUsdE8: twap as uint128,
-            dataDigest: 0 as uint256,
+            dataDigest: digest as uint256,
         },
     }));
     println("candle sent: round={} index={} period={}..{} twap={}", roundId, candleIndex, periodStart, periodEnd, twap);

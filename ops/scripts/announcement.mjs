@@ -126,9 +126,9 @@ const values = {
   burnedTeam: tokens(burnedTeamRaw),
   burnedPrincipal: tokens(burnedPrincipalRaw),
   closeReason: data.closeReason || '36 小时报名窗口到期正常关闭',
-  abortReason: data.abortReason || '观察应结束后 7 天仍未判定，或预告结束后 7 天仍未开轮',
+  abortReason: data.abortReason || '观察应结束后超过技术终止超时仍未判定，或预告结束后仍未开轮',
   nextRoundId: String(data.nextRoundId || Math.min(roundId + 1, 10)),
-  claimNote: data.claimNote || '本金 + 全额奖励一次领取（Claim / ClaimAll，用户自付 gas）',
+  claimNote: data.claimNote || '本金经攻城令领取（TicketClaim，用户自付 gas）；奖励 20% 立即可领，80% 等之后任意一城破城时解锁',
   siteUrl: data.siteUrl || 'https://a9.lat',
 };
 

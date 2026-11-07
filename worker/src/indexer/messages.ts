@@ -1,9 +1,10 @@
 /**
- * 链上入站消息（用户/keeper/Jetton 钱包 → RoundController）的 body 解码。
+ * 链上入站消息（用户/keeper/Jetton 钱包/攻城令 → RoundController）的 body 解码。
  * 用途：SubmitCandle 是 chain 模式 K 线的唯一权威来源（合约不逐根存 K 线，只存 rolling hash）。
- * 所有布局对齐 contracts/contracts/types.tolk（v10）；opcode 见 contracts/README §4.1。
- * v10 只剩下列入站 opcode：OpenRound / CloseStaking / SubmitCandle / Claim / ClaimAll /
- * StakeDeposit（forward_payload 内）/ AbortTechnical / RetrySettlement + transfer_notification。
+ * 所有布局对齐 contracts/contracts/types.tolk 与 ticket.tolk（v11）。
+ * v11 的入站 opcode：OpenRound / CloseStaking / SubmitCandle / AbortTechnical / RetrySettlement /
+ * ReleaseTeam / TicketRequest（攻城令 → RC）+ transfer_notification（forward_payload 内为 StakePayload v2）。
+ * Claim / ClaimAll 已从 RC 移除（用户直接发 TicketClaim / TicketRestake 给自己的攻城令）。
  */
 import { BitReader, parseBocBytes, base64ToBytes, type BocBag, type BocCell } from './boc';
 
@@ -11,14 +12,13 @@ export const TX_OP = {
   openRound: 0x52540001,
   closeStaking: 0x52540002,
   submitCandle: 0x52540003,
-  /** Claim(roundId)：本金 + 全额奖励；roundId 0 = 退款账本 */
-  claim: 0x52540006,
-  /** ClaimAll：0..10 轮全部 + 退款账本（roundId 字段忽略） */
-  claimAll: 0x5254000e,
   /** 质押 payload 的 op（只出现在 transfer_notification.forward_payload 内） */
   stakeDeposit: 0x5254000f,
   abortTechnical: 0x52540010,
   retrySettlement: 0x52540015,
+  releaseTeam: 0x52540016,
+  /** 攻城令 → RC：领取 / 续战请求 */
+  ticketRequest: 0x52540305,
   transferNotification: 0x7362d09c,
 } as const;
 
@@ -48,27 +48,40 @@ export interface OpenRoundMessage extends InboundMessageBase {
 export interface CloseStakingMessage extends InboundMessageBase {
   opcode: typeof TX_OP.closeStaking;
   queryId: bigint;
-  /** v10 忽略（没有提前关窗） */
+  /** 合约忽略（没有提前关窗） */
   twap1hUsdE8: bigint;
 }
 
-export interface RoundIdMessage extends InboundMessageBase {
-  opcode: typeof TX_OP.claim | typeof TX_OP.claimAll | typeof TX_OP.retrySettlement;
+export interface RetrySettlementMessage extends InboundMessageBase {
+  opcode: typeof TX_OP.retrySettlement;
   queryId: bigint;
   roundId: number;
 }
 
-export interface AbortTechnicalMessage extends InboundMessageBase {
-  opcode: typeof TX_OP.abortTechnical;
+export interface QueryOnlyMessage extends InboundMessageBase {
+  opcode: typeof TX_OP.releaseTeam | typeof TX_OP.abortTechnical;
   queryId: bigint;
 }
 
+export interface TicketRequestMessage extends InboundMessageBase {
+  opcode: typeof TX_OP.ticketRequest;
+  queryId: bigint;
+  owner: { workchain: number; hashHex: string; raw: string };
+  roundId: number;
+  amountRaw: bigint;
+  weightRaw: bigint;
+  principalDone: boolean;
+  lockedClaimedRaw: bigint;
+  restake: boolean;
+}
+
+/** StakePayload v2（docs/35 §3.2）：beneficiary = null 时记在转账发起人名下。 */
 export interface StakePayload {
   version: number;
   roundId: number;
-  depositNonce: bigint;
   riskDisclosureVersion: number;
   acceptFullPrincipalBurn: number;
+  beneficiary: { workchain: number; hashHex: string; raw: string } | null;
 }
 
 export interface TransferNotificationMessage extends InboundMessageBase {
@@ -84,8 +97,9 @@ export type DecodedInboundMessage =
   | SubmitCandleMessage
   | OpenRoundMessage
   | CloseStakingMessage
-  | RoundIdMessage
-  | AbortTechnicalMessage
+  | RetrySettlementMessage
+  | QueryOnlyMessage
+  | TicketRequestMessage
   | TransferNotificationMessage;
 
 export interface RawMessageInput {
@@ -105,18 +119,44 @@ function readCoins(reader: BitReader): bigint {
   return len === 0 ? 0n : reader.u(len * 8);
 }
 
+/** StakePayload v2：op(32) version(8)=2 roundId(8) riskVersion(16) acceptBurn(8) beneficiary(addr_none | addr_std)。 */
 function parseStakePayload(cell: BocCell, startBit: number): StakePayload | null {
   const reader = new BitReader(cell);
   if (startBit > 0) reader.skip(startBit);
-  if (reader.remaining < 136) return null;
+  if (reader.remaining < 74) return null;
   const op = reader.uNumber(32);
   if (op !== TX_OP.stakeDeposit) return null;
+  const version = reader.uNumber(8);
+  const roundId = reader.uNumber(8);
+  const riskDisclosureVersion = reader.uNumber(16);
+  const acceptFullPrincipalBurn = reader.uNumber(8);
+  let beneficiary: StakePayload['beneficiary'] = null;
+  const head = reader.preloadUint(2);
+  if (head === 0) {
+    reader.skip(2);
+  } else if (head === 2 && reader.remaining === 267) {
+    beneficiary = reader.address();
+  } else {
+    return null;
+  }
+  if (reader.remaining !== 0) return null;
+  return { version, roundId, riskDisclosureVersion, acceptFullPrincipalBurn, beneficiary };
+}
+
+function decodeTicketRequest(body: string): TicketRequestMessage | null {
+  const reader = readerOf(body);
+  if (reader.uNumber(32) !== TX_OP.ticketRequest) return null;
   return {
-    version: reader.uNumber(8),
+    opcode: TX_OP.ticketRequest,
+    body,
+    queryId: reader.u(64),
+    owner: reader.address(),
     roundId: reader.uNumber(8),
-    depositNonce: reader.u(64),
-    riskDisclosureVersion: reader.uNumber(16),
-    acceptFullPrincipalBurn: reader.uNumber(8),
+    amountRaw: reader.u(128),
+    weightRaw: reader.u(128),
+    principalDone: reader.u(1) === 1n,
+    lockedClaimedRaw: reader.u(128),
+    restake: reader.u(1) === 1n,
   };
 }
 
@@ -173,19 +213,19 @@ export function decodeInboundMessage(input: RawMessageInput): DecodedInboundMess
       if (reader.uNumber(32) !== TX_OP.closeStaking) return null;
       return { opcode: TX_OP.closeStaking, body, queryId: reader.u(64), twap1hUsdE8: reader.u(128) };
     }
-    case TX_OP.claim:
-    case TX_OP.claimAll:
     case TX_OP.retrySettlement: {
       const reader = readerOf(body);
-      const op = reader.uNumber(32);
-      if (op !== input.opcode) return null;
-      return { opcode: op as RoundIdMessage['opcode'], body, queryId: reader.u(64), roundId: reader.uNumber(8) };
+      if (reader.uNumber(32) !== TX_OP.retrySettlement) return null;
+      return { opcode: TX_OP.retrySettlement, body, queryId: reader.u(64), roundId: reader.uNumber(8) };
     }
+    case TX_OP.releaseTeam:
     case TX_OP.abortTechnical: {
       const reader = readerOf(body);
-      if (reader.uNumber(32) !== TX_OP.abortTechnical) return null;
-      return { opcode: TX_OP.abortTechnical, body, queryId: reader.u(64) };
+      if (reader.uNumber(32) !== input.opcode) return null;
+      return { opcode: input.opcode as QueryOnlyMessage['opcode'], body, queryId: reader.u(64) };
     }
+    case TX_OP.ticketRequest:
+      return decodeTicketRequest(body);
     case TX_OP.transferNotification:
       return decodeTransferNotification(body);
     default:

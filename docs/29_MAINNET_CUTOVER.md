@@ -1,3 +1,5 @@
+> ⚠️ **已作废（v8–v10 口径）**：主网上线请只按 [08_mainnet_v11.md](../ops/runbooks/08_mainnet_v11.md) 执行。本文仅供溯源。
+
 # 29 — 主网切换包（MAINNET CUTOVER）
 
 **版本**：V1.0 · 2026-11-06
@@ -168,11 +170,11 @@ ls migrations | sort
 for f in migrations/*.sql; do case "$(basename "$f")" in [0-9][0-9][0-9][0-9]_*.sql) ;; *) echo "BAD: $f"; exit 1;; esac; done
 # 主网：必须显式 --env production，否则会按顶层 demo 绑定解析
 wrangler d1 migrations apply DB --remote --env production
-# 彩排（drill）：用 drill 配置
-# wrangler d1 migrations apply DB --remote --config wrangler.drill.toml
+# 彩排（测试网配置）：wrangler.drill.toml 已删除，改用 worker/wrangler.toml 的 [env.testnet]
+# wrangler d1 migrations apply DB --remote --env testnet
 ~~~
 
-期望：`ls` 恰好 `0001_init.sql` … `0009_chain_indexer.sql`；apply 只列这 9 个，0 报错；命令里必须出现 **`--env production`**（彩排为 `--config wrangler.drill.toml`）。
+期望：`ls` 恰好 `0001_init.sql` … `0009_chain_indexer.sql`；apply 只列这 9 个，0 报错；命令里必须出现 **`--env production`**（彩排为 `--env testnet`；原 `wrangler.drill.toml` 已删除）。
 失败：出现非编号文件 → **立即停止**，移出 migrations 后重跑；**绝不执行 seed.sql**。
 **可逆**：是（删库重建；尚未有业务数据）。
 
@@ -692,7 +694,7 @@ curl -s https://a9.lat/api/health | jq '.data.oracle'
 | # | 彩排发现（实际 vs 文档） | 处理 | 状态 |
 | --- | --- | --- | --- |
 | ① | D1 写法错误：文档让改顶层 `[[d1_databases]]`（demo 库）；实际生产在 **`[[env.production.d1_databases]]`**，仓库为全 0 占位符，CI 从 `PROD_D1_DATABASE_ID` 注入 | 改写 §2.1：只建库 + 填 GitHub Variable，**禁止改顶层** | 已修正到文档 |
-| ② | 迁移命令缺 `--env production`（彩排 `--config wrangler.drill.toml`） | §2.2 改为 `wrangler d1 migrations apply DB --remote --env production`（彩排用 drill 配置） | 已修正到文档；**附：CI 的 migration 步骤仍写 `apply fuse-protocol --remote` 未带 `--env production`，需 CI 同步修**（流程调整） |
+| ② | 迁移命令缺 `--env production`（彩排原为 `--config wrangler.drill.toml`，该文件已删除，改为 `--env testnet`） | §2.2 改为 `wrangler d1 migrations apply DB --remote --env production`（彩排用 drill 配置） | 已修正到文档；**附：CI 的 migration 步骤仍写 `apply fuse-protocol --remote` 未带 `--env production`，需 CI 同步修**（流程调整） |
 | ③ | GitHub Variables 少第 5 个：**`PROD_D1_DATABASE_ID`**（CI 门禁强制） | §6.2 补 5 个变量表，注明建库后立即填 | 已修正到文档 |
 | ④ | 手工 `wrangler deploy` 不走 CI 的 “Inject production D1 database id”，会用占位符 D1 | §6.3 改为**推荐 CI workflow_dispatch**；手工仅兜底且必须先复用注入步骤 | 已修正到文档 |
 | ⑤ | 验证顺序矛盾：引导前 `/api/config`、`/api/rounds` 是 503 ORACLE_PAUSED（正确保护） | §6.4 只验 `/api/health` + `/api/version`；config/rounds 移到 §7.3 | 已修正到文档 |

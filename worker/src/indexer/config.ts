@@ -92,6 +92,8 @@ export interface ChainConfig {
   allowPublic: boolean;
   addresses: {
     roundController: TonAddress;
+    /** v11 军饷分发合约；可选（未配置 / 占位符为 null） */
+    junxiangDistributor: TonAddress | null;
     jettonMaster: TonAddress;
     /** 团队收款钱包（成功轮 RC 直接转 1.2 亿；对应 get_protocol_config 的 teamVault 槽） */
     teamWallet: TonAddress;
@@ -136,6 +138,10 @@ export function resolveChainConfig(env: Env): ChainConfigResult {
   const jm = parseTonAddress(trimmed(env.JETTON_MASTER_ADDRESS));
   if (!jm) return { ok: false, error: 'JETTON_MASTER_ADDRESS 缺失或非法：' + trimmed(env.JETTON_MASTER_ADDRESS) };
 
+  // optional: a placeholder (contains "__") or an invalid value means "not deployed yet"
+  const jxText = trimmed(env.JUNXIANG_DISTRIBUTOR_ADDRESS);
+  const jx = jxText && !jxText.includes('__') ? parseTonAddress(jxText) : null;
+
   const versionText = trimmed(env.ORACLE_CONFIG_VERSION);
   const expectedConfigVersion = versionText ? Number.parseInt(versionText, 10) : null;
   if (versionText && !Number.isFinite(expectedConfigVersion)) {
@@ -156,7 +162,7 @@ export function resolveChainConfig(env: Env): ChainConfigResult {
       v3FallbackUrl: null,
       apiKey,
       allowPublic,
-      addresses: { roundController: rc, jettonMaster: jm, teamWallet: tw, keeper },
+      addresses: { roundController: rc, jettonMaster: jm, teamWallet: tw, keeper, junxiangDistributor: jx },
       expectedConfigVersion,
       expectedConfigHash,
       leaseSeconds,

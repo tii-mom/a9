@@ -1,0 +1,96 @@
+/* 社交层样式（Telegram 小程序 / 战队 / 榜单 / 喊人）。仅 sx- 前缀，令牌沿用 fuse.css。
+   移动端优先，360px 宽度下可用。 */
+
+.sx-page { display: grid; gap: 14px; padding: 16px 14px 32px; max-width: 560px; margin: 0 auto; min-width: 0; }
+.sx-page h1 { font: 900 24px/1.2 var(--f-body); margin: 4px 0 6px; }
+.sx-page p { margin: 0; color: var(--text-2); }
+.sx-kicker { font: 500 11px var(--f-mono); letter-spacing: .08em; color: var(--ember); text-transform: uppercase; }
+.sx-muted { color: var(--muted); font-size: 12px; }
+.sx-hint { font-size: 13px; color: var(--text-2); line-height: 1.6; }
+.sx-hint b { color: var(--text); font-family: var(--f-mono); }
+
+/* 按钮：沿用 .btn，补一个整宽的主按钮 */
+.sx-cta { width: 100%; min-height: 56px; font-size: 18px; letter-spacing: .06em; }
+.sx-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.sx-row > * { flex: 1 1 140px; }
+.sx-btn { min-height: 44px; width: 100%; }
+
+/* 首页数字 */
+.sx-stats { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); grid-template-columns: 1fr; }
+.sx-stat { background: var(--panel); padding: 12px 14px; min-width: 0; }
+.sx-stat span { display: block; font: 500 11px var(--f-mono); letter-spacing: .06em; color: var(--muted); }
+.sx-stat b { display: block; margin-top: 4px; font: 700 26px/1.15 var(--f-disp); color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.sx-stat b.hot { color: var(--brand); }
+
+/* 破城进度条 */
+.sx-gate { display: grid; gap: 10px; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; min-width: 0; }
+.sx-gate-line { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-2); }
+.sx-gate-line b { color: var(--text); font-family: var(--f-mono); font-weight: 600; }
+.sx-gate-line b.hot { color: var(--brand); }
+.sx-bar { position: relative; height: 8px; background: var(--bg-2); border: 1px solid var(--line-2); }
+.sx-bar i { position: absolute; inset: 0 auto 0 0; background: var(--brand); transition: width .4s ease; }
+.sx-lamps { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; }
+.sx-lamps i { display: block; height: 10px; background: var(--pend); border: 1px solid var(--line-2); }
+.sx-lamps i.off { background: var(--panel-2); }
+.sx-lamps i.on { background: var(--ember); border-color: var(--ember); box-shadow: 0 0 6px rgba(255,182,61,.45); }
+.sx-lamps i.breach { outline: 1px solid var(--brand); outline-offset: 1px; }
+.sx-skel { display: block; height: 12px; background: linear-gradient(90deg, rgba(255,255,255,.05), rgba(255,255,255,.11), rgba(255,255,255,.05)); background-size: 200% 100%; animation: sx-shimmer 1.4s linear infinite; }
+@keyframes sx-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* 卡片 / 战队 */
+.sx-card { display: grid; gap: 12px; background: var(--panel); border: 1px solid var(--line); padding: 14px; min-width: 0; }
+.sx-card h2 { margin: 0; font: 800 17px/1.3 var(--f-body); }
+.sx-squad-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sx-squad-head b { font: 800 20px/1.2 var(--f-body); overflow-wrap: anywhere; }
+.sx-lv { font: 700 12px var(--f-mono); color: var(--bg); background: var(--ember); padding: 3px 7px; }
+.sx-template { margin: 0; padding: 10px 12px; background: var(--bg-2); border: 1px dashed var(--line-2); color: var(--text); font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.sx-stat-row { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sx-stat-row > div { background: var(--panel-2); padding: 8px 10px; min-width: 0; }
+.sx-stat-row span { display: block; font: 500 10px var(--f-mono); color: var(--muted); letter-spacing: .05em; }
+.sx-stat-row b { display: block; font: 600 14px var(--f-mono); margin-top: 3px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* 表单 */
+.sx-form { display: grid; gap: 8px; }
+.sx-form label { font: 500 11px var(--f-mono); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+.sx-form input { background: var(--bg-2); border: 1px solid var(--line-2); padding: 11px 12px; color: var(--text); font: 500 16px var(--f-mono); min-height: 44px; width: 100%; box-sizing: border-box; }
+.sx-form input:focus { outline: 2px solid var(--ember); outline-offset: 1px; }
+.sx-err { font-size: 12.5px; color: #ffb3b3; margin: 0; }
+
+/* 榜单 */
+.sx-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.sx-tabs button { flex: 1 0 auto; min-height: 44px; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 700 14px var(--f-body); padding: 8px 10px; }
+.sx-tabs button[aria-selected="true"] { color: var(--text); border-color: var(--brand); }
+.sx-scope { display: inline-flex; gap: 0; border: 1px solid var(--line-2); width: max-content; }
+.sx-scope button { min-height: 36px; background: var(--panel-2); border: 0; color: var(--muted); font: 600 12px var(--f-body); padding: 0 14px; }
+.sx-scope button[aria-pressed="true"] { background: var(--brand); color: #0A0807; }
+.sx-table-wrap { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); }
+.sx-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 460px; }
+.sx-table th { text-align: left; font: 500 10.5px var(--f-mono); letter-spacing: .06em; color: var(--muted); border-bottom: 1px solid var(--line); padding: 8px 8px; white-space: nowrap; }
+.sx-table td { border-bottom: 1px solid var(--line); padding: 9px 8px; font-variant-numeric: tabular-nums; vertical-align: middle; }
+.sx-table .num { text-align: right; font-family: var(--f-mono); white-space: nowrap; }
+.sx-rank { font: 800 15px var(--f-disp); color: var(--muted); }
+.sx-rank.top { color: var(--ember); }
+.sx-name { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.sx-sub { display: block; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.sx-title { display: inline-block; margin-left: 6px; font: 600 10px var(--f-mono); color: var(--ember); border: 1px solid #5a3f12; padding: 0 4px; vertical-align: 1px; white-space: nowrap; }
+
+/* 分享面板（底部弹层） */
+.sx-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
+.sx-sheet { width: 100%; max-width: 560px; background: var(--panel); border-top: 1px solid var(--line-2); padding: 16px 14px calc(20px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; max-height: 90dvh; overflow-y: auto; box-sizing: border-box; }
+.sx-sheet-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sx-sheet-h h2 { margin: 0; font: 800 17px/1.3 var(--f-body); }
+.sx-close { min-width: 44px; min-height: 44px; background: transparent; border: 1px solid var(--line-2); color: var(--text); font-size: 18px; }
+.sx-preview { margin: 0; padding: 10px 12px; background: var(--bg-2); border: 1px solid var(--line); font-size: 13.5px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+.sx-share-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.sx-share-grid .btn { min-height: 48px; }
+.sx-notice { font-size: 12px; color: var(--ember); margin: 0; }
+
+@media (min-width: 480px) {
+  .sx-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sx-stat b { font-size: 30px; }
+}
+@media (max-width: 359px) {
+  .sx-page { padding-inline: 10px; }
+  .sx-lamps { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  .sx-share-grid { grid-template-columns: minmax(0, 1fr); }
+}

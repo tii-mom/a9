@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react';
-import { connect, disconnect, getWalletSnapshot, refreshBalances, subscribe } from './store';
+import { connect, disconnect, getWalletSnapshot, refreshBalances, signIn, subscribe } from './store';
 import type { WalletStoreState } from './store';
 
 /** 全站统一钱包契约（Lead 定稿）。交易一律禁用：合约部署后开放。 */
@@ -15,12 +15,16 @@ export interface WalletState {
   /** A9 余额 raw units（9 位）；真实钱包在 Jetton 上线前为 null */
   fuseBalance: string | null;
   error: string | null;
+  /** TON 钱包已连接但没有有效登录会话：写接口会返回 401，需要「签名登录」 */
+  needsSignIn: boolean;
   connect(): void;
   disconnect(): void;
   refreshBalances(): void;
+  /** 签名登录：断开后用新挑战重新连接，钱包会再次要求确认身份 */
+  signIn(): void;
 }
 
-const ACTIONS = { connect, disconnect, refreshBalances };
+const ACTIONS = { connect, disconnect, refreshBalances, signIn };
 
 /**
  * 钱包状态 hook。无需 Provider：内部是模块级 store + useSyncExternalStore，
@@ -37,9 +41,11 @@ export function useWallet(): WalletState {
       tonBalance: snapshot.tonBalance,
       fuseBalance: snapshot.fuseBalance,
       error: snapshot.error,
+      needsSignIn: snapshot.mode === 'ton' && snapshot.status === 'connected' && !snapshot.hasSession,
       connect: ACTIONS.connect,
       disconnect: ACTIONS.disconnect,
       refreshBalances: ACTIONS.refreshBalances,
+      signIn: ACTIONS.signIn,
     }),
     [snapshot],
   );

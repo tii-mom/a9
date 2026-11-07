@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * 15 — 整体部署（contracts/scripts/deploy-emulation.tolk，v10 / D-42）：
+ * 15 — 整体部署（contracts/scripts/deploy-emulation.tolk，v11）：
  * JettonMaster + mint-once → RoundController（keeper / teamWallet / 参数写入初始数据，无 admin、无 wiring）
- * → 核对 RC 钱包推导 → treasury 向 RC 注资 82 亿（forward_ton_amount = 0）。
+ * → 核对 RC 钱包推导 → treasury 向 RC 注资 82 亿（forward_ton_amount = 0）
+ * → JunxiangDistributor 部署（publisher = junxiangPublisher，缺省 keeper；不注资）→ 读回 ticket code hash / get_distributor。
+ * 快测档：OPS_PARAMS=ops/config/testnet-fast.params.json 时，时序自动取快测参数（见 testnet-fast.params.json 的 fastCycle）。
  */
 
 import { spawnSync } from 'node:child_process';
@@ -19,12 +21,14 @@ import { section, kv, ok, fail, warn, info, detail, table } from './lib/log.mjs'
 
 const { args, execute, params, digest, registry, toolchain } = bootstrap({
   id: '15',
-  title: '整体部署（deploy-emulation v10：Jetton + RoundController + 82 亿注资）',
+  title: '整体部署（deploy-emulation v11：Jetton + RoundController + 82 亿注资 + JunxiangDistributor）',
 });
 
 // keeper / teamWallet 写入 RC 初始数据，部署后永久不可改：优先登记表，其次环境变量。
 const keeper = str(args, 'keeper') || resolveWalletAddress(registry, 'keeper') || process.env[params.roles.keeper.env] || '';
 const teamWallet = str(args, 'team-wallet') || resolveWalletAddress(registry, 'teamWallet') || process.env[params.roles.teamWallet.env] || '';
+// junxiangPublisher 写入军饷分发合约，部署后不可改；必须显式提供（与 keeper 分开的热钱包）。
+const junxiangPublisher = str(args, 'junxiang-publisher') || resolveWalletAddress(registry, 'junxiangPublisher') || process.env[params.roles.junxiangPublisher.env] || '';  // must be explicit (deploy refuses a default)
 
 // 时间与限额参数默认取 params（显式环境变量优先），保证链上初始数据与参数文件一致。
 const deployEnvDefaults = {
@@ -33,13 +37,22 @@ const deployEnvDefaults = {
   A9_TIMING_CANDLE_SECONDS: params.timeline.candleSeconds,
   A9_TIMING_CANDLE_COUNT: params.timeline.candleCount,
   A9_TIMING_MIN_QUALIFIED: params.timeline.minQualifiedCandles,
+  A9_TIMING_ABORT_TIMEOUT_SECONDS: params.techAbort.abortTimeoutSeconds,
+  A9_TIMING_FALLBACK_UNLOCK_SECONDS: params.techAbort.fallbackUnlockSeconds ?? 2592000,
   A9_DEPLOY_ROUND_REWARD_RAW: params.rounds.roundRewardRaw,
   A9_DEPLOY_TEAM_ROUND_RAW: params.rounds.teamRoundRaw,
   A9_DEPLOY_MIN_STAKE_RAW: params.stakeLimits.minStakeRaw,
+  A9_DEPLOY_P0_USD_E8: params.price.p0UsdE8,
+  A9_JUNXIANG_PUBLISHER_ADDRESS: junxiangPublisher,
 };
 for (const [key, value] of Object.entries(deployEnvDefaults)) {
   if (process.env[key] === undefined) process.env[key] = String(value);
 }
+// Fast drill timing is refused by deploy-emulation on a real network unless A9_ALLOW_FAST_TIMING=1.
+// Grant it only for testnet params that declare a fastCycle profile; never on mainnet.
+if (networkName(params) === 'mainnet') delete process.env.A9_ALLOW_FAST_TIMING;
+else if (params.fastCycle && process.env.A9_ALLOW_FAST_TIMING === undefined) process.env.A9_ALLOW_FAST_TIMING = '1';
+const TIMING_ENV_KEYS = ['A9_TIMING_PREVIEW_SECONDS', 'A9_TIMING_STAKE_SECONDS', 'A9_TIMING_CANDLE_SECONDS', 'A9_TIMING_CANDLE_COUNT', 'A9_TIMING_MIN_QUALIFIED', 'A9_TIMING_ABORT_TIMEOUT_SECONDS', 'A9_TIMING_FALLBACK_UNLOCK_SECONDS'];
 
 const fromLog = str(args, 'from-log');
 const overrides = {
@@ -53,15 +66,17 @@ function renderDeployCommand() {
     contractsDir: params.toolchain.contractsDir,
     keeper: keeper || '<KEEPER>',
     teamWallet: teamWallet || '<TEAM_WALLET>',
+    junxiangPublisher: junxiangPublisher || '<JUNXIANG_PUBLISHER>',
   });
 }
 
-section('部署范围（contracts/scripts/deploy-emulation.tolk，v10）');
-detail('顺序：部署 JettonMaster → mint 100 亿到 treasury（mint-once，同笔关闭铸造）→ 部署 RoundController（keeper/teamWallet/参数/JettonWallet 代码写入初始数据）→ 核对 RC 钱包推导 → 注资 82 亿（forward_ton_amount = 0）。');
-detail('v10 没有 admin，也没有任何钱包绑定 / 角色绑定步骤（RC 在链上自行推导 Jetton Wallet）；分步部署只保留 Jetton 两步（10/11）。');
+section('部署范围（contracts/scripts/deploy-emulation.tolk，v11）');
+detail('顺序：部署 JettonMaster → mint 100 亿到 treasury（mint-once）→ 部署 RoundController（keeper/teamWallet/参数/JettonWallet+StakeTicket 代码写入初始数据）→ 核对 RC 钱包推导与 ticket code hash → 注资 82 亿（forward_ton_amount = 0）→ 部署 JunxiangDistributor（不注资）→ 读回 get_distributor。');
+detail('v11 没有 admin，也没有任何钱包绑定 / 角色绑定步骤（RC 在链上自行推导 Jetton Wallet）；分步部署只保留 Jetton 两步（10/11）。');
 kv('keeper', keeper || '（未提供：登记表 wallets.keeper 或 ' + params.roles.keeper.env + '）');
 kv('teamWallet', teamWallet || '（未提供：登记表 wallets.teamWallet 或 ' + params.roles.teamWallet.env + '）');
-kv('时间参数', ['A9_TIMING_PREVIEW_SECONDS', 'A9_TIMING_STAKE_SECONDS', 'A9_TIMING_CANDLE_SECONDS', 'A9_TIMING_CANDLE_COUNT', 'A9_TIMING_MIN_QUALIFIED'].map((key) => process.env[key]).join(' / '));
+kv('junxiangPublisher', junxiangPublisher || '（未提供：默认 keeper，但 keeper 也未确定）');
+kv('时间参数', TIMING_ENV_KEYS.map((key) => key + '=' + process.env[key]).join(' '));
 kv('最低质押 raw', process.env.A9_DEPLOY_MIN_STAKE_RAW);
 kv('Acton 版本', toolchain.pinnedVersion || toolchain.version || '（未知）');
 kv('命令', hasCommand(params, 'deployAllContracts') ? renderDeployCommand() : '（模板缺失）');
@@ -102,7 +117,7 @@ if (!keeper || !teamWallet) {
   fail('keeper / teamWallet 必须在部署前确定（写入 RC 初始数据，永久不可改）：先登记 wallets.keeper / wallets.teamWallet，或设置 ' + params.roles.keeper.env + ' / ' + params.roles.teamWallet.env);
   process.exit(finish());
 }
-for (const [label, address] of [['keeper', keeper], ['teamWallet', teamWallet]]) {
+for (const [label, address] of [['keeper', keeper], ['teamWallet', teamWallet], ['junxiangPublisher', junxiangPublisher]]) {
   if (!parseAddress(address).ok) { fail(label + ' 地址非法：' + address); process.exit(finish()); }
 }
 const command = renderDeployCommand();
@@ -148,7 +163,7 @@ function codeHashViaActon(address) {
 }
 
 function parseAddresses(text) {
-  const found = { jettonMaster: null, roundController: null, roundControllerJettonWallet: null };
+  const found = { jettonMaster: null, roundController: null, roundControllerJettonWallet: null, junxiangDistributor: null, junxiangDistributorJettonWallet: null };
   const others = [];
   const lines = String(text).split(String.fromCharCode(10));
   for (const line of lines) {
@@ -158,7 +173,9 @@ function parseAddresses(text) {
     const lower = line.toLowerCase();
     const first = addresses[0];
     if (lower.includes('funded rc jetton wallet')) continue; // 注资行不含地址
-    if (lower.includes('rc jetton wallet') || (lower.includes('jetton wallet') && (lower.includes('roundcontroller') || lower.includes('round controller')))) found.roundControllerJettonWallet = found.roundControllerJettonWallet || first;
+    if (lower.includes('distributor jetton wallet')) found.junxiangDistributorJettonWallet = found.junxiangDistributorJettonWallet || first;
+    else if (lower.includes('junxiangdistributor') || lower.includes('junxiang distributor')) found.junxiangDistributor = found.junxiangDistributor || first;
+    else if (lower.includes('rc jetton wallet') || (lower.includes('jetton wallet') && (lower.includes('roundcontroller') || lower.includes('round controller')))) found.roundControllerJettonWallet = found.roundControllerJettonWallet || first;
     else if (lower.includes('jettonmaster') || lower.includes('jetton master')) found.jettonMaster = found.jettonMaster || first;
     else if (lower.includes('roundcontroller') || lower.includes('round controller')) found.roundController = found.roundController || first;
     else others.push(first);
@@ -176,11 +193,14 @@ async function registerFromText(text, logPath) {
     jettonMaster: 'JettonMaster',
     roundController: 'RoundController',
     roundControllerJettonWallet: 'RC Jetton Wallet',
+    junxiangDistributor: 'JunxiangDistributor',
+    junxiangDistributorJettonWallet: 'Distributor Jetton Wallet',
   };
   section('解析部署地址');
   const buildNameByKey = {
     jettonMaster: 'JettonMaster',
     roundController: 'RoundController',
+    junxiangDistributor: 'JunxiangDistributor',
   };
   const rows = [];
   const inactive = [];

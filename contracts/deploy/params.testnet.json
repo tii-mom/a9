@@ -1,6 +1,7 @@
 {
-  "$comment": "A9 Protocol V6.2 deployment parameter template (12h preview + 36h staking + 24h observation = 72h/round, 30 days for 10 rounds). Values in raw units where noted; USD_E8 = USD * 1e8. Fill every <PLACEHOLDER> before deploying. Candle/observation timing is V6.2; source of truth: docs/00 (current), docs/04, docs/11.",
+  "$comment": "A9 Protocol v11 deployment parameters (testnet). Source of truth for values: ops/config/testnet.params.json (production timing) or ops/config/testnet-fast.params.json (fast-cycle drill). This file is the contract-side summary used by contracts/scripts/deploy-emulation.tolk defaults; keep it in step with ops/config. No TeamVault / OracleAdapter / rewardV2 (removed in v10/v11). Addresses are produced by the deployment, never typed here.",
   "network": "testnet",
+  "contractsVersion": "v11",
   "token": {
     "name": "A9",
     "symbol": "A9",
@@ -16,7 +17,9 @@
     "teamPerRoundRaw": "120000000000000000",
     "internalSaleCapRaw": "800000000000000000",
     "liquidityRaw": "500000000000000000",
-    "marketingRaw": "500000000000000000"
+    "marketingRaw": "500000000000000000",
+    "rcFundingRaw": "8200000000000000000",
+    "rcFundingForwardTonNano": "0"
   },
   "price": {
     "p0UsdE8": "116000",
@@ -25,73 +28,77 @@
     "note": "target = max(P0 * 2^tier, 2 * opening 24h TWAP), locked at open; ladder R10 = 118784000 USD_E8"
   },
   "round": {
+    "timingProfile": "production",
     "previewSeconds": 43200,
     "stakeDurationSeconds": 129600,
     "observationSeconds": 86400,
     "candleSeconds": 3600,
     "candleCount": 24,
     "minQualifiedCandles": 16,
-    "failureThreshold": "qualified < 16 after 24 candles => SETTLING_FAILURE",
+    "failureThreshold": "qualified < 16 after 24 candles => FAILED_PERMANENT",
     "singleRoundSeconds": 259200,
     "tenRoundsSeconds": 2592000
   },
+  "timingFastCycle": {
+    "timingProfile": "fast-cycle",
+    "previewSeconds": 600,
+    "stakeDurationSeconds": 1800,
+    "candleSeconds": 60,
+    "candleCount": 24,
+    "minQualifiedCandles": 16,
+    "abortTimeoutSeconds": 900,
+    "tenRoundsSeconds": 38400,
+    "envOverride": "A9_TIMING_PREVIEW_SECONDS / A9_TIMING_STAKE_SECONDS / A9_TIMING_CANDLE_SECONDS / A9_TIMING_CANDLE_COUNT / A9_TIMING_MIN_QUALIFIED / A9_TIMING_ABORT_TIMEOUT_SECONDS"
+  },
   "stakingLimits": {
-    "minStakeRaw": "10000000000000",
-    "minStakeHuman": "10000",
-    "maxStakePerAddressRaw": "20000000000000000",
-    "maxStakePerAddressHuman": "20000000",
-    "maxStakePerAddressBps": 1000,
-    "maxTotalStakeRaw": "200000000000000000",
-    "maxTotalStakeHuman": "200000000"
+    "minStakeRaw": "1000000000000",
+    "minStakeHuman": "1000",
+    "maxStakePerAddressRaw": "0",
+    "maxStakePerAddressBps": 0,
+    "maxTotalStakeRaw": "0",
+    "note": "v11: no per-address cap and no round cap"
   },
   "technicalAbort": {
-    "pauseSeconds": 1209600,
-    "observationTimeoutSeconds": 604800
+    "abortTimeoutSeconds": 604800,
+    "note": "observation and preview share abortTimeoutSeconds (fast-cycle: 900)"
+  },
+  "stakeTicket": {
+    "codeHash": "0xB04B6A611A93401F40B10274D85E72EAAF9624553F546FAC7C4CDCD7555A4F91",
+    "claimTonMinNano": "150000000",
+    "restakeTonMinNano": "250000000",
+    "note": "one ticket per (owner, round); address derived from RC + owner + round + code"
+  },
+  "junxiangDistributor": {
+    "publisherDefault": "keeper",
+    "publisherEnv": "A9_JUNXIANG_PUBLISHER_ADDRESS",
+    "codeHash": "0x9E07E813F0081B715C084BCF479C35E94BA4A711CAF4844C68112B5565B742D8",
+    "recordCodeHash": "0x8DB60A5B92079367C80AAA9856B2CDDABAFB0667F0C1CEC0CBF19359D8388D61",
+    "initialListId": 0,
+    "firstPublishedListId": 1,
+    "fundingRule": "not funded at deploy; ops funds the distributor jetton wallet with >= the cumulative total BEFORE each junxiang-set-root",
+    "note": "cumulative Merkle model (contracts/README §7.1); no admin, no withdrawal"
+  },
+  "roles": {
+    "keeper": "A9_KEEPER_ADDRESS (writes RC initial data; cannot be changed)",
+    "teamWallet": "A9_TEAM_WALLET_ADDRESS (required with --net)",
+    "junxiangPublisher": "A9_JUNXIANG_PUBLISHER_ADDRESS (default keeper; writes distributor initial data)"
   },
   "riskDisclosureVersion": 1,
   "configVersion": 1,
   "addresses": {
-    "admin": "<ADMIN_OWNER_ADDRESS>",
-    "oracle": "<ORACLE_OR_GUARDIAN_ADDRESS>",
-    "jettonMaster": "<JETTON_MASTER_ADDRESS>",
-    "teamVault": "<TEAM_VAULT_ADDRESS>",
-    "roundController": "<ROUND_CONTROLLER_ADDRESS>",
-    "roundControllerJettonWallet": "<RC_JETTON_WALLET_ADDRESS>",
-    "teamVaultJettonWallet": "<TEAM_VAULT_JETTON_WALLET_ADDRESS>",
-    "teamWallet": "<TEAM_HOT_WALLET_ADDRESS>",
-    "teamInternalWallet": "<TEAM_INTERNAL_SALE_WALLET>"
-  },
-  "tonBalances": {
-    "roundController": "20",
-    "teamVault": "10"
+    "_": "filled by deploy-emulation.tolk into contracts/deploy/*.addr and ops/config/testnet.registry.json",
+    "jettonMaster": "contracts/deploy/jetton-master.addr",
+    "roundController": "contracts/deploy/round-controller.addr",
+    "junxiangDistributor": "contracts/deploy/junxiang-distributor.addr"
   },
   "deployOrder": [
-    "1. Deploy Jetton Master, mint 10,000,000,000 A9, close mint authority",
-    "2. Deploy TeamVault (placeholder jettonWallet = admin, controller = null)",
-    "3. Deploy RoundController with teamVault address (placeholder stakingJettonWallet = admin)",
-    "4. Jetton Master.get_wallet_address(roundController) -> admin RoundController.SetJettonWallet",
-    "5. Jetton Master.get_wallet_address(teamVault) -> admin TeamVault.SetJettonWallet",
-    "6. admin TeamVault.InitController(roundController) (one-time)",
-    "7. Fund RC Jetton Wallet with 7,000,000,000 A9; TeamVault Jetton Wallet with 1,200,000,000 A9",
-    "8. Fund TON gas balances; admin OpenRound(round 1) with opening 24h TWAP"
-  ],
-  "rewardV2": {
-    "version": "V8.0",
-    "streakBpsPerRound": 1000,
-    "streakMax": 10,
-    "referralBps": 2000,
-    "referralCap": "min(20% x referredStake, referrer ownStake)",
-    "rewardStates": [
-      "PENDING=0",
-      "ROLLED=1",
-      "EARLY=2"
-    ],
-    "earlyClaimRatio": "50%",
-    "rollPerAddressCapRaw": "20000000000000000",
-    "rollRoundCapRaw": "200000000000000000",
-    "unlockDurationSeconds": 31104000,
-    "unlockNote": "12 x 30 days linear after R10 terminal; early forfeit + pending rewards go to this pool",
-    "rounding": "reward = floor(700M * weight / totalWeight); dust stays in vault (no extra mint)",
-    "legacyClaimSemantics": "ClaimPrincipal 100%; ClaimReward/ClaimAll reward = 50% paid + 50% locked (EARLY) during ladder; after R10 unlock ClaimReward rejected"
-  }
+    "1. Deploy JettonMaster, MintOnce 100 亿 to treasury (same transaction closes minting)",
+    "2. Deploy RoundController (keeper, jettonMaster, teamWallet, params, JettonWallet + StakeTicket codes)",
+    "3. Verify RC.get_jetton_wallet_address == JettonMaster.get_wallet_address(RC); RC.get_ticket_code_hash == StakeTicket build",
+    "4. treasury -> RC: 82 亿 A9 with forward_ton_amount = 0",
+    "5. Deploy JunxiangDistributor (publisher = junxiangPublisher, codes = JettonWallet + ClaimRecord); verify get_distributor; NO funding",
+    "6. Fund TON gas (RC >= 20 TON, keeper >= 2 TON); treasury distributes internal sale 8 亿 / liquidity 5 亿 / marketing 5 亿",
+    "7. keeper: OpenRound(round 1)",
+    "8. weekly junxiang: fund distributor wallet >= cumulative total, then publisher SetRoot(listId, root)"
+  ]
 }

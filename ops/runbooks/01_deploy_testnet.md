@@ -1,46 +1,28 @@
-# 01 — A9 测试网部署 Runbook（TON testnet，v10）
+# 01 — A9 测试网部署 Runbook（TON testnet，v11）
 
-**版本**：v10（2026-11-06，D-42）
+**版本**：v11（2026-11-07，玩法 docs/35，D-43 ~ D-50）
 **Owner**：testnet-ops
-**权威口径**：contracts/README.md（§0–§5）、docs/34_V10_MIGRATION.md §4、docs/00 的 D-42
-**对应脚本**：00_preflight → 15_deploy_contracts → 40 → 55 → 50 → 60 → verify_deployment → 80（open-round R1）
-**默认模式**：所有脚本默认 **DRY-RUN**；只有 OPS_EXECUTE=1（写操作再加 OPS_CONFIRM=YES）才广播交易。
+**权威口径**：docs/35_GAMEPLAY_V11.md、contracts/README.md（§5 ABI、§6 部署、§7.1 军饷合约）、本文
+**脚本与命令**：以 `ops/README.md` 为准（§1.1 部署顺序、§1.2 快测档、§5.3 军饷充值与发根）。本文命令与该 README 一致，环境变量见 §2.0。
+**默认模式**：所有脚本默认 DRY-RUN。真实广播需要 `OPS_EXECUTE=1`；注资、开轮、提交 K 线、军饷发根等写操作另需 `OPS_CONFIRM=YES`。
 
 ---
 
-## 0. TL;DR（有合约构建产物后）
+## 0. 总览
 
-~~~bash
-cd /Users/yu1/Desktop/BAM
+部署顺序（测试网）：
 
-# 0) 参数与工具链检查（不发交易）
-node ops/scripts/00_preflight.mjs
+1. 部署 JettonMaster，同一笔交易 mint 100 亿 A9 到 treasury 并关闭铸造
+2. 部署 RoundController（RC），初始数据写入 keeper、teamWallet、协议参数、JettonWallet 与 StakeTicket 代码
+3. 核对 RC 推导的 Jetton 钱包与 Master 返回值一致，核对 ticket code hash
+4. treasury 向 RC 转 **82 亿 A9**（`forward_ton_amount` = 0）
+5. 给 RC 充 TON
+6. 部署 JunxiangDistributor（军饷分发合约）。此时不注资，不发根
+7. 部署后检查（§3），全部 PASS 才继续
+8. 部署测试网 Worker（D1、secrets、vars、GitHub 变量）、设置 Telegram webhook、创建 STON.fi 测试池、部署 Web
+9. 开 R1，见 `02_round_operations.md`
 
-# 1) 全流程 dry-run，逐条核对命令与地址
-node ops/scripts/deploy_all.mjs
-
-# 2) 真实部署（整体 deploy-emulation：JettonMaster + mint-once + RC + 钱包推导校验 + 82 亿注资）
-export OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<acton-wallet-name>
-node ops/scripts/15_deploy_contracts.mjs --execute
-node ops/scripts/40_init_params.mjs --execute --online
-OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
-OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
-node ops/scripts/60_verify_and_register.mjs --execute
-node ops/scripts/verify_deployment.mjs --online --save
-# ↑ 默认 STRICT：必检项必须全部 PASS；任一 FAIL 不得开 R1。
-#   --lenient 仅用于排查，输出不得作为开轮或上线依据。
-
-# 3) 开 R1（R1 无预告期，部署后由 keeper 直接 OpenRound）
-OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<keeper-wallet-name> node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
-
-# 备选：只做 Jetton 分步（10/11，位置参数），RC 仍用 15 部署
-# node ops/scripts/10_deploy_jetton.mjs --execute
-# node ops/scripts/11_mint_and_lock_jetton.mjs --execute
-~~~
-
-> **注意**：v10 **没有 admin**，RC 不可升级。keeper 地址与 teamWallet 地址在部署时写入 RC，之后**无法修改**。部署前必须在登记表核对 `wallets.keeper` 与 `wallets.teamWallet`；宁可停在 dry-run 也不要试错。
->
-> 15 完成后 RC 已持有 82 亿 A9，**不需要单独的接线步骤**（RC 在链上自行推导自己的 Jetton 钱包）。
+> RC 的 keeper 与 teamWallet 写死在部署数据里，之后无法修改。部署前必须在登记表核对这两个地址；宁可停在 dry-run，也不要试错。
 
 ---
 
@@ -48,345 +30,338 @@ OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<keeper-wallet-name> node ops/scr
 
 | # | 前置条件 | 检查方式 | 负责 |
 | --- | --- | --- | --- |
-| 1 | 参数已冻结并签字（P0=116000、倍数 2、12h/36h/24h、24 根/阈值 16、最低质押 10 万 A9、单地址每轮 2,000 万 A9、本轮总额 2 亿 A9） | `node ops/scripts/00_preflight.mjs` 全 PASS；参数哈希记入签字单 | 项目方 |
-| 2 | 合约已构建并通过测试（JettonMaster、JettonWallet、RoundController 三个） | `cd contracts && acton build && acton check && acton test`；code hash 与 contracts/README §0 一致 | 合约负责人 |
-| 3 | 部署脚本存在（contracts/scripts/deploy-emulation.tolk；scripts/deploy/fund_jetton.tolk、fund_ton.tolk、admin_op.tolk） | `ls contracts/scripts`；与命令模板逐条比对 | 合约负责人 |
-| 4 | Acton 版本锁定（1.1.0 / Tolk 1.4.1，与 contracts/Acton.toml 一致） | `acton --version`；`ops/config/testnet.params.json` 的 toolchain.pinnedVersion | 部署者 |
-| 5 | Acton 项目钱包已导入（助记词只在本地交互输入） | `cd contracts && acton wallet list` | 部署者 |
-| 6 | 部署者钱包测试网 TON 足够（建议 ≥25 TON） | 浏览器或 acton wallet 查询；00_preflight 会提示 | 部署者 |
-| 7 | 收款与运营地址已登记：keeper、treasury、teamWallet、marketingWallet、liquidityWallet、teamInternalWallet | 登记表 `wallets` 段；不公开地址至少向审计方披露 | 项目方 |
-| 8 | 参数哈希、时间窗、公告排期、值班人已确认 | 本 runbook §11 签字表 | Lead |
-| 9 | Worker API 已就绪（展示与对账用，不阻断部署） | `curl /api/health` | 后端 |
+| 1 | **Toncenter 测试网 API key**（只读查询用，存入本地环境或 secret，不进仓库） | 查询接口返回正常 | 部署者 |
+| 2 | **三个热钱包**：deployer / treasury（同一个或分开，需登记）、keeper（只放 gas）、junxiang publisher（只发根） | 地址登记 + 双人核对 | 项目方 |
+| 3 | **团队钱包（team wallet）**：接收团队额度，地址部署时写死 | 地址登记 + 双人核对 | 项目方 |
+| 4 | **测试网 TON**：从测试网 faucet 领取。deployer 建议 ≥ 25 TON；keeper ≥ 2 TON；RC 见 §4 | 钱包余额查询 | 部署者 |
+| 5 | **合约构建与代码哈希**：`cd contracts && acton build && acton check && acton test` 全部通过；代码哈希与 contracts/README §0、§7.1 一致（见下表） | 构建产物哈希比对 | 合约负责人 |
+| 6 | **参数**：v11 参数表已签字，记录参数哈希。`abortTimeoutSeconds` 按档位确定（正式测试网 604800 秒 = 7 天；快速演练档见 drill）；最低质押 1,000 A9 | `node ops/scripts/00_preflight.mjs`（快测档前加 `OPS_PARAMS=ops/config/testnet-fast.params.json`） | 项目方 |
+| 7 | **新建测试网 D1 数据库**。不复用主网库，也不复用旧 v8.9 彩排库 `a9-drill`（其配置 `worker/wrangler.drill.toml` 已删除；测试网用 `worker/wrangler.toml` 的 `[env.testnet]`） | 数据库名与 ID 登记 | 后端 |
+| 8 | **Telegram 测试 bot**（BotFather 创建）与 1–2 个测试群 | bot 能收发消息 | 运营 |
+| 9 | **STON.fi 测试网池**（§6） | 池子地址登记 | 运营 |
 
-**红线**：不要向任何人索要主网私钥；不要使用裸私钥（64 位 hex）；不要在共享屏幕或终端历史里粘贴助记词。
+**红线**：
 
----
+- 不向任何人索要主网私钥；不使用裸私钥（64 位 hex）。
+- 助记词只在本地交互输入，不粘贴进终端历史、截图或聊天。
+- 不把任何 API key、token、secret 写进仓库或 wrangler.toml。
 
-## 2. 环境变量（只作占位，绝不写入仓库）
+### 代码哈希（contracts/README §0、§7.1）
 
-| 变量 | 示例（占位） | 用途 | 是否敏感 |
-| --- | --- | --- | --- |
-| OPS_EXECUTE | 1 | 开启真实链上操作 | 否 |
-| OPS_CONFIRM | YES | 不可逆或写操作的二次确认 | 否 |
-| OPS_REGISTRY | ops/config/testnet.registry.json | 登记表路径（selftest 用临时文件） | 否 |
-| TON_DEPLOYER_WALLET | a9-deployer | Acton 项目钱包名（私钥在本地 keystore） | 否 |
-| A9_SIGNER_WALLET | a9-deployer / keeper | 广播脚本的签名钱包名，缺省 TON_DEPLOYER_WALLET | 否 |
-| A9_KEEPER_ADDRESS | （由 15 从登记表 `wallets.keeper` 读取） | 传给 deploy-emulation，作为 RC 的 keeper | 否（地址） |
-| A9_TEAM_WALLET_ADDRESS | （由 15 从登记表 `wallets.teamWallet` 读取） | 传给 deploy-emulation，作为 RC 的团队收款钱包 | 否（地址，但不公开） |
-| TON_TREASURY_ADDRESS | <treasury address> | 100 亿 mint 的接收地址 | 是（不公开） |
-| OPS_ALLOW_EMULATION | true | 本地验证广播（不真实上链，可打印 trace hash） | 否 |
-| TON_DEPLOYER_MNEMONIC | <24-word mnemonic> | **仅非 Acton 工具链**使用，由密码管理器或硬件钱包提供 | **是** |
-| TONCENTER_API_KEY | <testnet key> | TON Center 只读查询（无 key 限速 1 RPS） | **是** |
-| TELEGRAM_BOT_TOKEN / TELEGRAM_OPS_CHAT_ID | <token> / <chat id> | 告警与公告发送 | **是** |
-| ADMIN_TOKEN | <worker admin token> | Worker 管理接口（监控可选） | **是** |
+| 合约 | 代码哈希 |
+| --- | --- |
+| JettonWallet | `0xD06DAA57ED188CE9CB6CA596DD2111347433BF335223AC66C0D713C8E3DB74F4` |
+| JettonMaster | `0x76B56D9A6301223F1201D719E2F4A3FB84E08D7D701CB93BB43C9D0208E5E241` |
+| RoundController | `0x1037BACD95A773F713A506A81C8009D7858B6005CFCB97D2A58E7F438FDBD226` |
+| StakeTicket | `0xB04B6A611A93401F40B10274D85E72EAAF9624553F546FAC7C4CDCD7555A4F91` |
+| JunxiangDistributor | `0x9E07E813F0081B715C084BCF479C35E94BA4A711CAF4844C68112B5565B742D8` |
+| ClaimRecord | `0x8DB60A5B92079367C80AAA9856B2CDDABAFB0667F0C1CEC0CBF19359D8388D61` |
 
-推荐做法：用 `acton wallet import` 交互导入助记词，**不设置** TON_DEPLOYER_MNEMONIC；只有非 Acton 工具链才用环境变量，用完立即 unset。
+> `contracts/deploy/params.testnet.json` 仍是 v6 旧参数（有 `<PLACEHOLDER>`，且仍写着单地址上限、总额上限）。v11 不能直接用它，必须按 v11 参数重新生成，并核对 `ticketCodeHash` 等新字段。
 
 ---
 
-## 3. 工具链锁定
+## 2. 部署步骤
+
+### 2.0 环境与整体部署命令（对应 ops/README.md §1.1）
+
+钱包先在 `contracts/` 下用 `acton wallet import` 交互导入（名字：`deployer`、`admin`；keeper 钱包名为 `<keeper 钱包名>`，导入时自定）。环境变量只放在当前 shell，不写入文件。
 
 ~~~bash
-export PATH=$HOME/.acton/bin:$PATH
-acton --version          # 期望 acton 1.1.0
-cd contracts && acton build && acton check && acton test
+cd <repo root>
+export A9_KEEPER_ADDRESS=<keeper 测试网地址>            # 写入 RC，部署后不可改
+export A9_TEAM_WALLET_ADDRESS=<teamWallet 测试网地址>    # 写入 RC，部署后不可改
+export A9_JUNXIANG_PUBLISHER_ADDRESS=<publisher 测试网地址>   # 可选，默认 = keeper
+export TON_DEPLOYER_WALLET=deployer                    # 部署者（mint-once、注资）
+export A9_SIGNER_WALLET=deployer                       # 每一步改成对应签名钱包
+export OPS_PARAMS=ops/config/testnet-fast.params.json  # 快测档；正式档不设置
+
+node ops/scripts/selftest.mjs
+node ops/scripts/00_preflight.mjs                      # 必须无阻断项
+node ops/scripts/15_deploy_contracts.mjs --execute     # JettonMaster → mint-once → RC → 82 亿注资 → JunxiangDistributor（不注资）
 ~~~
 
-- 构建产物在 contracts/build/（JSON/ABI）与 contracts/build/abi/（消息 ABI）。
-- 升级工具链：更新 contracts/Acton.toml → 重新构建 → 重跑测试 → 更新 toolchain.pinnedVersion → 重新生成配置哈希。
-- 命令模板在 ops/config/testnet.params.json → toolchain.adapters.acton.commands；与 contracts/scripts 实际参数不一致时**先改模板**，不要手工改脚本逻辑。
+以下 2.1–2.4 都由上面这一条 `15_deploy_contracts.mjs --execute` 完成，逐项说明保留作为核对依据。
+
+### 2.1 JettonMaster（mint once）
+
+- 命令：由 `15_deploy_contracts.mjs --execute` 完成（§2.0）。
+- 动作：部署 JettonMaster，mint 100 亿 A9（1e19 raw）到 treasury，**同一笔交易内关闭铸造**（admin 置空）。
+- 预期（链上回读）：
+  - total_supply = 1e19 raw
+  - mintable = false
+  - admin = null
+  - decimals = 9，symbol = A9
+- 记录：部署交易哈希、JettonMaster 地址、code hash。
+
+### 2.2 RoundController
+
+- 初始数据：keeper 地址、JettonMaster 地址、teamWallet 地址、协议参数（含 `abortTimeoutSeconds`、时长、阈值）、`codes = { JettonWallet 代码, StakeTicket 代码 }`。
+- 初始状态：carry、lastSuccessRound、teamPending、endAt 均为 0。
+- 命令：同 §2.0（`15_deploy_contracts.mjs --execute`）。部署后核对：`node ops/scripts/30_deploy_round_controller.mjs`（初始数据快照，只读核对清单）。
+- 部署前双人核对：keeper、teamWallet 地址与登记表一致。
+
+### 2.3 JunxiangDistributor
+
+- 初始数据：publisher（军饷发布热钱包）、JettonMaster 地址、ClaimRecord 代码。
+- 命令：同 §2.0（`15_deploy_contracts.mjs --execute` 内完成，读回 `get_distributor`）。
+- 本步不注资，不发根。第一份根在第一次军饷结算时发布（见 `02_round_operations.md` §4）。
+
+### 2.4 注资 RC 82 亿 A9
+
+- 来源：treasury → RC 的 Jetton 钱包（owner = RC）。
+- 金额：**8,200,000,000 A9**（raw 8200000000000000000）。
+- `forward_ton_amount` 必须为 **0**。
+- 命令：同 §2.0（`15_deploy_contracts.mjs --execute` 内完成，forward 为 0）。
+- 注资后核对（只读）：`node ops/scripts/40_init_params.mjs --execute --online`。
+
+**注资防呆（沿用 2026-11-05 注资事故教训，完整记录见 `ops/records/incident-2026-11-05-funding-misallocation.md`）**：
+
+1. 接收参数必须是**接收 owner（RC 合约地址）**，不能是 Jetton Wallet 地址。传错会被发送方再推导一次，资金错投且不可找回。
+2. 注资前四者必须一致并逐项打印核对：
+   - 接收 owner（RC 地址）
+   - 脚本推导的 expected wallet
+   - `JettonMaster.get_wallet_address(RC)` 的链上返回值
+   - 登记表中记录的 canonical wallet
+3. 第一笔先发 **1 A9** 试探，确认 RC 钱包余额增加 1 A9 后才发大额。
+4. 每笔后独立查询目标钱包余额，与"转前余额 + 金额"精确比对，不一致立即停止。
+5. dry-run 不能替代小额实盘验证。
+
+### 2.5 treasury 分配（测试网）
+
+- 内盘、流动性、营销等分配按测试网分配单执行，地址只记在内部登记表。
+- 命令（快测档 / 正式档相同，`OPS_PARAMS` 已在 §2.0 设置）：
+
+  ~~~bash
+  OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --probe --all
+  node ops/scripts/60_verify_and_register.mjs --execute
+  ~~~
+
+- 测试网演练用的 A9 测试钱包余额（drill §2）也从这里分发，分发记录写入登记表。
 
 ---
 
-## 4. Dry-run 演练（强制）
+## 3. 部署后检查（全部 PASS 才继续）
+
+按顺序执行（ops/README.md §1.1）：
 
 ~~~bash
-node ops/scripts/00_preflight.mjs
-node ops/scripts/deploy_all.mjs                    # 默认整体部署：00 → 15 → 40 → 55 → 50 → 60 → verify（dry-run）
-node ops/scripts/deploy_all.mjs --mode jetton      # 分步备选：10 → 11（dry-run）
-node ops/scripts/15_deploy_contracts.mjs
-node ops/scripts/40_init_params.mjs
-node ops/scripts/55_fund_ton.mjs
-node ops/scripts/50_fund_vaults.mjs --all
-node ops/scripts/60_verify_and_register.mjs
-node ops/scripts/verify_deployment.mjs --offline   # 默认 STRICT；离线只覆盖不变量与登记表
+node ops/scripts/40_init_params.mjs --execute --online                     # get_protocol_config 逐项比对 + ticket code hash
+OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --probe --all   # 内盘 / 流动性 / 营销核对
+node ops/scripts/60_verify_and_register.mjs --execute                       # 登记表定稿 + 地址簿
+node ops/scripts/verify_deployment.mjs --online --save                      # STRICT：必须 0 FAIL 才允许开 R1
 ~~~
 
-> **验收模式（STRICT / LENIENT）**：`verify_deployment.mjs` 默认 STRICT。`--lenient` 仅用于排查，**输出不得作为开轮或上线依据**。`--offline` 不覆盖链上状态，**开轮前必须再跑 `--online` 且必检项全 PASS**。
+`verify_deployment` 有 FAIL 时不得开 R1。`--lenient` 只用于排查，输出不作为开轮依据。
 
-验收 dry-run 输出：
-
-- [ ] 每个脚本打印 [DRY-RUN]，退出码 0，没有发任何交易。
-- [ ] 40 生成 ops/records/params-snapshot.json 与 round-controller.init.json，字段与 contracts/README §4 一致（12h / 36h / 24h、24 根 × 1h、阈值 16、最低质押 100000 A9）。
-- [ ] 50 `--all` 显示 8 亿（内盘）、5 亿（流动性）、5 亿（营销）三笔；与 15 的 82 亿合计 100 亿。
-- [ ] 命令模板中的占位符（{contractsDir}、{treasury} 等）全部被替换，无 `{...}` 残留。
-- [ ] 登记表未被静默改写（60 在 dry-run 只校验，不落真实地址）。
+- [ ] `RC.get_jetton_wallet_address()` = `JettonMaster.get_wallet_address(RC)`
+- [ ] `RC.get_ticket_code_hash()` = `0xB04B6A61…5A4F91`（与 §1 一致）
+- [ ] `RC.get_jetton_wallet_code_hash()` 与 JettonWallet 代码哈希一致
+- [ ] `RC.get_protocol_config()` 各字段与参数签字单一致，尤其：
+  - `abortTimeoutSeconds`（正式档 604800；快速档按 drill）
+  - `minStake` = 1,000 A9
+  - previewSeconds、stakeDurationSeconds、candleSeconds、candleCount（24）、minQualifiedCandles（16）
+- [ ] `RC.get_protocol_state()`：carry = 0、lastSuccessRound = 0、teamPending = 0、endAt = 0、successCount = 0、currentRoundId = 0
+- [ ] RC 的 Jetton 钱包余额 = **8,200,000,000 A9**（raw 8200000000000000000）
+- [ ] JettonMaster：total_supply = 1e19、mintable = false、admin = null
+- [ ] `JunxiangDistributor.get_distributor()`：publisher、JettonMaster 正确；分发钱包余额为 0（首次注资前）
+- [ ] `JunxiangDistributor` 的 ClaimRecord 代码哈希与 §1 一致
+- [ ] 地址全部登记；内盘、流动性、营销等非公开地址不对外公开
 
 ---
 
-## 5. 部署步骤（整体部署是唯一推荐路径）
+## 4. RC 充 TON
 
-> **唯一推荐部署路径（测试网）**：
-> `15_deploy_contracts.mjs --execute` → `40_init_params.mjs --execute --online` → `55_fund_ton.mjs` → `50_fund_vaults.mjs --all` → `60_verify_and_register.mjs --execute` → `verify_deployment.mjs --online --save` → `80 open-round R1`
+- RC 每次结算的销毁与团队转账都要 TON。领取与续战的 TON 由用户附带（见 contracts/README §3）。
+- 门槛：脚本门槛沿用既有值，RC ≥ **20 TON**、keeper ≥ 2 TON。contracts/README §6 建议 ≥ 5 TON，两者取较大者，即 RC ≥ 20 TON。
+- 命令（脚本检查 RC ≥ 20 TON、keeper ≥ 2 TON，不足则补充）：
 
-### Step 0 — preflight
+  ~~~bash
+  OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
+  ~~~
 
-~~~bash
-node ops/scripts/00_preflight.mjs
-~~~
+- 充值后回读 RC 余额并登记。
 
-检查：参数不变量、登记表结构、密钥来源是否存在（不读取内容）、Acton 钱包、工具链、合约目录。
-
-失败处理：
-- 参数不变量失败：修正 ops/config/testnet.params.json，重跑 selftest，**不要**绕过。
-- contracts/ 或 build/ 不存在：等合约负责人完成构建。
-- 未发现 Acton 钱包：`cd contracts && acton wallet import`（交互）；仅测试时可 `acton wallet new`。
-
-### Step 15 — 整体部署（deploy-emulation）
-
-~~~bash
-node ops/scripts/15_deploy_contracts.mjs --execute
-# 等价：cd contracts && acton script --net testnet scripts/deploy-emulation.tolk
-~~~
-
-顺序（脚本内完成，无分步子命令）：
-
-1. 部署 **JettonMaster**，mint 100 亿 A9 到 treasury。**mint-once**：op 0x00000015，金额必须 1e19，**同一笔交易**内关闭铸造（admin 置 null），二次 mint 会报 MintClosed(75)。
-2. 部署 **RoundController**：keeper、jettonMaster、teamWallet、协议参数、JettonWallet 代码都写在初始数据里。
-3. RC 在链上推导自己的 Jetton 钱包，并与 `JettonMaster.get_wallet_address(RC)` 比对，必须一致。
-4. treasury 向 RC 转 **82 亿 A9**（8200000000000000000 raw：70 亿奖励池 + 12 亿团队额度），**forward_ton_amount = 0**。
-
-- forward 必须为 0：否则 RC 会把这笔当作质押并退回。
-- 脚本把地址写入登记表 `contracts`：jettonMaster、jettonMasterTreasuryWallet、roundController、roundControllerJettonWallet、teamWalletJettonWallet。
-- 链上复核：JettonMaster 的 total_supply = 1e19、mintable = false、admin = null；RC 钱包余额 = 82 亿 A9。
-- 失败时用 `--from-log <日志>` 重新解析登记（不重新部署）。
-
-### Step 40 — 参数校验（只读）
-
-~~~bash
-node ops/scripts/40_init_params.mjs --execute --online
-~~~
-
-- 生成 ops/records/params-snapshot.json。
-- 调用 RC 的 `get_protocol_config` 逐字段比对；任一不匹配 → FAIL，禁止开轮。
-- 本步骤**不发送交易**：v10 没有初始化消息。
-
-### Step 55 — TON gas 充值
-
-~~~bash
-OPS_CONFIRM=YES node ops/scripts/55_fund_ton.mjs --execute
-~~~
-
-- 脚本门槛：**RC ≥ 20 TON、keeper ≥ 2 TON**。contracts/README §5 写的建议值是 ≥ 5 TON；两者以较大者为准，即按 20 TON 执行。
-- RC 的 TON 不足时，结算转账和销毁会失败（见 02 的 SettlementBounced），轮次无法正常结算。
-- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> acton script --net testnet scripts/deploy/fund_ton.tolk <toAddress> <amountTon>`；amountTon 为整数 TON，脚本自动加 1 TON 缓冲。
-- 地址优先读登记表。
-
-### Step 50 — 注资与初始分配
-
-~~~bash
-OPS_CONFIRM=YES node ops/scripts/50_fund_vaults.mjs --execute --all
-~~~
-
-| 分配 | 金额 (A9) | 接收方 | 来源 |
-| --- | --- | --- | --- |
-| 奖励池 + 团队额度 | 8,200,000,000 | RC 的 Jetton 钱包（owner = RC） | 15 已完成，50 只检测并登记 |
-| 内盘销售 | 800,000,000 | teamInternalWallet（公开可查） | treasury，`--all` 时执行 |
-| 流动性 | 500,000,000 | liquidityWallet | treasury，`--all` 时执行 |
-| 营销 | 500,000,000 | marketingWallet | treasury，`--all` 时执行 |
-
-- 合计 100 亿 A9；执行后 treasury 余额应为 0（60 会核对）。
-- 第一笔自动以 1 A9 试探；链上确认目标钱包增加 1 A9 后才发剩余金额。每笔后用 `get_wallet_data` 核对增量。
-- 每笔成功后写 registry.funding；60 核对全部笔数是否 CONFIRMED。
-- 可分步：先只做 RC 检测与登记，确认后再补 `--all`。
-- 实际调用（单笔）：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> JETTON_MASTER_ADDRESS=<master> acton script --net testnet scripts/deploy/fund_jetton.tolk <recipientOwner> <amountRaw>`。**位置参数必须是接收 owner（RC、热钱包地址），不是 Jetton Wallet 地址**；传钱包地址会被发送方再次推导，造成错投（见 §8.2）。
-- 广播前脚本校验 signer 的 A9 余额，不足则可读报错并 exit 1。
-
-### Step 60 — 登记表定稿 + 地址簿
-
-~~~bash
-node ops/scripts/60_verify_and_register.mjs --execute
-~~~
-
-- 写入 paramsDigest，校验地址与资金，生成 ops/records/address-book.testnet.md 与 .json。
-- 团队、营销、流动性、内盘地址：**不公开**，只出现在内部地址簿；对外只写“项目方热钱包持有”。
-
-### Step 80 — 开 R1（keeper 手动开轮）
-
-~~~bash
-OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<keeper-wallet-name> node ops/scripts/80_admin_ops.mjs --action open-round --round 1 --twap24h <USD_E8>
-~~~
-
-- R1 无预告期：部署完成后 keeper 直接 OpenRound，交易中锁定 target = max(P0 × 2^1, 2 × twap24h)。
-- twap24h 的来源与双人复核见 07 §9.1，不得临时决定。
-- 开轮前确认：RC 与 keeper 的 TON 充足、82 亿已登记、公告已发、值班已就位。
-- 开轮后核对 TargetPriceSet 事件与 `get_round(1)` 回读的 target。
-- 实际调用：`cd contracts && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=<name> ROUND_CONTROLLER_ADDRESS=<rc> acton script --net testnet scripts/deploy/admin_op.tolk open-round 1 <twap24h>`。
-- RC 地址优先读登记表，缺失时回退 contracts/deploy/round-controller.addr。
-
-### Step 90 — 全量验收（STRICT 门禁）
-
-~~~bash
-node ops/scripts/verify_deployment.mjs --online --save   # 默认 STRICT；必检项必须全部 PASS
-~~~
-
-- 离线：参数、登记表结构、资金记录（**离线通过不构成开轮依据**）。
-- 在线：合约账户 active；RC 与 JettonWallet 的 code hash 与 contracts/build 一致；JettonMaster 的 total_supply、mintable、admin；RC 钱包余额；RC 配置逐字段；RC 推导的钱包地址与 JettonMaster 返回值一致。
-- 门禁语义：
-  - **默认 STRICT**：必检项必须全部 PASS；getter 缺失、返回栈异常、必检分支未执行，一律 FAIL。
-  - **`--lenient` 仅用于排查**：必检项降为 WARN，输出不得作为开轮依据。
-  - **code hash 不一致** = 线上实例与 contracts/build 不一致，**必须重部署到当前构建后再开轮**，不得用 `--lenient` 掩盖。
-  - 结尾做覆盖审计（`gate.missing.*`）：关键分支被跳过也会 FAIL。
-- 任一 FAIL → 不得开 R1；先按 §10 排查。
-
-#### Step 90 必检项（STRICT 全 PASS 才允许开 R1）
-
-- [ ] `params.digest`：登记表参数哈希 = 当前 ops/config（漂移则重跑 40/60）。
-- [ ] `registry.structure`：JettonMaster、RoundController 两个合约，以及 jettonMasterTreasuryWallet、roundControllerJettonWallet、teamWalletJettonWallet 地址均已登记，且为测试网地址。
-- [ ] `funding.*`：RC 82 亿（forward 0）已登记；`--all` 时内盘 8 亿、流动性 5 亿、营销 5 亿已确认。
-- [ ] `account.*`：JettonMaster、RC、RC 的 Jetton 钱包 `state=active`。
-- [ ] `jetton.total_supply` = 1e19（若已有销毁，核对销毁记录后再放行）；`jetton.mintable = false`；`jetton.admin_null = true`。
-- [ ] `roundController.code_hash` 与 `jettonWallet.code_hash` 与 contracts/build 的 JSON 完全一致（不一致 = 未重部署）。
-- [ ] RC 推导的 Jetton 钱包地址 = `JettonMaster.get_wallet_address(RC)`。
-- [ ] `rc.get_protocol_config`：全部字段与参数一致（P0、倍数、每轮奖励与团队额、最低质押 100000 A9、单地址与本轮上限、PREVIEW / 报名 / 观察 / K 线 / 阈值、技术终止时长、风险披露版本）。
-- [ ] RC 钱包余额 = 8,200,000,000 A9（forward 0 注资后，未有其他流入流出）。
-- [ ] `gate.missing.*`：无「必检项未执行」记录；出现即禁止开轮。
-
-> 报告落盘：`--save` 会在 `ops/records/verify-deployment-<date>.json` 记录 STRICT 模式、FAIL/WARN 与必检项通过数，作为开轮审批附件。
+RC 余额不足时，结算转账和销毁会失败，出现 SettlementBounced（见 `02_round_operations.md`）。
 
 ---
 
-## 6. 手工部署与 --adopt 路径
+## 5. Worker 部署（测试网）
 
-若部署脚本不可用，由合约负责人在钱包或 IDE 完成部署，记录地址、交易哈希与 code hash，然后用 --adopt 登记（只做校验，不发交易）：
+### 5.1 D1 迁移
 
-~~~bash
-node ops/scripts/10_deploy_jetton.mjs --adopt <jettonMaster>
-node ops/scripts/30_deploy_round_controller.mjs --adopt <roundController>
-~~~
+- 迁移文件：`worker/migrations/` 下 **0001–0012、0014、0015**。
+- **注意：仓库里没有 0013。** 这是有意留空还是漏文件，需要先确认。wrangler 按文件名顺序执行，缺号本身不影响执行。不要为了凑号新建空文件。
+- **不要直接运行根目录的 `npm run db:migrate`**。它指向顶层 `[[d1_databases]]` 绑定（`fuse-protocol`，database_id `b5945609…`，即演示库），会误操作演示库。
+- 新建测试网 D1（只做一次）：
 
-- 其余步骤（40、55、50、60、verify）不变。
-- adopt 地址必须是**测试网地址**；主网地址会被拒绝。
-- 若已有整体部署日志：`node ops/scripts/15_deploy_contracts.mjs --from-log <日志>` 可解析并登记地址（不重新部署）。
+  ~~~bash
+  cd worker
+  ./node_modules/.bin/wrangler d1 create a9-testnet     # 把返回的 database_id 写入 wrangler.toml 的 [env.testnet] 绑定
+  ./node_modules/.bin/wrangler d1 migrations apply a9-testnet --env testnet --remote
+  ~~~
 
----
+- 禁止使用根目录 `npm run db:migrate`（指向演示库）。
+- 验收：列出已应用迁移，确认 0001–0012、0014、0015 全部已应用（0013 待确认）。
 
-## 7. 地址登记表工作流
+### 5.2 Secrets（wrangler secret，不写入 wrangler.toml 与仓库）
 
-~~~text
-ops/config/testnet.addresses.template.json   // 人工填写模板（说明用途）
-        │
-        ├─ 15 整体部署输出解析 / 10、30 --adopt ──► ops/config/testnet.registry.json（唯一事实来源）
-        │
-        └─ 60_verify_and_register ──► ops/records/address-book.testnet.{md,json}
-~~~
-
-登记表结构（键名）：
-
-- `contracts`：jettonMaster、jettonMasterTreasuryWallet、roundController、roundControllerJettonWallet、teamWalletJettonWallet
-- `wallets`：keeper、treasury、teamWallet、marketingWallet、liquidityWallet、teamInternalWallet
-
-其他规则：
-
-- 每次写登记表都更新时间戳；不要把私钥、助记词、API key 写入登记表。
-- registryDigest = 合约 + 钱包 + 配置哈希的 sha256，用于对外公布“地址与配置未被篡改”。
-- 地址变更（例如重建部署）必须先人工确认旧地址作废，再清空对应字段；不要覆盖式静默替换。
-- 旧版（v8.x）登记表已移到 ops/config/archive/v8.9/，不再使用。
-
----
-
-## 8. 部署后演练（开 R1 前必须完成）
-
-对应 docs/34 §5 与 ops/drills/2026-11_prelaunch_drill_plan.md：
-
-- [ ] 成功轮：24 根齐备且 ≥16 达标 → 本金 + 奖励由 `Claim(roundId)` 一次领取；RC 向 teamWallet 直接转 1.2 亿，且只转一次。
-- [ ] 失败轮：一笔销毁（7 亿 + 1.2 亿 + 全部本金）→ total_supply 实际减少；不可领取。
-- [ ] 无人质押轮：照常 24 根观察；成功 → 7 亿销毁、团队额度照常释放；失败 → 销毁 7 亿 + 1.2 亿。
-- [ ] 技术终止：观察应结束后 7 天或预告结束后 7 天仍未推进，任何人可触发；本金可领；7 亿与 1.2 亿留在 RC（不分配、不销毁）。
-- [ ] 结算重试：出现 SettlementBounced 后调用 RetrySettlement（≥0.3 TON）。若测试网无法复现，记录为“未演练”，不得省略不写。
-- [ ] 第三方 response_destination 的标准转账（DEX 出款）：测试网 DEX 建池后验证买入、卖出、退款。
-- [ ] 每次演练后用 reconcile.mjs 对账，CSV 归档到 ops/records/。
-- [ ] 测试网完整跑满 10 轮（docs/34 §5）。
-
----
-
-## 8.1 v10 部署与运营要点（与旧口径的差异）
-
-1. **三个合约**：JettonMaster、标准 JettonWallet、RoundController。没有团队合约，也没有预言机合约。
-2. **没有 admin**：RC 不可升级、无提现、无参数修改入口；keeper 与 teamWallet 部署时写死。
-3. **没有接线步骤**：RC 在链上推导自己的 Jetton 钱包，部署后不需要任何设置消息。
-4. **82 亿注资 forward 0**：RC 同时托管 70 亿奖励池和 12 亿团队额度；成功轮 RC 直接转 1.2 亿给 teamWallet。
-5. **最低质押 10 万 A9**；质押 forward_ton_amount ≥ 0.1 TON（建议 0.12），质押消息总额建议 0.3 TON。
-6. **判定点**：第 24 根 K 线提交时直接判定为 SUCCEEDED 或 FAILED_PERMANENT，没有结算中间态。
-7. **结算退回**：只有结算转账或销毁在第一跳被退回时才需要 RetrySettlement；其他情况不需要人工干预。
-8. **Jetton mint-once**：op 0x00000015，金额 1e19，同一笔交易关闭铸造；verify 检查 total_supply、mintable、admin、decimals=9、symbol=A9。
-
----
-
-## 8.2 注资事故复盘与防呆检查清单（2026-11-05）
-
-2026-11-05 测试网注资时，70 亿 A9 被转入一个 owner 为 RC Jetton 钱包地址的错误钱包（不可找回）。根因是 fund_jetton 的位置参数要求**接收 owner**，而操作时传入的是**目标 Jetton Wallet 地址**，发送方钱包于是又推导了一次（wallet-of-wallet）。完整记录见 ops/records/incident-2026-11-05-funding-misallocation.md。
-
-**注资前必须逐项打印并人工核对（四者必须一致）**：
-
-1. 接收 owner 地址（RC / teamWallet / 热钱包）
-2. 接收 owner → expected wallet（fund_jetton 脚本打印的推导值）
-3. JettonMaster.get_wallet_address(owner) 的链上返回值
-4. 登记表 `wallets` 或 `contracts` 段中记录的 canonical wallet
-
-**强制流程**：
-
-- 第一笔必须 ≤ 1 A9 试探；链上确认 `get_wallet_data(dest).jettonBalance` 增加 1 A9 后，才允许发大额。
-- 每笔转账后独立查询 `get_wallet_data(dest)`，与“转前余额 + 金额”精确比对；不一致立即停止。
-- dry-run 不解析发送方推导，**不能替代**小额实盘验证。
-
----
-
-## 9. 回滚与重建策略（RC 不可升级）
-
-**核心约束**：RoundController 不可升级，keeper 与 teamWallet 写死在部署数据里。因此只能“修正后整套重建”，不能热修。
-
-| 阶段 | 可回滚程度 | 处理 |
+| 名称 | 用途 | 说明 |
 | --- | --- | --- |
-| JettonMaster 部署后、注资前 | 高 | 废弃该 Jetton（测试网），整套重新部署 |
-| 15 完成（82 亿已注资）后、开 R1 前 | 低 | 资金已进入不可改合约。参数、keeper 或 teamWallet 错误时，只能整套重建（新 Jetton、新 RC），旧地址作废并公告 |
-| R1 开轮后 | 极低 | 不热修；记录问题；按规则判定、结算或技术终止；下一套部署修复 |
+| `SESSION_SECRET` | TON Proof 登录后的 7 天会话签名 | 未配置时写接口的 Bearer 登录不可用 |
+| `TG_BOT_TOKEN` | 调用 Telegram Bot API | 只放 secret |
+| `TG_WEBHOOK_SECRET` | 校验 Telegram 回调头 `X-Telegram-Bot-Api-Secret-Token` | 必须与 §5.5 的 `secret_token` 一致 |
+| `ADMIN_TOKEN` | 管理接口（军饷 compute、payout build 等）的鉴权 | 不在清单三项里，但 `requireAdmin` 需要，必须另设 |
 
-**重建检查**：新 Jetton 意味着新的 total_supply；旧测试数据保留作历史，不要混用地址。重建后必须更新登记表、地址簿与配置哈希，并公告。
+- 命令（每条会提示输入值，值不要粘贴进聊天或命令历史）：
+
+  ~~~bash
+  cd worker
+  ./node_modules/.bin/wrangler secret put SESSION_SECRET --env testnet
+  ./node_modules/.bin/wrangler secret put ADMIN_TOKEN --env testnet
+  ./node_modules/.bin/wrangler secret put TG_BOT_TOKEN --env testnet
+  ./node_modules/.bin/wrangler secret put TG_WEBHOOK_SECRET --env testnet
+  ~~~
+- 设置后只记录"已设置"，不记录值。
+
+### 5.3 Vars（非机密，测试网环境）
+
+| 变量 | 测试网取值 | 说明 |
+| --- | --- | --- |
+| `DATA_SOURCE` | `chain` | 不能是 `demo` |
+| `CHAIN_NETWORK` | `testnet` | 不能是 `mainnet` |
+| `DEMO_ALLOW_UNSIGNED_WRITES` | `false` | 测试网也关闭无签名写入 |
+| `DEMO_AUTOPLAY` | `false` | 链上模式关闭演示自动推进 |
+| `ROUND_CONTROLLER_ADDRESS` | §2.2 的 RC 地址 | 测试网地址 |
+| `KEEPER_ADDRESS` | keeper 地址 | 测试网地址 |
+| `TEAM_WALLET_ADDRESS` | teamWallet 地址 | 测试网地址 |
+| `JETTON_MASTER_ADDRESS` | §2.1 的 JettonMaster 地址 | 测试网地址 |
+| `JUNXIANG_DISTRIBUTOR_ADDRESS` | §2.3 的分发合约地址 | 测试网地址 |
+| `TONCENTER_V2_URL` / `TONCENTER_V3_URL` | 测试网 Toncenter 地址 | 主网地址不要用 |
+| `TG_BOT_USERNAME` | 测试 bot 用户名（不带 @） | 用于生成小程序与群链接 |
+| `STONFI_POOL_ADDRESS` | §6 的测试池地址 | **未设时不发守城补贴，且不报错**，容易漏，部署后必须确认 |
+| `TON_PROOF_DOMAINS` | 测试站域名，逗号分隔 | 默认值含 `a9.lat`，测试网必须改成测试站域名，不要保留生产域名 |
+
+- 测试网 Worker 名：`a9-testnet`（workers.dev，`routes = []`，不会碰 a9.lat）。
+- **前置改动（未在本次完成）**：`worker/wrangler.toml` 目前只有 `[env.production]`。需要先新增 `[env.testnet]`：`[[env.testnet.d1_databases]]` 绑定 `a9-testnet` 的 database_id、`routes = []`、`[env.testnet.vars]`（见下表）。由 Worker 负责人补上后再执行本节命令。
+- **测试网 Worker 不能部署到生产 Worker 名 `fuse-protocol`（a9.lat）上。** 生产环境有门禁（要求 chain、mainnet、无无签名写入、生产 D1 独立）；测试网需要独立的 Worker 名和 D1。
+
+### 5.4 GitHub 变量（合约地址）
+
+- CI 当前读取的变量名是 `PROD_ROUND_CONTROLLER_ADDRESS`、`PROD_TEAM_WALLET_ADDRESS`、`PROD_KEEPER_ADDRESS`、`PROD_JETTON_MASTER_ADDRESS`、`PROD_ORACLE_CONFIG_HASH`、`PROD_D1_DATABASE_ID`。这些都是生产门禁用的。
+- **不要把测试网地址填进 `PROD_*`**。那样生产门禁会放行，但指向的是测试合约。
+- 测试网不走 CI，不使用 GitHub Variables。地址直接写在 `[env.testnet.vars]`。
+- 地址来源：`contracts/deploy/round-controller.addr`、`contracts/deploy/jetton-master.addr`；keeper、teamWallet、分发合约等其余地址从 `ops/config/testnet.registry.json` 取。
+- 军饷分发合约地址：变量名 `JUNXIANG_DISTRIBUTOR_ADDRESS`，写入 `[env.testnet.vars]`（§5.3 表中已列）。
+- 部署：`wrangler deploy --env testnet`（§7）。
+
+  ~~~bash
+  cd worker && ./node_modules/.bin/wrangler deploy --env testnet
+  ~~~
+
+### 5.5 Telegram webhook（setWebhook，带 secret_token）
+
+1. 确认 Worker 已部署，`https://<测试站域名>/api/tg/webhook` 可以访问。
+2. 调用 Telegram Bot API `setWebhook`：
+   - `url` = 上面的地址
+   - `secret_token` = `TG_WEBHOOK_SECRET` 的值
+   - 用环境变量传入 token 与 secret，不要把它们写进命令历史、截图或聊天。
+
+  ~~~bash
+  # TG_BOT_TOKEN、TG_WEBHOOK_SECRET 已放在当前 shell 的环境变量里
+  curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/setWebhook" \
+    -d "url=https://<测试站或 workers.dev 域名>/api/tg/webhook" \
+    -d "secret_token=${TG_WEBHOOK_SECRET}"
+  curl -s "https://api.telegram.org/bot${TG_BOT_TOKEN}/getWebhookInfo"
+  ~~~
+3. 调用 `getWebhookInfo` 验收：
+   - `url` 正确
+   - `last_error_message` 为空
+   - `pending_update_count` 正常（不持续增长）
+4. 在测试群发送 `/team` 或 `/gate`，确认 bot 有回复（完整检查见 drill §4 Phase 0）。
+5. 不带正确 `secret_token` 的请求不得被处理（见 `03_monitoring_alerting.md` 的 webhook 健康检查）。
+
+### 5.6 Worker 部署后检查
+
+- [ ] `GET /api/health` 返回 ok
+- [ ] `GET /api/rounds` 返回的链上配置与 §3 一致（链上模式，不是演示数据）
+- [ ] `GET /api/social/gate` 返回有效的 gate 状态
+- [ ] 管理接口不带 `ADMIN_TOKEN` 时被拒绝
+- [ ] cron 在测试网环境中生效。顶层 `[triggers]` 是每分钟一次；测试网环境要单独确认配置了，不要只看顶层
 
 ---
 
-## 10. 常见故障
+## 6. STON.fi 测试网池
+
+- 在 STON.fi testnet 创建 A9 与 TON（或测试 USDT）的池子，并注入初始流动性。
+- 池子地址写入 Worker 变量 `STONFI_POOL_ADDRESS`。
+- 池子用途有两个：守城补贴读取池子储备；一键上车（drill g）。
+- 创建步骤：ops 仓库里没有 STON.fi 池的脚本。在 STON.fi testnet 界面人工创建 A9 / TON（或测试 USDT）池，并记录池子地址，写入 `[env.testnet.vars]` 的 `STONFI_POOL_ADDRESS`。
+- 验收：
+  - Worker 能读到池子数据：`GET /api/social/gate` 返回的池子美元储备非空（未设置 `STONFI_POOL_ADDRESS` 时守城补贴不发，且不报错）
+  - 池子地址与登记表一致
+- 只能用测试网池子。不要在主网地址上做任何测试。
+
+---
+
+## 7. Web 部署
+
+- 根目录 `npm run build` 生成 `web/dist`。Worker 通过 ASSETS 托管 `web/dist`，所以部署 Worker 时用的必须是新构建。
+- 构建时的变量：`web/src` 里唯一用到的构建变量是 `VITE_ENABLE_DEMO_WALLET`，测试网不设置（或留空）。其余无需设置。
+- 构建与部署命令（根目录构建，Worker 托管 `web/dist`）：
+
+  ~~~bash
+  npm run build
+  cd worker && ./node_modules/.bin/wrangler deploy --env testnet
+  ~~~
+- 验收：
+  - 测试站页面打开正常，显示测试网
+  - `/tonconnect-manifest.json` 可读
+  - TON Connect 能连接测试网钱包
+
+---
+
+## 8. 部署后验收
+
+本文到此为止是"能跑起来"的检查。完整的链上与社交验收见 `ops/drills/2026-11_testnet_v11_10round_drill.md` 的 Phase 0。
+
+- [ ] §3 全部 PASS
+- [ ] §5.6 全部 PASS
+- [ ] Telegram webhook 健康（§5.5）
+- [ ] STON.fi 池可读（§6）
+- [ ] 签字（§10）
+
+---
+
+## 9. 常见故障
 
 | 现象 | 可能原因 | 处理 |
 | --- | --- | --- |
-| 未发现 Acton 钱包 | 未导入，或钱包名不同 | `cd contracts && acton wallet list`；`acton wallet import`；或设置 TON_DEPLOYER_WALLET |
-| 部署命令 exit≠0 | 工具链参数与模板不一致、余额不足、RPC 限速 | 对照 contracts/scripts 实际参数更新模板；充值 gas；配置 TONCENTER_API_KEY |
-| 15 报钱包推导不一致 | RC 推导值与 JettonMaster 返回值不同 | 立即停止，不做注资；交合约负责人排查 |
-| 地址解析失败 | 部署输出格式变化 | 用 --adopt 登记，并把输出片段反馈给合约负责人 |
-| verify FAIL：mintable=true | 铸造未关闭 | 立即停止；未确认关闭前不得注资或开轮；按整套重建处理 |
-| RC 钱包余额 ≠ 82 亿 | 注资金额或 forward 参数错误 | 立即停止后续注资；按 §8.2 核对；不得再次转账“补齐” |
-| 注资时 Jetton 钱包解析失败 | TON Center v3 不可用，或 owner 地址错误 | 配置 API key；用 get_wallet_address 人工核对；解析失败禁止盲转 |
-| 供应量不一致 | 手工转账绕过脚本，或分配漏记 | 停止后续步骤；用 reconcile.mjs --chain 对账；补记录或重建 |
+| 迁移报错或版本顺序不对 | 误用了演示库，或迁移文件缺失 | 确认目标库是测试网新库；确认 0013 状态；不要改已应用的迁移 |
+| `npm run db:migrate` 碰了演示库 | 根脚本指向顶层绑定 | 立即停止，不要再运行；用测试网命令（§5.1） |
+| webhook 收不到消息 | `url` 错误，或 `secret_token` 不一致 | 看 `getWebhookInfo` 的 `last_error_message`；核对 `TG_WEBHOOK_SECRET` |
+| 写接口返回未授权 | `SESSION_SECRET` 未设，或域名不在 `TON_PROOF_DOMAINS` | 补 secret 或改域名变量，然后重新登录 |
+| 守城补贴没有发 | `STONFI_POOL_ADDRESS` 未设（这种情况不报错） | 补变量，并核对池子能读到储备 |
+| RC 注资后余额不对 | 金额、forward 或接收参数错误 | 立即停止后续注资；按 §2.4 核对；不得再次转账"补齐" |
+| 部署 Worker 时门禁失败 | 变量仍是占位符，或误用了生产配置 | 核对 §5.3、§5.4；不要放行门禁 |
+| 部署后 cron 不运行 | 测试网环境没有配置 cron | 按 §5.6 补配置 |
 
 ---
 
-## 11. 签字与证据归档
+## 10. 签字与证据归档
 
 | 项 | 记录 | 负责人 | 时间 |
 | --- | --- | --- | --- |
-| 参数哈希（paramsDigest） | sha256:... | 部署者 | |
-| 合约 code hash（JettonMaster / RoundController / JettonWallet） | | 合约负责人 | |
+| 参数签字单与参数哈希 | sha256:... | 部署者 | |
+| 合约 code hash（JettonMaster / RC / JettonWallet / StakeTicket / JunxiangDistributor / ClaimRecord） | 与 §1 对比结果 | 合约负责人 | |
 | keeper 地址与 teamWallet 地址（部署时写入 RC，不可改） | 地址 + 双人核对 | 部署者 + 复核人 | |
 | 部署交易哈希（每步） | | 部署者 | |
-| 登记表摘要（registryDigest） | | 部署者 | |
-| 地址簿 ops/records/address-book.testnet.md | 归档链接 | Ops | |
-| 验收报告 ops/records/verify-deployment-YYYY-MM-DD.json | 归档链接 | Ops | |
-| 演练记录 | ops/drills/ | Ops | |
-| R1 开轮 twap24h 审批附件（见 07 §9.1） | 计算过程与双人签字 | Ops + 复核人 | |
+| 登记表与地址簿 | 归档位置 | Ops | |
+| §3 检查结果 | 截图或 JSON | Ops | |
+| Telegram webhook 与 STON.fi 池检查 | 截图 | 运营 | |
 
-> 证据保留至少到主网后 90 天；所有对外披露只使用链上可验证字段。
+> 证据保留至少到主网后 90 天。对外只披露链上可验证的字段。
 
 ---
 
-*本 runbook 与 ops/config/testnet.params.json、脚本输出一一对应；参数变更后必须重新生成配置哈希并重跑 dry-run 与 selftest。*
+*本 runbook 与 `ops/README.md`、contracts/README 对应。脚本参数以 ops/README 与脚本 `--help` 输出为准。*

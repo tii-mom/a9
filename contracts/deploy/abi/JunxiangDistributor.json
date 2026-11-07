@@ -1,0 +1,436 @@
+{
+  "abi_schema_version": "1.0",
+  "contract_name": "JunxiangDistributor",
+  "author": "A9 Protocol",
+  "version": "1.0.0",
+  "description": "A9 junxiang cumulative merkle distributor.",
+  "unique_types": [
+    {
+      "kind": "void"
+    },
+    {
+      "kind": "int"
+    },
+    {
+      "kind": "slice"
+    },
+    {
+      "kind": "cell"
+    },
+    {
+      "kind": "builder"
+    },
+    {
+      "kind": "bool"
+    },
+    {
+      "kind": "coins"
+    },
+    {
+      "kind": "address"
+    },
+    {
+      "kind": "intN",
+      "n": 32
+    },
+    {
+      "kind": "uintN",
+      "n": 32
+    },
+    {
+      "kind": "intN",
+      "n": 64
+    },
+    {
+      "kind": "uintN",
+      "n": 64
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "SetRoot"
+    },
+    {
+      "kind": "uintN",
+      "n": 256
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ClaimJunxiang"
+    },
+    {
+      "kind": "uintN",
+      "n": 128
+    },
+    {
+      "kind": "nullable",
+      "inner_ty_idx": 3
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordPay"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "TopUpTons"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "ReturnExcessesBack"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "DistributorStorage"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "DistributorCodes"
+    },
+    {
+      "kind": "cellOf",
+      "inner_ty_idx": 21
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RecordAdvance"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "DistributorView"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "RootPublished"
+    },
+    {
+      "kind": "StructRef",
+      "struct_name": "JunxiangClaimed"
+    }
+  ],
+  "struct_instantiations": [],
+  "alias_instantiations": [],
+  "declarations": [
+    {
+      "kind": "struct",
+      "name": "DistributorCodes",
+      "ty_idx": 21,
+      "fields": [
+        {
+          "name": "jettonWalletCode",
+          "ty_idx": 3
+        },
+        {
+          "name": "recordCode",
+          "ty_idx": 3
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "DistributorStorage",
+      "ty_idx": 20,
+      "fields": [
+        {
+          "name": "publisher",
+          "ty_idx": 7
+        },
+        {
+          "name": "jettonMaster",
+          "ty_idx": 7
+        },
+        {
+          "name": "codes",
+          "ty_idx": 22
+        },
+        {
+          "name": "root",
+          "ty_idx": 13
+        },
+        {
+          "name": "listId",
+          "ty_idx": 9
+        },
+        {
+          "name": "totalPaidRaw",
+          "ty_idx": 15
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "SetRoot",
+      "ty_idx": 12,
+      "prefix": {
+        "prefix_num": 1247281153,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "listId",
+          "ty_idx": 9
+        },
+        {
+          "name": "root",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "ClaimJunxiang",
+      "ty_idx": 14,
+      "prefix": {
+        "prefix_num": 1247281154,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "cumulativeRaw",
+          "ty_idx": 15
+        },
+        {
+          "name": "proof",
+          "ty_idx": 16
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RecordAdvance",
+      "ty_idx": 23,
+      "prefix": {
+        "prefix_num": 1247281155,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "cumulativeRaw",
+          "ty_idx": 15
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RecordPay",
+      "ty_idx": 17,
+      "prefix": {
+        "prefix_num": 1247281156,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        },
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 15
+        },
+        {
+          "name": "cumulativeRaw",
+          "ty_idx": 15
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "RootPublished",
+      "ty_idx": 25,
+      "prefix": {
+        "prefix_num": 1247281409,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "listId",
+          "ty_idx": 9
+        },
+        {
+          "name": "root",
+          "ty_idx": 13
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "JunxiangClaimed",
+      "ty_idx": 26,
+      "prefix": {
+        "prefix_num": 1247281410,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        },
+        {
+          "name": "amountRaw",
+          "ty_idx": 15
+        },
+        {
+          "name": "cumulativeRaw",
+          "ty_idx": 15
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "DistributorView",
+      "ty_idx": 24,
+      "fields": [
+        {
+          "name": "publisher",
+          "ty_idx": 7
+        },
+        {
+          "name": "root",
+          "ty_idx": 13
+        },
+        {
+          "name": "listId",
+          "ty_idx": 9
+        },
+        {
+          "name": "totalPaidRaw",
+          "ty_idx": 15
+        }
+      ]
+    },
+    {
+      "kind": "struct",
+      "name": "TopUpTons",
+      "ty_idx": 18,
+      "prefix": {
+        "prefix_num": 3547469196,
+        "prefix_len": 32
+      },
+      "fields": []
+    },
+    {
+      "kind": "struct",
+      "name": "ReturnExcessesBack",
+      "ty_idx": 19,
+      "prefix": {
+        "prefix_num": 3576854235,
+        "prefix_len": 32
+      },
+      "fields": [
+        {
+          "name": "queryId",
+          "ty_idx": 11
+        }
+      ]
+    }
+  ],
+  "incoming_messages": [
+    {
+      "body_ty_idx": 12
+    },
+    {
+      "body_ty_idx": 14
+    },
+    {
+      "body_ty_idx": 17
+    },
+    {
+      "body_ty_idx": 18
+    },
+    {
+      "body_ty_idx": 19
+    }
+  ],
+  "incoming_external": [],
+  "outgoing_messages": [
+    {
+      "body_ty_idx": 3
+    },
+    {
+      "body_ty_idx": 23
+    }
+  ],
+  "emitted_events": [
+    {
+      "body_ty_idx": 25
+    },
+    {
+      "body_ty_idx": 26
+    }
+  ],
+  "storage": {
+    "storage_ty_idx": 20
+  },
+  "get_methods": [
+    {
+      "tvm_method_id": 105341,
+      "name": "get_distributor",
+      "parameters": [],
+      "return_ty_idx": 24
+    },
+    {
+      "tvm_method_id": 106651,
+      "name": "get_record_address",
+      "parameters": [
+        {
+          "name": "owner",
+          "ty_idx": 7
+        }
+      ],
+      "return_ty_idx": 7
+    }
+  ],
+  "thrown_errors": [
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotKeeper",
+      "err_code": 101
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadRoundId",
+      "err_code": 200
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NothingToClaim",
+      "err_code": 230
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotEnoughValue",
+      "err_code": 234
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.WrongWorkchain",
+      "err_code": 235
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.NotTicket",
+      "err_code": 236
+    },
+    {
+      "kind": "enum_member",
+      "name": "Errors.BadProof",
+      "err_code": 260
+    }
+  ],
+  "compiler_name": "tolk",
+  "compiler_version": "1.4.1"
+}

@@ -15,4 +15,4 @@ node ops/scripts/monitor_check.mjs --snapshot ops/tests/fixtures/worker-snapshot
 
 - 夹具与 worker、shared 的 API 契约同构（ApiResponse 解包后的 data）；字段改动需同步更新夹具与 selftest。
 - 夹具不含真实地址与私钥；用于验证对账公式、监控阈值与告警分级。
-- **待办**：夹具文件（tests/fixtures/*.json）尚未按 v10 字段改写。在改写前，`worker-snapshot-bad.json` 中的 v8.9 字段不再对应告警，不能作为 v10 的验收依据。
+- **状态（v11）**：`worker-snapshot.json` 已按 v11 口径改写（R1 首次破城无团队释放；R2 失败销毁 = 奖池一半 3.5 亿 + 1.2 亿 + 本金 = 711.5e15 raw；RC 钱包公式 + 123 raw 零头；无退款账本）。`worker-snapshot-bad.json` 仍含 v8.9 字段，只用于验证故障分级（exit 2），不能作为 v11 验收依据；改写前不要据其数值判断口径。

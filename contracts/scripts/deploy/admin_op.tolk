@@ -1,18 +1,20 @@
-// Keeper / operator operation on RoundController (v10).
+// Keeper / operator operation on RoundController (v11 ABI, contracts/README §5.1).
 // POSITIONAL args:
 //   acton script scripts/deploy/admin_op.tolk <op> <roundId> <extra>
 //
 // op + args:
-//   open-round        extra = opening 24h TWAP (USD_E8), roundId ignored (0)
-//   close-staking     extra = current 1h TWAP (USD_E8), roundId ignored (0)
-//   submit-candle     roundId; candle fields via env:
+//   open-round        extra = opening 24h TWAP (USD_E8), roundId ignored (0)   [keeper]
+//   close-staking     extra = ignored (v11 has no early close)                 [anyone, after 36h]
+//   submit-candle     roundId; candle fields via env:                          [keeper]
 //                     A9_CANDLE_INDEX / A9_PERIOD_START / A9_PERIOD_END /
 //                     A9_TWAP_E8 / A9_DIGEST (64 hex or 0x + 64 hex)
-//   abort-technical   roundId/extra ignored
-//   retry-settlement  roundId, extra ignored (alias: retry-pending)
+//   abort-technical   roundId/extra ignored                                    [anyone, 7 days late]
+//   retry-settlement  roundId, extra ignored                                   [anyone, >= 0.3 TON]
+//   release-team      roundId/extra ignored; ReleaseTeam 0x52540016            [anyone, 30 days after R10, >= 0.1 TON]
 //
-// Removed in v10 (fail with a clear message): start-observation, finalize-round,
-// pause-oracle, resume-oracle, oracle-candle, set-jetton-wallet, init-controller.
+// Removed (fail with a clear message): start-observation, finalize-round,
+// pause-oracle, resume-oracle, oracle-candle, set-jetton-wallet, init-controller
+// (v10-era ops). Distributor root publishing lives in junxiang_op.tolk.
 //
 // Addresses: ROUND_CONTROLLER_ADDRESS env or deploy/round-controller.addr.
 // Dry-run by default; broadcast with OPS_EXECUTE=1 OPS_CONFIRM=YES + --net testnet.
@@ -21,6 +23,7 @@
 //   admin_op.tolk open-round 0 232000
 //   admin_op.tolk close-staking 0 0
 //   admin_op.tolk retry-settlement 1 0
+//   admin_op.tolk release-team 0 0
 //   A9_CANDLE_INDEX=0 A9_PERIOD_START=... A9_PERIOD_END=... A9_TWAP_E8=232000 \
 //     A9_DIGEST=<64 hex> admin_op.tolk submit-candle 1 0
 
@@ -64,7 +67,8 @@ fun isRemovedOp(opName: string): bool {
         || opName.equalTo("resume-oracle")
         || opName.equalTo("oracle-candle")
         || opName.equalTo("set-jetton-wallet")
-        || opName.equalTo("init-controller");
+        || opName.equalTo("init-controller")
+        || opName.equalTo("retry-pending");
 }
 
 fun planCandleOp(opName: string, roundId: int, rc: address): OpPlan {
@@ -120,7 +124,7 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
     // Acton passes script string args as slices; format() materialises a real string for comparisons.
     val opName = format("{}", op);
     if (isRemovedOp(opName)) {
-        Assert.fail(format("{} was removed in v10", opName));
+        Assert.fail(format("{} was removed (not in the v11 ABI)", opName));
     }
     if (opName.equalTo("open-round")) {
         return {
@@ -149,7 +153,7 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
             details: "",
         };
     }
-    if (opName.equalTo("retry-settlement") || opName.equalTo("retry-pending")) {
+    if (opName.equalTo("retry-settlement")) {
         return {
             target: rc,
             opcode: OP_RETRY_SETTLEMENT,
@@ -158,12 +162,21 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
             details: "",
         };
     }
+    if (opName.equalTo("release-team")) {
+        return {
+            target: rc,
+            opcode: OP_RELEASE_TEAM,
+            label: "ReleaseTeam",
+            message: buildReleaseTeam(rc),
+            details: "",
+        };
+    }
     if (opName.equalTo("submit-candle")) {
         return planCandleOp(opName, roundId, rc);
     }
     Assert.fail(
         format(
-            "unknown op: {} (expected open-round/close-staking/submit-candle/abort-technical/retry-settlement)",
+            "unknown op: {} (expected open-round/close-staking/submit-candle/abort-technical/retry-settlement/release-team)",
             opName,
         ),
     );
@@ -172,7 +185,7 @@ fun planControllerOp(op: string, roundId: int, extra: int, rc: address): OpPlan 
 fun main(op: string, roundId: int, extra: int) {
     // fail on removed ops before any address lookup
     if (isRemovedOp(format("{}", op))) {
-        Assert.fail(format("{} was removed in v10", format("{}", op)));
+        Assert.fail(format("{} was removed (not in the v11 ABI)", format("{}", op)));
     }
     val rc = resolveAddress(
         "ROUND_CONTROLLER_ADDRESS",

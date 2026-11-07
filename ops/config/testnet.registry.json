@@ -1,21 +1,21 @@
 {
   "network": "testnet",
   "chainId": -3,
-  "status": "not_deployed",
-  "contractsVersion": "v10",
+  "status": "deployed_funded_partial",
+  "contractsVersion": "v11",
   "configVersion": 1,
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T00:00:00.000Z",
+  "updatedAt": "2026-11-07T03:22:36.033Z",
   "contracts": {
     "jettonMaster": {
-      "address": null,
-      "raw": null,
+      "address": "kQActKc_feFVN7n95a_yrCCtd9SACBCN2zBinFq2dXijx374",
+      "raw": "0:1cb4a73f7de15537b9fde5aff2ac20ad77d48008108ddb30629c5ab67578a3c7",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-07T03:22:35.082Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "jettonMasterTreasuryWallet": {
       "address": null,
@@ -26,20 +26,20 @@
       "note": null
     },
     "roundController": {
-      "address": null,
-      "raw": null,
+      "address": "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt",
+      "raw": "0:9df707634dcf534dc470368ce97c3b73ac5fd006d965417fb23bf6b59b9fb7ff",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-07T03:22:35.082Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "roundControllerJettonWallet": {
-      "address": null,
-      "raw": null,
+      "address": "kQCdvTQR0VnAr2Zt5kPKs4k3ktE5geupwpLChjn4t0Utw9RI",
+      "raw": "0:9dbd3411d159c0af666de643cab3893792d13981eba9c292c28639f8b7452dc3",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": null,
-      "note": null
+      "deployedAt": "2026-11-07T03:22:35.082Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "teamWalletJettonWallet": {
       "address": null,
@@ -48,6 +48,22 @@
       "codeHash": null,
       "deployedAt": null,
       "note": null
+    },
+    "junxiangDistributor": {
+      "address": "kQBKpzusd8LanpLhoSsYg3U64C1zKgJ0sXVSmipkNWltViNi",
+      "raw": "0:4aa73bac77c2da9e92e1a12b1883753ae02d732a0274b175529a2a6435696d56",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-07T03:22:35.082Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
+    },
+    "junxiangDistributorJettonWallet": {
+      "address": "kQBKSXzaBfK5E6adliGfkyqJDerBa_1xGWMqmbWpwEvFPBmW",
+      "raw": "0:4a497cda05f2b913a69d96219f932a890deac16bfd7119632a99b5a9c04bc53c",
+      "deployTxHash": null,
+      "codeHash": null,
+      "deployedAt": "2026-11-07T03:22:35.082Z",
+      "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     }
   },
   "wallets": {
@@ -66,6 +82,13 @@
       "note": null
     },
     "teamWallet": {
+      "address": null,
+      "raw": null,
+      "testnet": null,
+      "public": false,
+      "note": null
+    },
+    "junxiangPublisher": {
       "address": null,
       "raw": null,
       "testnet": null,
@@ -95,13 +118,26 @@
     }
   },
   "bindings": {
-    "roundControllerJettonWalletOwner": null,
-    "roundControllerKeeper": null,
-    "roundControllerTeamWallet": null,
+    "roundControllerJettonWalletOwner": "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt",
+    "roundControllerKeeper": "kQB2_JOvF0Aqp6AHmQIy9HdORKL8-kUmbjsBIuTsp7meN-Qb",
+    "roundControllerTeamWallet": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
     "roundControllerUpgradeable": false,
     "hasAdmin": false
   },
-  "funding": [],
+  "funding": [
+    {
+      "key": "roundController:kQCdvTQR0VnAr2Zt5kPKs4k3ktE5geupwpLChjn4t0Utw9RI:8200000000000000000",
+      "at": "2026-11-07T03:22:36.033Z",
+      "confirmed": true,
+      "kind": "roundController",
+      "recipient": "kQCdvTQR0VnAr2Zt5kPKs4k3ktE5geupwpLChjn4t0Utw9RI",
+      "recipientOwner": "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt",
+      "amountRaw": "8200000000000000000",
+      "forwardTonNano": "0",
+      "txHash": null,
+      "note": "deploy-emulation 注资（forward_ton_amount = 0），链上余额核对一致"
+    }
+  ],
   "verification": {
     "lastRunAt": null,
     "healthy": null,

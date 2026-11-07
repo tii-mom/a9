@@ -310,10 +310,10 @@ export function validateTestnetAddress(input, label = 'address') {
 }
 
 // ---------------------------------------------------------------------------
-// v10 RoundController 只读辅助（contracts/README §4.3 / §4.4）
+// v11 RoundController 只读辅助（contracts/README §5）
 // ---------------------------------------------------------------------------
 
-/** v10 状态值（数值沿用 v8.9；3/5/6/7 不再出现）。 */
+/** v11 状态值（数值沿用 v8；3/5/6/7 不再出现）。 */
 export const ROUND_STATUS = { 0: 'UNOPENED', 1: 'PREVIEW', 2: 'STAKING_OPEN', 4: 'OBSERVING', 8: 'SUCCEEDED', 9: 'FAILED_PERMANENT', 10: 'TECHNICAL_ABORTED' };
 
 /** 解码 get_round(roundId) 的 RoundView 栈（types.tolk RoundView 字段顺序）。 */
@@ -391,23 +391,23 @@ export function bocRootData(b64) {
   return null;
 }
 
-const V10_EVENT_NAMES = {
+const V11_EVENT_NAMES = {
   0x52540101: 'TargetPriceSet', 0x52540102: 'RoundSettled', 0x52540103: 'DepositAccepted', 0x52540104: 'TechnicalAborted',
   0x5254010b: 'StakingClosed', 0x5254010c: 'CandleSubmitted', 0x5254010e: 'Claimed', 0x5254010f: 'DepositRefunded',
-  0x52540110: 'SettlementBounced', 0x52540111: 'UnexpectedBounce',
+  0x52540110: 'SettlementBounced', 0x52540111: 'UnexpectedBounce', 0x52540112: 'Restaked', 0x52540113: 'TeamReleased',
 };
 
-/** 把 external-out 消息体解成 v10 事件（只解运维告警需要的字段）。 */
+/** 把 external-out 消息体解成 v11 RC 事件（只解运维告警需要的字段）。 */
 export function decodeRcEvent(bodyB64, meta = {}) {
   const data = bocRootData(bodyB64);
   if (!data || data.length < 4) return null;
   const op = data.readUInt32BE(0);
-  const type = V10_EVENT_NAMES[op];
+  const type = V11_EVENT_NAMES[op];
   if (!type) return null;
   const event = { type, opcode: '0x' + op.toString(16), ...meta };
   if (type === 'SettlementBounced' && data.length >= 6) { event.roundId = data[4]; event.action = data[5]; }
   if (type === 'UnexpectedBounce' && data.length >= 16) { event.op = '0x' + data.readUInt32BE(4).toString(16); event.queryId = data.readBigUInt64BE(8).toString(); }
-  if ((type === 'RoundSettled' || type === 'TechnicalAborted' || type === 'StakingClosed' || type === 'CandleSubmitted') && data.length >= 5) event.roundId = data[4];
+  if ((type === 'RoundSettled' || type === 'TechnicalAborted' || type === 'StakingClosed' || type === 'CandleSubmitted' || type === 'TeamReleased') && data.length >= 5) event.roundId = data[4];
   return event;
 }
 

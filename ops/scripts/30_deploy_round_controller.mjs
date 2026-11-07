@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * 30 — RoundController（v10）：生成初始数据快照 + --adopt 登记。
+ * 30 — RoundController（v11）：生成初始数据快照 + --adopt 登记。
  *
- * v10 的 RC 由 15_deploy_contracts.mjs（deploy-emulation.tolk）整体部署：keeper、jettonMaster、
+ * v11 的 RC 由 15_deploy_contracts.mjs（deploy-emulation.tolk）整体部署：keeper、jettonMaster、
  * teamWallet、经济/时间参数与 JettonWallet 代码全部写进初始数据；无 admin、不可升级、无 wiring。
  * 本脚本只保留：初始数据快照（供双人核对 / 公示）与 --adopt 手工登记。
  */
@@ -19,7 +19,7 @@ import { section, kv, ok, fail, info } from './lib/log.mjs';
 
 const { args, params, digest, registry } = bootstrap({
   id: '30',
-  title: 'RoundController 初始数据快照 / 登记（v10）',
+  title: 'RoundController 初始数据快照 / 登记（v11）',
   dependsOn: ['jettonMaster'],
 });
 
@@ -31,7 +31,7 @@ const existing = resolveContractAddress(registry, 'roundController');
 
 const initData = {
   note: '生成时间 ' + new Date().toISOString() + '；由 ops/scripts/30_deploy_round_controller.mjs 生成，作为 RC 初始数据的人工核对清单（实际写入由 deploy-emulation.tolk 完成）。',
-  contractsVersion: 'v10',
+  contractsVersion: 'v11',
   configVersion: params.meta.configVersion,
   paramsDigest: digest,
   addresses: { keeper, jettonMaster, teamWallet },
@@ -76,14 +76,14 @@ ok('初始数据快照已写入：' + initDataFile);
 if (adopt) {
   const validation = validateTestnetAddress(adopt, 'roundController');
   if (!validation.ok) { fail(validation.message); process.exit(finish()); }
-  setContract(registry, 'roundController', adopt, { note: 'adopt 手工登记（v10）' });
+  setContract(registry, 'roundController', adopt, { note: 'adopt 手工登记（v11）' });
   registry.paramsDigest = digest;
   writeRegistry(registry);
   ok('已登记 RoundController：' + adopt);
   process.exit(finish({ 地址: adopt }));
 }
 if (existing) info('RoundController 已登记：' + existing);
-else info('v10 RC 由 15_deploy_contracts.mjs 整体部署；本脚本不单独部署。');
+else info('v11 RC 由 15_deploy_contracts.mjs 整体部署；本脚本不单独部署。');
 
 printNextSteps([
   '整体部署：node scripts/15_deploy_contracts.mjs --execute（keeper / teamWallet 必须先登记）',

@@ -1,6 +1,6 @@
 {
-  "$comment": "MAINNET IS NOT APPROVED YET. Blocking items before mainnet: (1) OracleAdapter signed submissions replacing the admin-supplied TWAP in OpenRound; (2) audited Jetton burn acknowledgement extension (or signed off-chain reconciliation) instead of the testnet BurnAck authority; (3) third-party audit of RoundController + TeamVault; (4) ops runbook + monitoring (task-6). Copy params.testnet.json and change network.",
+  "$comment": "MAINNET IS NOT APPROVED YET (v11). Blocking items before mainnet: (1) external third-party audit of v11 — RoundController, StakeTicket, JunxiangDistributor and ClaimRecord are all new code (contracts/README §8); (2) indexer / frontend / ops aligned to the v11 ABI (ops/config/mainnet.params.json is the canonical input); (3) full 10-round testnet drill (fast-cycle and production timing) and STON.fi testnet one-tap entry with a beneficiary payload; (4) risk disclosure updated; (5) source freeze tag v11-audit-fixed. Copy params.testnet.json and change network.",
   "network": "mainnet",
-  "status": "BLOCKED_PENDING_AUDIT_AND_ORACLE",
-  "parameterSource": "deploy/params.testnet.json"
+  "status": "BLOCKED_PENDING_AUDIT",
+  "parameterSource": "contracts/deploy/params.testnet.json (v11)"
 }

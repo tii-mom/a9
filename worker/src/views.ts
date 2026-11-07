@@ -14,6 +14,7 @@ import type {
   ProtocolConfig,
   ProtocolStats,
   RoundDetail,
+  RoundPosition,
   RoundSummary,
   RoundState,
   StakePosition,
@@ -27,6 +28,7 @@ import type { CandleRow, RoundRow, TradeRow } from './store';
 import { getSource } from './sources';
 import * as rewards from './rewards';
 import type { ReconcileResult } from './state';
+import { fallbackUnlockSecondsOf, roundPositionOf, type UnlockContext } from './me-position';
 import { clampInt, mulDivFloor, toBigInt } from './util';
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -142,6 +144,7 @@ export function buildProtocolConfig(state: ReconcileResult): ProtocolConfig {
     contracts: {
       jettonMaster: contract('contract_jetton_master'),
       roundController: contract('contract_round_controller'),
+      junxiangDistributor: contract('contract_junxiang_distributor'),
       stakingVault: contract('contract_staking_vault'),
       rewardVault: contract('contract_reward_vault'),
       codeHash: contract('contract_code_hash'),
@@ -341,8 +344,22 @@ export function buildLeaderboard(state: ReconcileResult, roundId: number): Leade
     }));
 }
 
-/** 退款账本的 roundsMask 位（合约 maskBit(0)）。 */
-const REFUND_MASK_BIT = 1 << 15;
+function unlockContextOf(state: ReconcileResult): UnlockContext {
+  const { kv, rounds, now } = state;
+  const chainLast = kv.get('chain:last_success_round');
+  const chainEnd = kv.get('chain:end_at');
+  const successIds = rounds.filter((row) => row.state === 'SUCCEEDED').map((row) => row.round_id);
+  const lastSuccessRound = chainLast !== undefined ? Number(chainLast) || 0 : Math.max(0, ...successIds);
+  let endAt = chainEnd !== undefined ? Number(chainEnd) || 0 : 0;
+  if (chainEnd === undefined) {
+    // demo 没有链上 endAt：第 10 城进入终态的时刻近似为 endAt
+    const last = rounds.find((row) => row.round_id === 10);
+    if (last && isTerminal(last.state)) endAt = Math.floor(last.updated_at / 1000);
+  }
+  const fallback = kv.get('chain:fallback_unlock_seconds');
+  const fallbackSec = fallbackUnlockSecondsOf(fallback);
+  return { lastSuccessRound, endAt, nowSec: Math.floor(now / 1000), fallbackSec };
+}
 
 export async function buildMe(env: Env, state: ReconcileResult, address: string): Promise<MeResponse> {
   const [rows, claims, refundRows] = await Promise.all([
@@ -352,7 +369,8 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
   ]);
   const roundsById = new Map(state.rounds.map((row) => [row.round_id, row]));
 
-  const perRound = new Map<number, { amount: bigint; acceptedAt: number; claimed: boolean }>();
+  // 本金按城汇总（deposit + 续战滚入）；principal_claimed 为 1 当且仅当该城本金已付或已续战转出
+  const perRound = new Map<number, { amount: bigint; acceptedAt: number; principalClaimed: boolean }>();
   for (const row of rows) {
     const current = perRound.get(row.round_id);
     const amount = toBigInt(row.amount_raw);
@@ -360,14 +378,21 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
     if (current) {
       current.amount += amount;
       current.acceptedAt = Math.min(current.acceptedAt, row.accepted_at);
-      current.claimed = current.claimed && claimed;
+      current.principalClaimed = current.principalClaimed && claimed;
     } else {
-      perRound.set(row.round_id, { amount, acceptedAt: row.accepted_at, claimed });
+      perRound.set(row.round_id, { amount, acceptedAt: row.accepted_at, principalClaimed: claimed });
     }
   }
+  const rewardClaimedByRound = new Map<number, bigint>();
+  for (const claim of claims) {
+    if (claim.kind !== 'reward') continue;
+    rewardClaimedByRound.set(claim.round_id, (rewardClaimedByRound.get(claim.round_id) ?? 0n) + toBigInt(claim.amount_raw));
+  }
 
+  const ctx = unlockContextOf(state);
   const stakes: StakePosition[] = [];
   const claimable: MeResponse['claimable'] = [];
+  const rounds: RoundPosition[] = [];
   let stakedTotal = 0n;
   let rewardTotal = 0n;
   let mask = 0;
@@ -377,33 +402,44 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
     const round = roundsById.get(roundId);
     const roundState = round?.state ?? 'UNOPENED';
     const reward = round ? rewards.rewardOfAddress(round, address, state.stakeRows, state.rewardRows) : 0n;
-    const canClaim = !entry.claimed && entry.amount > 0n && (roundState === 'SUCCEEDED' || roundState === 'TECHNICAL_ABORTED');
+    const position = roundPositionOf({
+      roundId,
+      state: roundState,
+      principalRaw: entry.amount,
+      principalClaimed: entry.principalClaimed,
+      rewardRaw: reward,
+      rewardClaimedRaw: rewardClaimedByRound.get(roundId) ?? 0n,
+      ctx,
+    });
+    const claimableRaw = toBigInt(position.claimableRaw);
     stakedTotal += entry.amount;
     rewardTotal += reward;
+    rounds.push(position);
     stakes.push({
       roundId,
       address,
       amountRaw: entry.amount.toString(),
       rewardRaw: reward.toString(),
       state: roundState,
-      claimed: entry.claimed,
-      claimable: canClaim,
+      claimed: entry.principalClaimed && claimableRaw === 0n,
+      claimable: claimableRaw > 0n,
       acceptedAt: entry.acceptedAt,
     });
-    if (canClaim) {
-      claimable.push({ roundId, principalRaw: entry.amount.toString(), rewardRaw: reward.toString(), state: roundState });
+    if (claimableRaw > 0n) {
+      claimable.push({
+        roundId,
+        principalRaw: position.claimablePrincipalRaw,
+        rewardRaw: position.claimableRewardRaw,
+        state: roundState,
+      });
       mask |= 1 << (roundId - 1);
-      claimablePrincipal += entry.amount;
-      claimableReward += reward;
+      claimablePrincipal += toBigInt(position.claimablePrincipalRaw);
+      claimableReward += toBigInt(position.claimableRewardRaw);
     }
   }
 
+  // v11 没有退款账本：历史 refund 行只做展示（不进入 claimable / roundsMask）
   const refund = store.refundBalance(refundRows);
-  if (refund.pending > 0n) {
-    claimable.unshift({ roundId: 0, principalRaw: refund.pending.toString(), rewardRaw: '0', state: 'UNOPENED' });
-    mask |= REFUND_MASK_BIT;
-    claimablePrincipal += refund.pending;
-  }
 
   let claimedTotal = 0n;
   for (const claim of claims) claimedTotal += toBigInt(claim.amount_raw);
@@ -413,6 +449,7 @@ export async function buildMe(env: Env, state: ReconcileResult, address: string)
     address,
     stakes,
     claimable,
+    rounds,
     refund: {
       pendingRaw: refund.pending.toString(),
       creditedRaw: refund.credited.toString(),

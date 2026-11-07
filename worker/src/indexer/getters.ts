@@ -1,5 +1,5 @@
 /**
- * RoundController / JettonMaster 的 get-method 封装与栈解码（v10：TeamVault / OracleAdapter 已删除）。
+ * RoundController / StakeTicket / JettonMaster 的 get-method 封装与栈解码（v11：Claim 相关 getter 已移除，改读攻城令）。
  * 槽位顺序严格对齐 contracts/contracts/types.tolk（RoundView 22 槽 / ProtocolConfigView 22 槽，形状沿用 v8.9），
  * 任何槽位顺序变化都必须先改合约再改这里（进度核对脚本会以 candleHash 复算兜底）。
  */
@@ -132,26 +132,51 @@ export interface ChainRoundView {
   qualifiedCandles: number;
   totalAcceptedStakeRaw: bigint;
   settledAt: number;
-  /** v10：团队转账已发出且未被退回（成功轮） */
+  /** 团队转账已发出且未被退回（成功轮；本轮释放上一次成功的团队额度） */
   teamReleaseConfirmed: boolean;
-  /** v10：失败轮且那一笔 burn 已发出且未被退回 */
+  /** 失败轮：唯一的 burn 已发出且未被退回（v11 同 rewardBurnConfirmed） */
   teamBurnConfirmed: boolean;
-  /** v10：本轮 burn 已发出且未被退回（失败轮或 0 质押成功轮） */
+  /** 本轮 burn 已发出且未被退回（失败轮；成功轮仅第 10 城留存滚存时） */
   rewardBurnConfirmed: boolean;
-  /** v10：同 teamBurnConfirmed（失败轮只有一笔 burn） */
+  /** 同 rewardBurnConfirmed（一笔 burn 三个标志同真同假） */
   principalBurnConfirmed: boolean;
-  /** v10 恒为 0 */
+  /** 恒为 0（v11 不再有 failureBurnId） */
   failureBurnId: string;
   candleHash: string;
-  /** v10 = 总质押（不再有权重） */
+  /** v11 = 本轮总权重（sum of amount × timing bps / 10000） */
   totalWeight: bigint;
 }
 
-export interface ChainStakePosition {
+/** get_ticket_data()（攻城令 StakeTicket，v11）：8 槽。 */
+export interface ChainTicketView {
+  rc: string;
+  owner: string;
+  roundId: number;
   amountRaw: bigint;
-  lastDepositNonce: bigint;
-  /** v10：一次 Claim 同时领本金 + 奖励（principalClaimed = rewardClaimed） */
-  claimed: boolean;
+  weightRaw: bigint;
+  principalDone: boolean;
+  lockedClaimedRaw: bigint;
+  /** 请求已发往 RC 但尚未收到 TicketUpdate（或被 bounce 清除）之前为 true */
+  pending: boolean;
+}
+
+/** get_reward_preview(roundId, weightRaw)：4 槽。 */
+export interface ChainRewardPreview {
+  rewardRaw: bigint;
+  immediateRaw: bigint;
+  lockedRaw: bigint;
+  unlockedLockedRaw: bigint;
+}
+
+/** get_protocol_state()：7 槽（第 7 槽 fallbackUnlockSeconds 为压城兜底解锁窗口，秒）。 */
+export interface ChainProtocolState {
+  carryRaw: bigint;
+  lastSuccessRound: number;
+  teamPendingRaw: bigint;
+  endAt: number;
+  successCount: number;
+  currentRoundId: number;
+  fallbackUnlockSeconds: number;
 }
 
 export interface ChainJettonData {
@@ -228,41 +253,74 @@ export async function getRoundTotalStake(client: ChainClient, roundController: s
   return stackNum(stack[0]);
 }
 
-/** get_user_stake(roundId, owner)：6 槽（amount, nonce, principalClaimed, rewardClaimed, weight=amount, rewardState=0）。 */
-export async function getUserStake(
-  client: ChainClient,
-  roundController: string,
-  roundId: number,
-  owner: TonAddress,
-): Promise<ChainStakePosition> {
-  const { stack } = await client.runGetMethod(roundController, 'get_user_stake', [numArg(roundId), addressArg(owner)]);
-  if (stack.length < 6) throw new Error('get_user_stake 槽位不足：' + stack.length);
+/** get_ticket_address(owner, roundId)：攻城令地址由 RC 按 (code, owner, roundId) 推导，任何人可算。 */
+export async function getTicketAddress(client: ChainClient, roundController: string, owner: TonAddress, roundId: number): Promise<string> {
+  const { stack } = await client.runGetMethod(roundController, 'get_ticket_address', [addressArg(owner), numArg(roundId)]);
+  const address = stackAddress(stack[0]);
+  if (!address) throw new Error('get_ticket_address 返回 null');
+  return address.raw;
+}
+
+/** 攻城令 get_ticket_data()：8 槽（rc, owner, roundId, amountRaw, weightRaw, principalDone, lockedClaimedRaw, pending）。 */
+export async function getTicketData(client: ChainClient, ticket: string): Promise<ChainTicketView> {
+  const { stack } = await client.runGetMethod(ticket, 'get_ticket_data');
+  if (stack.length < 8) throw new Error('get_ticket_data 槽位不足：' + stack.length + '（期望 8）');
+  const rc = stackAddress(stack[0]);
+  const owner = stackAddress(stack[1]);
+  if (!rc || !owner) throw new Error('get_ticket_data 地址槽为 null');
   return {
-    amountRaw: stackNum(stack[0]),
-    lastDepositNonce: stackNum(stack[1]),
-    claimed: stackBool(stack[2]),
+    rc: rc.raw,
+    owner: owner.raw,
+    roundId: stackInt(stack[2], 'roundId'),
+    amountRaw: stackNum(stack[3]),
+    weightRaw: stackNum(stack[4]),
+    principalDone: stackBool(stack[5]),
+    lockedClaimedRaw: stackNum(stack[6]),
+    pending: stackBool(stack[7]),
   };
 }
 
-export async function getUserRewardEstimate(
+/** get_reward_preview(roundId, weightRaw)：4 槽。 */
+export async function getRewardPreview(
   client: ChainClient,
   roundController: string,
   roundId: number,
-  owner: TonAddress,
-): Promise<bigint> {
-  const { stack } = await client.runGetMethod(roundController, 'get_user_reward_estimate', [numArg(roundId), addressArg(owner)]);
-  return stackNum(stack[0]);
+  weightRaw: bigint,
+): Promise<ChainRewardPreview> {
+  const { stack } = await client.runGetMethod(roundController, 'get_reward_preview', [numArg(roundId), numArg(weightRaw)]);
+  if (stack.length < 4) throw new Error('get_reward_preview 槽位不足：' + stack.length);
+  return {
+    rewardRaw: stackNum(stack[0]),
+    immediateRaw: stackNum(stack[1]),
+    lockedRaw: stackNum(stack[2]),
+    unlockedLockedRaw: stackNum(stack[3]),
+  };
 }
 
-/** get_claimable_all(owner)：principalRaw, rewardRaw（全额）, roundsMask（bit r-1 = 第 r 轮；bit 15 = 退款账本）。 */
-export async function getClaimableAll(
-  client: ChainClient,
-  roundController: string,
-  owner: TonAddress,
-): Promise<{ principalRaw: bigint; rewardRaw: bigint; roundsMask: number }> {
-  const { stack } = await client.runGetMethod(roundController, 'get_claimable_all', [addressArg(owner)]);
-  if (stack.length < 3) throw new Error('get_claimable_all 槽位不足：' + stack.length);
-  return { principalRaw: stackNum(stack[0]), rewardRaw: stackNum(stack[1]), roundsMask: stackInt(stack[2], 'roundsMask') };
+/** 旧部署 get_protocol_state 只有 6 槽时的兜底解锁窗口默认值（30 天）。与 me-position.ts DEFAULT_FALLBACK_UNLOCK_SECONDS 同值；此处不 import 以免索引器经 me-position 拖入 @shared 类型别名。 */
+const LEGACY_FALLBACK_UNLOCK_SECONDS = 30 * 24 * 3600;
+
+/**
+ * get_protocol_state()：7 槽。旧部署只有 6 槽（无第 7 槽）时，兜底解锁窗口取默认 30 天（2592000 秒）。
+ */
+export async function getProtocolState(client: ChainClient, roundController: string): Promise<ChainProtocolState> {
+  const { stack } = await client.runGetMethod(roundController, 'get_protocol_state');
+  if (stack.length < 6) throw new Error('get_protocol_state 槽位不足：' + stack.length + '（期望 7，至少 6）');
+  return {
+    carryRaw: stackNum(stack[0]),
+    lastSuccessRound: stackInt(stack[1], 'lastSuccessRound'),
+    teamPendingRaw: stackNum(stack[2]),
+    endAt: stackInt(stack[3], 'endAt'),
+    successCount: stackInt(stack[4], 'successCount'),
+    currentRoundId: stackInt(stack[5], 'currentRoundId'),
+    fallbackUnlockSeconds: stack.length >= 7 ? stackInt(stack[6], 'fallbackUnlockSeconds') : LEGACY_FALLBACK_UNLOCK_SECONDS,
+  };
+}
+
+/** get_round_staker_count(roundId)：uint32 = 入账笔数（攻城令不按地址去重）。 */
+export async function getRoundStakerCount(client: ChainClient, roundController: string, roundId: number): Promise<number> {
+  const { stack } = await client.runGetMethod(roundController, 'get_round_staker_count', [numArg(roundId)]);
+  return stackInt(stack[0], 'stakerCount');
 }
 
 /** JettonMaster get_jetton_data()：total_supply, mintable, admin, content, wallet_code。 */

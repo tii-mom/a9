@@ -10,6 +10,7 @@ export {
   refreshBalances,
   resetDemoWallet,
   ensureWalletInit,
+  signIn,
   sendTonConnectTransaction,
   getTonConnectState,
 } from './store';

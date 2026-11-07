@@ -1,3 +1,5 @@
+> ⚠️ **已作废（v8–v10 口径）**：主网上线请只按 [08_mainnet_v11.md](../ops/runbooks/08_mainnet_v11.md) 执行。本文仅供溯源。
+
 # 33 — 主网部署当天执行卡（A9）
 
 > **本卡是 `docs/29_MAINNET_CUTOVER.md` 的压缩版，冲突以 docs/29 为准。** 基线：`v8.9-audit-fixed` @ `58d0be8`；179 tests / 18 files。主网当天只照本卡走，不翻 600 行。

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-/** fasttest-runner.mjs — v10 快测 10 轮编排：逐轮质押（含低于 10 万的退款探针）+ Claim / ClaimAll，记录每轮证据。
- * 用法：OPS_EXECUTE=1 node ops/scripts/fasttest-runner.mjs --rc <fastRc> --start 2 --end 10
+import { readFileSync } from 'node:fs';
+/** fasttest-runner.mjs — v11 快测 10 轮编排：逐轮质押（含低于 1,000 A9 的退款探针）+ TicketClaim（攻城令领取），记录每轮证据。
+ * 用法：OPS_PARAMS=ops/config/testnet-fast.params.json OPS_EXECUTE=1 node ops/scripts/fasttest-runner.mjs --rc <fastRc> --start 2 --end 10
+ * 注：v11 没有 Claim / ClaimAll；每人每城一张攻城令，领取 = TicketClaim 发到 RC.get_ticket_address(owner, round)。
+ * 不覆盖：TicketRestake（一键续战）与军饷分发（需单独演练）。
  */
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -19,7 +22,15 @@ const users = {
   B: { wallet: 'a9-test-b', address: 'kQBL8tlXBXfvBwN_qobNXdM4tpMBpcomOtHre_JsmeXA7ExM' },
   C: { wallet: 'a9-test-c', address: 'kQAhuPFUdpAniiSwgfYalPCi7n6SfL1zcHQMnK5pmpNCXYpH' },
 };
-const master = str(args, 'master') || process.env.A9_FAST_MASTER || 'kQCOYBSzkm5SEpv0g4Wg7NkCuiQGs47HlKPOzzXvff52kX65';
+// Jetton master of THIS deployment: --master > A9_FAST_MASTER > contracts/deploy/jetton-master.addr (written by deploy).
+// Never hard-code: a stale master makes every stake arrive from a foreign jetton wallet (RC exit 104).
+function deployedMaster() {
+  try {
+    return readFileSync(new URL('../../contracts/deploy/jetton-master.addr', import.meta.url), 'utf8').trim().split(/\s+/)[0];
+  } catch { return ''; }
+}
+const master = str(args, 'master') || process.env.A9_FAST_MASTER || deployedMaster();
+if (!master) { console.error('缺少 Jetton master：--master / A9_FAST_MASTER / contracts/deploy/jetton-master.addr'); process.exit(2); }
 const script = resolvePath('ops/scripts/tolk/user_op.tolk');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -65,8 +76,8 @@ async function runUser(key, cmd, a = 0, b = 0, c = 0, addr) {
 }
 const A9 = 1000000000n;
 const MIN_STAKE = BigInt(params.stakeLimits.minStakeRaw);
-// R4 的 A 故意质押 5 万（低于 10 万最低额）：forward 0.12 TON → 合约即时退回，链上仓位应为 0
-function stakeAmount(key, roundId) { return (roundId === 4 && key === 'A' ? 50000n : 100000n) * A9; }
+// R4 的 A 故意质押 500 A9（低于 1,000 A9 最低额）：forward 0.12 TON → 合约即时退回，链上攻城令不生成（仓位应为 0）
+function stakeAmount(key, roundId) { return (roundId === 4 && key === 'A' ? 500n : 100000n) * A9; }
 function expectedPosition(amount) { return amount >= MIN_STAKE ? amount : 0n; }
 async function walletA9(address) {
   try { const r = await runGetMethod(params, address, 'get_wallet_data'); return stackItemToBigInt(r.stack[0]); } catch { return 0n; }
@@ -110,6 +121,12 @@ while (Date.now() - started < 80 * 60 * 1000) {
       let confirmed = false;
       let actual = 0n;
       for (let attempt = 0; attempt < 5; attempt++) {
+        // Short drill windows: never send a stake that would land after stakeCloseAt (it is only refunded
+        // and burns the player's gas). Keep a 6 s margin for confirmation latency.
+        if (Math.floor(Date.now() / 1000) >= Number(rd.stakeCloseAt) - 6) {
+          log({ event: 'stake-window-closed', roundId: cur, key, attempt: attempt + 1, stakeCloseAt: rd.stakeCloseAt });
+          break;
+        }
         await runUser(key, 'stake', Number(amount), cur, cur * 1000 + ({ A: 1, B: 2, C: 3 })[key]);
         await sleep(2000);
         const readback = await queryUser('stake', users[key].address, cur);
@@ -120,7 +137,7 @@ while (Date.now() - started < 80 * 60 * 1000) {
         if (actual === expected) { confirmed = true; break; }
         await sleep([2000, 4000, 8000, 8000][attempt]);
       }
-      if (!confirmed) { log({ event: 'stake-readback-fail', roundId: cur, key, expected: expectedPosition(amount).toString(), actual: actual.toString() }); process.exit(3); }
+      if (!confirmed) { log({ event: 'stake-readback-fail', roundId: cur, key, expected: expectedPosition(amount).toString(), actual: actual.toString() }); continue; }
       if (amount < MIN_STAKE && wallet) {
         await sleep(4000);
         const after = await walletA9(wallet);
@@ -132,9 +149,9 @@ while (Date.now() - started < 80 * 60 * 1000) {
     claimed.add(cur);
     log({ event: 'round-terminal', roundId: cur, status: rd.status, qualified: rd.qualified, candles: rd.candles, totalStake: rd.totalStake?.toString() });
     if (rd.status === 8 || rd.status === 10) {
-      // v10：Claim(roundId) = 本金 + 全额奖励；ClaimAll = 1..10 + 退款账本
-      if (cur % 2 === 1) { await runUser('A', 'claim', cur, 0, 0); await runUser('B', 'claim-all', 0, 0, 0); }
-      else { await runUser('C', 'claim', cur, 0, 0); }
+      // v11：TicketClaim 发到本人本城攻城令：成功轮 = 20% 立即奖励 + 本金（破城当轮）；技术终止轮 = 退本金。
+      // 每个质押人都领一次（没有攻城令的地址会在 user_op 里失败，记录即可）。
+      for (const key of ['A', 'B', 'C']) await runUser(key, 'claim', cur, 0, 0);
     }
     for (const key of ['A', 'B', 'C']) {
       const rb = await queryUser('stake', users[key].address, cur);

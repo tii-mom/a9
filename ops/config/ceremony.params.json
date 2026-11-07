@@ -3,27 +3,25 @@
     "project": "A9 Protocol / 引信机制",
     "network": "mainnet",
     "chainId": -3,
-    "version": "V10",
-    "sourceOfTruth": "docs/00_DECISIONS_V2.md",
+    "version": "V11",
+    "sourceOfTruth": "docs/35_GAMEPLAY_V11.md + contracts/README.md（v11 ABI）",
     "configVersion": 1,
     "riskDisclosureVersion": 1,
-    "generatedAt": "2026-11-06",
+    "timingProfile": "production",
+    "generatedAt": "2026-11-07",
     "notes": [
-      "本文件是主网部署的唯一参数输入；部署前必须双人复核并生成 SHA-256 存档。",
-      "所有 *_Raw 均为 9 位精度原始单位字符串（1 A9 = 1e9），禁止浮点数。",
-      "V7 时间参数：12h PREVIEW + 36h 报名 + 24h 观察（24 根 x 1h，阈值 16）= 72h/轮；10 轮 30 天。",
-      "主网严禁复用测试网任何密钥。",
-      "v10（D-42）：只有 JettonMaster + JettonWallet + 一个 RoundController；无 admin，单 keeper 热钱包提交 OpenRound / SubmitCandle；RC 钱包持有 82 亿（70 亿奖励 + 12 亿团队），注资 forward_ton_amount 必须为 0。"
+      "本文件是主网部署仪式（90_mainnet_ceremony.mjs）的参数输入；与 mainnet.params.json 同口径，仪式前必须双人复核。",
+      "仪式状态 BLOCKED_PENDING_AUDIT：未审计前只允许 --dry-run。"
     ],
-    "contractsVersion": "v10 (D-42)"
+    "contractsVersion": "v11 (D-43~D-50)"
   },
   "network": {
-    "name": "ton-testnet",
-    "chainId": -3,
-    "explorerBaseUrl": "https://testnet.tonscan.org",
+    "name": "ton-mainnet",
+    "chainId": -239,
+    "explorerBaseUrl": "https://tonscan.org",
     "toncenter": {
-      "v2": "https://testnet.toncenter.com/api/v2",
-      "v3": "https://testnet.toncenter.com/api/v3",
+      "v2": "https://toncenter.com/api/v2",
+      "v3": "https://toncenter.com/api/v3",
       "apiKeyEnv": "TONCENTER_API_KEY"
     },
     "deployer": {
@@ -35,7 +33,7 @@
       "minTonBalance": 30,
       "keyPolicy": "主网部署者钱包必须全新生成，助记词离线备份 >=2 份、异地存放，绝不进入仓库或命令历史；严禁复用测试网密钥。"
     },
-    "net": "testnet"
+    "net": "mainnet"
   },
   "token": {
     "name": "A9",
@@ -77,7 +75,7 @@
         "percent": 12,
         "tokens": 1200000000,
         "raw": "1200000000000000000",
-        "recipient": "roundControllerJettonWallet（12 亿团队额度与 70 亿奖励同在 RC 钱包；成功轮 RC 直接转 1.2 亿到 teamWallet，失败轮并入一笔销毁）"
+        "recipient": "roundControllerJettonWallet（12 亿团队额度与 70 亿奖励同在 RC 钱包；破城轮 RC 不立即转出，下一次破城才转 1.2 亿到 teamWallet（D-47）；最后一笔在第 10 城 30 天后由 ReleaseTeam 释放）"
       },
       "marketing": {
         "percent": 5,
@@ -97,7 +95,7 @@
     "teamRoundRaw": "120000000000000000",
     "teamPoolRaw": "1200000000000000000",
     "initialStakeGrantedRaw": "0",
-    "notes": "十轮奖励 10 × 7 亿 = 70 亿；团队 10 × 1.2 亿 = 12 亿；两者都在 RC 钱包（共 82 亿）。失败轮一笔销毁：7 亿奖励 + 1.2 亿团队 + 本轮全部本金。技术终止轮的 8.2 亿留在 RC。",
+    "notes": "十轮奖励 10 × 7 亿 = 70 亿；团队 10 × 1.2 亿 = 12 亿；两者都在 RC 钱包（共 82 亿）。失败轮一笔销毁：奖池的一半（budget/2，首轮 3.5 亿）+ 1.2 亿团队 + 本轮全部本金，另一半滚入下一城（D-46）；0 人破城全额滚存并升档；技术终止全额滚存（D-39）。",
     "rcFundingRaw": "8200000000000000000",
     "rcFundingForwardTonNano": "0"
   },
@@ -126,7 +124,7 @@
     },
     "fdvAtP0Usd": "11600000",
     "gramRatio": "1 GRAM = 1000 A9 (anchor only; targets are USD_E8)",
-    "notes": "目标价由 keeper 的 OpenRound(twap24h) 在开轮交易中锁定；v10 无触价提前关窗。"
+    "notes": "目标价由 keeper 的 OpenRound(twap24h) 在开轮交易中锁定；v11 无触价提前关窗。"
   },
   "timeline": {
     "previewSeconds": 43200,
@@ -141,43 +139,46 @@
     "boundaryRule": "关窗即观察，不做整点取整；主网若需对齐应在结算时让 prevSettledAt 落在整点边界"
   },
   "stakeLimits": {
-    "minStakeTokens": 100000,
-    "minStakeRaw": "100000000000000",
-    "maxStakePerAddressBps": 1000,
-    "maxStakePerAddressRaw": "20000000000000000",
-    "maxStakePerAddressTokens": 20000000,
-    "maxStakePerAddressNote": "固定硬顶 20,000,000 A9（= 200,000,000 × 1000/10000，contracts/README §9.1 裁决）；首个存款人不再被 10% 动态规则卡死",
-    "maxTotalStakeTokens": 200000000,
-    "maxTotalStakeRaw": "200000000000000000",
+    "minStakeTokens": 1000,
+    "minStakeRaw": "1000000000000",
+    "maxStakePerAddressBps": 0,
+    "maxStakePerAddressRaw": "0",
+    "maxStakePerAddressTokens": 0,
+    "maxTotalStakeTokens": 0,
+    "maxTotalStakeRaw": "0",
+    "capsNote": "v11：无单地址上限、无本轮总额上限；get_protocol_config 的 maxStakePerAddressBps / maxTotalStakeRaw 恒为 0（D-48 后不再需要）",
     "cancelStakeAllowed": false,
     "stakeForwardTonMinNano": "100000000",
     "stakeForwardTonRecommendedNano": "120000000",
     "stakeMessageTonNano": "300000000",
-    "claimTonNano": "200000000",
-    "refundNote": "无效质押：forward_ton_amount ≥ 0.1 TON 时即时退回；不足时 ≥ 10 万记入退款账本（Claim(0)/ClaimAll 领取）；低于 10 万且 TON 不足的零头不退。"
+    "ticketClaimTonMinNano": "150000000",
+    "ticketClaimTonRecommendedNano": "200000000",
+    "ticketRestakeTonMinNano": "250000000",
+    "ticketRestakeTonRecommendedNano": "300000000",
+    "refundNote": "无效质押（低于 1,000 A9 或受益人非法）：附带 TON ≥ 0.1 时原路退回给转账发起人；不足时不退（v11 没有退款账本，前端必须足额附带 TON）。"
   },
   "techAbort": {
     "abortTimeoutSeconds": 604800,
     "abortTimeoutDays": 7,
-    "observationTimeoutSeconds": 604800,
-    "previewTimeoutSeconds": 604800,
     "anyoneCanTrigger": true,
     "refundPrincipalBps": 10000,
     "burnsRewardOnAbort": false,
     "burnsTeamOnAbort": false,
     "tierConsumed": false,
-    "note": "观察应结束后 7 天仍未判定，或预告结束后 7 天仍未开轮（keeper 失联）→ 任何人 AbortTechnical；本金可领，奖励/团队额度留在 RC。"
+    "note": "观察应结束后 abortTimeoutSeconds 仍未判定，或预告结束后仍未开轮（keeper 失联）→ 任何人 AbortTechnical；本金经攻城令领取，奖励/团队额度滚入下一城（D-39）。observation 与 preview 共用同一个超时（v11 ProtocolTiming.abortTimeoutSeconds）。"
   },
   "risk": {
     "disclosureVersion": 1,
     "requiredCheckbox": "acceptFullPrincipalBurn = true",
     "mandatoryWarnings": [
-      "高风险实验：失败轮 100% 质押本金销毁，可能损失全部本金",
+      "高风险实验：失败轮 100% 质押本金销毁，可能损失全部本金（失败轮本金全部销毁）",
       "目标价可能因 2× 开窗 TWAP 上移；通过率不保证",
       "项目方不提供外部法律意见，合规风险由项目方承担（D-34）",
       "价格由单个 keeper 热钱包提交，链上无法验证真实性；keeper 私钥泄露可伪造任意一轮结果",
-      "低于 10 万 A9 且附带 TON 不足的无效质押零头不退",
-      "成功后本金 + 奖励一次全额领取（pull claim，用户自付 gas）"
+      "奖励 20% 立即可领，80% 等之后任意一城破城时解锁；第 10 城后 30 天线性兜底",
+      "团队额度晚一轮：本城破城时不发，下一次破城才发（最后一笔第 10 城 30 天后释放）",
+      "无效质押（低于 1,000 A9 且附带 TON 不足）不退；领取与续战需附带足额 TON（攻城令）",
+      "分发合约（军饷）由单个 publisher 热钱包决定分配，无 admin、无提现"
     ]
   },
   "roles": {
@@ -185,7 +186,7 @@
       "env": "A9_KEEPER_ADDRESS",
       "registry": "keeper",
       "walletNameEnv": "A9_KEEPER_WALLET",
-      "note": "单 keeper 热钱包（主网全新生成，只放 gas）：提交 OpenRound 与 SubmitCandle；写入 RC 初始数据，永久不可更换（无 admin）"
+      "note": "单 keeper 热钱包：提交 OpenRound 与 SubmitCandle；写入 RC 初始数据，永久不可更换（无 admin）"
     },
     "treasury": {
       "env": "TON_TREASURY_ADDRESS",
@@ -196,7 +197,15 @@
       "env": "A9_TEAM_WALLET_ADDRESS",
       "registry": "teamWallet",
       "public": false,
-      "note": "团队收款钱包；写入 RC 初始数据，每轮成功由 RC 直接转 1.2 亿"
+      "note": "团队收款钱包；写入 RC 初始数据，由 RC 在破城轮的下一次破城时转出 1.2 亿"
+    },
+    "junxiangPublisher": {
+      "env": "A9_JUNXIANG_PUBLISHER_ADDRESS",
+      "registry": "junxiangPublisher",
+      "default": "keeper",
+      "public": false,
+      "walletNameEnv": "A9_JUNXIANG_WALLET",
+      "note": "军饷分发合约的 publisher 热钱包（发布周根 SetRoot）；默认与 keeper 相同，只放 gas。写入分发合约初始数据，部署后不可改"
     },
     "marketingWallet": {
       "registry": "marketingWallet",
@@ -220,33 +229,40 @@
       "SubmitCandle（观察期每小时一根，共 24 根；第 24 根即判定）"
     ],
     "anyoneAllowed": [
-      "CloseStaking（36h 报名窗口到期后）",
-      "AbortTechnical（观察应结束 7 天后 / 预告结束 7 天后仍未开轮）",
+      "CloseStaking（报名窗口到期后）",
+      "AbortTechnical（观察应结束 abortTimeoutSeconds 后 / 预告结束后仍未开轮）",
       "RetrySettlement（SettlementBounced 后重试团队转账或销毁，≥ 0.3 TON）",
-      "Claim / ClaimAll（用户，≥ 0.1 TON）",
+      "ReleaseTeam（第 10 城结束 30 天后，≥ 0.1 TON）",
+      "TicketClaim / TicketRestake（攻城令主人，≥ 0.15 / 0.25 TON）",
       "TopUpTons"
+    ],
+    "publisherAllowed": [
+      "JunxiangSetRoot / SetRoot（军饷分发 publisher，listId 严格递增；先充值再发根）"
     ],
     "forbidden": [
       "不存在 admin：没有人能修改参数、目标价、K 线阈值或 keeper",
       "没有人能转移用户质押本金或提走 RC 资金（无提现函数）",
-      "不能取消质押 / 提前退款（技术终止轮本金由用户自行 Claim）",
-      "RoundController 不可升级",
+      "不能取消质押 / 提前退款（技术终止轮本金由用户经攻城令领取）",
+      "RoundController 与 JunxiangDistributor 不可升级",
       "终态 SUCCEEDED / FAILED_PERMANENT / TECHNICAL_ABORTED 不可逆"
     ],
     "opcodes": {
       "OpenRound": "0x52540001",
       "CloseStaking": "0x52540002",
       "SubmitCandle": "0x52540003",
-      "Claim": "0x52540006",
-      "ClaimAll": "0x5254000E",
       "StakeDeposit": "0x5254000F",
       "AbortTechnical": "0x52540010",
       "RetrySettlement": "0x52540015",
+      "ReleaseTeam": "0x52540016",
+      "TicketClaim": "0x52540303",
+      "TicketRestake": "0x52540304",
       "JettonTransfer": "0x0F8A7EA5",
       "JettonBurn": "0x595F07BC",
       "JettonBurnNotification": "0x7BDD97DE",
       "JettonTransferNotification": "0x7362D09C",
-      "TopUpTons": "0xD372158C"
+      "TopUpTons": "0xD372158C",
+      "JunxiangSetRoot": "0x4A580001",
+      "JunxiangClaim": "0x4A580002"
     },
     "events": {
       "TargetPriceSet": "0x52540101",
@@ -258,17 +274,21 @@
       "Claimed": "0x5254010E",
       "DepositRefunded": "0x5254010F",
       "SettlementBounced": "0x52540110",
-      "UnexpectedBounce": "0x52540111"
+      "UnexpectedBounce": "0x52540111",
+      "Restaked": "0x52540112",
+      "TeamReleased": "0x52540113",
+      "JunxiangRootPublished": "0x4A580101",
+      "JunxiangClaimed": "0x4A580102"
     },
-    "opcodeNote": "v10 ABI 以 contracts/README.md §4 为准；StakeDeposit(0x5254000F) 是质押 forward_payload 内的 op，不是独立入站消息。"
+    "opcodeNote": "v11 ABI 以 contracts/README.md §5 为准。StakeDeposit(0x5254000F) 是质押 forward_payload 内的 op（payload v2），不是独立入站消息；Claim(0x52540006) / ClaimAll(0x5254000E) 已删除，领取走 TicketClaim。"
   },
   "toolchain": {
     "contractsDir": "contracts",
     "buildDir": "contracts/build",
-    "language": "Tolk（RoundController + TEP-74 JettonMaster/JettonWallet）",
+    "language": "Tolk（RoundController / StakeTicket / JunxiangDistributor / ClaimRecord + TEP-74 JettonMaster/JettonWallet）",
     "activeAdapter": "acton",
     "pinned": true,
-    "pinnedVersion": "acton 1.1.0 / tolk 1.4.1（与 contracts/Acton.toml 一致；升级需重新评审并更新本字段）",
+    "pinnedVersion": "acton 1.1.0（与 contracts/Acton.toml 一致；升级需重新评审并更新本字段）",
     "adapters": {
       "acton": {
         "bin": "acton",
@@ -276,19 +296,20 @@
         "walletNameEnv": "TON_DEPLOYER_WALLET",
         "commands": {
           "buildAll": "cd {contractsDir} && acton build",
-          "deployAllContracts": "cd {contractsDir} && A9_KEEPER_ADDRESS={keeper} A9_TEAM_WALLET_ADDRESS={teamWallet} acton script --net {net} scripts/deploy-emulation.tolk",
+          "deployAllContracts": "cd {contractsDir} && A9_KEEPER_ADDRESS={keeper} A9_TEAM_WALLET_ADDRESS={teamWallet} A9_JUNXIANG_PUBLISHER_ADDRESS={junxiangPublisher} acton script --net {net} scripts/deploy-emulation.tolk",
           "deployJettonMaster": "cd {contractsDir} && acton script --net {net} scripts/deploy/deploy_jetton_master.tolk {treasury} {totalSupplyRaw}",
           "mintAndLockJetton": "cd {contractsDir} && acton script --net {net} scripts/deploy/mint_and_lock_jetton.tolk {master} {treasury} {totalSupplyRaw}",
           "fundVault": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} JETTON_MASTER_ADDRESS={jettonMaster} acton script --net {net} scripts/deploy/fund_jetton.tolk {recipient} {amount}",
           "fundTon": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} acton script --net {net} scripts/deploy/fund_ton.tolk {recipient} {amountTon}",
           "adminOp": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} acton script --net {net} scripts/deploy/admin_op.tolk {op} {roundId} {extra}",
-          "submitCandle": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_CANDLE_INDEX={candleIndex} A9_PERIOD_START={periodStart} A9_PERIOD_END={periodEnd} A9_TWAP_E8={twapUsdE8} A9_DIGEST={digest} acton script --net {net} scripts/deploy/admin_op.tolk submit-candle {roundId} 0"
+          "submitCandle": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} ROUND_CONTROLLER_ADDRESS={roundController} A9_CANDLE_INDEX={candleIndex} A9_PERIOD_START={periodStart} A9_PERIOD_END={periodEnd} A9_TWAP_E8={twapUsdE8} A9_DIGEST={digest} acton script --net {net} scripts/deploy/admin_op.tolk submit-candle {roundId} 0",
+          "junxiangSetRoot": "cd {contractsDir} && OPS_EXECUTE=1 A9_SIGNER_WALLET={signerWallet} JUNXIANG_DISTRIBUTOR_ADDRESS={junxiangDistributor} acton script --net {net} scripts/deploy/junxiang_op.tolk junxiang-set-root {listId} {rootHex}"
         },
-        "note": "Acton script 只接受位置参数（按 main() 参数顺序），不支持 flag；广播脚本默认 dry-run，OPS_EXECUTE=1 才广播、OPS_CONFIRM=YES 二次确认、A9_SIGNER_WALLET 指定签名钱包（keeper 操作用 keeper 钱包）；真实网络必须带 --net {net}；本地验证广播可加 OPS_ALLOW_EMULATION=true。deploy-emulation.tolk 是整体顺序部署：JettonMaster → mint-once → RoundController（keeper/teamWallet/参数/钱包代码写入初始数据）→ 钱包推导核对 → 82 亿注资（forward 0）。v10 没有任何 wiring 步骤。admin_op.tolk 只支持 open-round / close-staking / submit-candle / abort-technical / retry-settlement。"
+        "note": "Acton script 只接受位置参数（按 main() 参数顺序），不支持 flag；广播脚本默认 dry-run，OPS_EXECUTE=1 才广播、OPS_CONFIRM=YES 二次确认、A9_SIGNER_WALLET 指定签名钱包（keeper 操作用 keeper 钱包，军饷根用 publisher 钱包）；真实网络必须带 --net {net}；本地验证广播可加 OPS_ALLOW_EMULATION=true。deploy-emulation.tolk 是整体顺序部署：JettonMaster → mint-once → RoundController → 钱包推导核对 → 82 亿注资（forward 0）→ JunxiangDistributor（不注资）→ 读回 ticket code hash / get_distributor。admin_op.tolk 支持 open-round / close-staking / submit-candle / abort-technical / retry-settlement / release-team；junxiang_op.tolk 支持 junxiang-set-root。"
       },
       "manual": {
         "bin": null,
-        "note": "若 Acton/Blueprint 不可用：由合约负责人在钱包/IDE 完成部署，再用 --adopt <address> 登记（见 runbooks/01_deploy_testnet.md §7）。"
+        "note": "若 Acton 不可用：由合约负责人在钱包/IDE 完成部署，再用 --adopt <address> 登记（见 runbooks/01_deploy_testnet.md §7）。"
       }
     }
   },
@@ -397,16 +418,32 @@
   "tonBalances": {
     "roundControllerMinTon": 20,
     "keeperMinTon": 2,
-    "note": "RC：每次结算动作（团队转账 / 销毁）约 0.1 TON，领取由用户付 gas；keeper：每轮 OpenRound + 24 根 SubmitCandle，单笔 0.3 TON 上限（多余退回）。"
+    "junxiangDistributorDeployTon": 1,
+    "note": "RC：每次结算动作（团队转账 / 销毁）约 0.1 TON，领取由用户付 gas；keeper：每轮 OpenRound + 24 根 SubmitCandle，单笔 0.3 TON 上限（多余退回）。分发合约部署时附 1 TON（不需要 TON 运行余额，领取由领取人附带 gas）。"
   },
   "deployOrder": [
     "1. 部署 JettonMaster，MintOnce 100 亿到 treasury（同一笔交易关闭铸造）",
-    "2. 部署 RoundController（keeper、jettonMaster、teamWallet、参数、JettonWallet 代码写进初始数据；无 admin、无 wiring）",
-    "3. 核对 RC.get_jetton_wallet_address() == JettonMaster.get_wallet_address(RC)",
+    "2. 部署 RoundController（keeper、jettonMaster、teamWallet、参数、JettonWallet + StakeTicket 代码写进初始数据；无 admin、无 wiring）",
+    "3. 核对 RC.get_jetton_wallet_address() == JettonMaster.get_wallet_address(RC)，RC.get_ticket_code_hash() == StakeTicket 构建哈希",
     "4. treasury 向 RC 转 82 亿 A9（70 亿奖励 + 12 亿团队），forward_ton_amount 必须为 0",
-    "5. 给 RC 充值 TON（≥ roundControllerMinTon），给 keeper 充值 gas（≥ keeperMinTon）；treasury 分配内盘 8 亿 / 流动性 5 亿 / 营销 5 亿",
-    "6. keeper 调用 OpenRound 开第一轮"
+    "5. 部署 JunxiangDistributor（publisher = junxiangPublisher，默认 keeper；codes = JettonWallet + ClaimRecord；listId 0、root 0）；核对 get_distributor；不注资",
+    "6. 给 RC 充值 TON（≥ roundControllerMinTon），给 keeper 充值 gas（≥ keeperMinTon）；treasury 分配内盘 8 亿 / 流动性 5 亿 / 营销 5 亿",
+    "7. keeper 调用 OpenRound 开第一轮",
+    "8. 每周军饷：先给分发合约 A9 钱包转入 ≥ 本期累计总额，再由 publisher 发布 junxiang-set-root（listId 严格递增）"
   ],
+  "junxiang": {
+    "contract": "JunxiangDistributor + ClaimRecord（contracts/README §7.1，累计默克尔）",
+    "publisher": {
+      "env": "A9_JUNXIANG_PUBLISHER_ADDRESS",
+      "registry": "junxiangPublisher",
+      "default": "keeper"
+    },
+    "listIdStart": 1,
+    "claimTonMinNano": "150000000",
+    "rootPublishCommand": "node ops/scripts/80_admin_ops.mjs --action junxiang-set-root --list <listId> --root <0x64hex> --total <cumulativeRaw>",
+    "fundingRule": "发布新根前，分发合约 A9 钱包余额必须 ≥ 本期累计总额（--total）；80 在 EXECUTE 前校验，余额不足会导致领取 jetton 转账 bounce",
+    "trustModel": "单热钱包 publisher 决定分配；无 admin、无提现、不可升级"
+  },
   "monitoring": {
     "workerBaseUrlEnv": "OPS_WORKER_BASE_URL",
     "workerBaseUrlDefault": "http://127.0.0.1:8787",
@@ -439,6 +476,5 @@
       "enabled": false
     },
     "channelsNote": "所有密钥/Token 只从环境变量读取，绝不写入本文件或仓库。"
-  },
-  "notes": "ceremony rehearsal: production timing on testnet network"
+  }
 }

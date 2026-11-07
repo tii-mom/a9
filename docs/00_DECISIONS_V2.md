@@ -8,7 +8,32 @@
 
 > **⚠️ V10（2026-11-06，D-42）优先于本文其余内容**：合约重构为「标准 Jetton Master + 标准 Jetton Wallet + 一个 RoundController」，单 keeper 热钱包运营。下列旧决策被推翻或修改：**D-20**（TeamVault 删除，团队额度放在 RC 钱包）、**D-36/D-41 中的 OracleAdapter 迁移路径**（OracleAdapter 删除）、**D-40**（权重/邀请/连续/滚存/早领/解锁全部删除，回到按质押比例分配、本金+奖励一次全额领取）、**三笔销毁**（改为一笔合并销毁）、**V6 触价提前关窗与预言机暂停**（删除）、**V6.1 最低质押 1 万**（改为 10 万 A9）、**D-24 中 admin 的权限**（不再有 admin，只有 keeper）。实现与 ABI 见 [contracts/README.md](../contracts/README.md)。
 
-## 0. 一句话机制（V7 定稿口径，所有文案与叙事的骨架）
+## 0. 一句话机制（v11 定稿口径，取代 V7；所有文案与叙事的骨架）
+
+> **1 GRAM 上车，大家一起把价格推过城门；城门一开，奖池分给攻城的人。没打下来，奖池一半滚到下一城。**
+>
+> 口号：「这一次，散户做庄。」首页主标题：「70 亿筹码锁在 10 座城里。城门是价格，钥匙是人。」
+> 权威口径：[docs/35_GAMEPLAY_V11.md](35_GAMEPLAY_V11.md)（D-43 ~ D-50）与 [contracts/README.md](../contracts/README.md)。
+
+### 0.1 风险披露（v11，中英对照）
+
+对外披露必须包含下表全部条目；前端 `web/src/features/landing/landing.i18n.ts` 的 `risk.items` 与之同步。`riskDisclosureVersion` 保持 **1**：链上 payload 校验的是部署配置值，v11 未改 payload，因此不升版本。
+
+| # | 中文 | English |
+| --- | --- | --- |
+| 1 | **输了归零**：城没破，本城全部上车本金 100% 销毁，没有保本、复活或免死。 | **Losing means zero**: if the gate holds, 100% of the round's principal is burned. No capital protection, no revival, no free pass. |
+| 2 | **城没破，奖池一半销毁、一半滚入下一城**；本城团队 1.2 亿销毁；第 10 城结束后剩余滚存全部销毁。 | **Failed gate**: half of the pool is burned and half rolls into the next round; the 120M team quota is burned; after round 10 any remaining rollover is burned. |
+| 3 | **破城奖励分两段**：20% 立即可领；80% 压城，此后任一城破城即解锁；若第 10 城结束后仍未解锁，则在 30 天内线性解锁。 | **Two-part reward**: 20% is claimable at once; 80% is locked and unlocks on any later successful gate, or linearly over 30 days after round 10 if still locked. |
+| 4 | **团队额度晚一轮发放**：第 r 城破城时 1.2 亿不发，下一次破城时才发；最后一笔在第 10 城结束 30 天后由任何人释放。 | **The team quota is paid one round late**: the 120M is paid at the next successful gate; the last one is released by anyone 30 days after round 10. |
+| 5 | **价格由单一 keeper 提交**：开窗 TWAP 与每根 K 线都来自同一热钱包；链上无法验证价格真实性，密钥泄露可伪造任意一城的结果。 | **A single keeper submits prices**: the opening TWAP and every candle come from one hot wallet; the chain cannot verify prices, and a leaked key can fake any outcome. |
+| 6 | **军饷由单一发布者决定分配**：每周默克尔根由同一把钥匙发布，决定每个钱包的累计额；合约无法核验分配依据。 | **A single publisher decides allocations**: weekly Merkle roots are published by one key that sets each wallet's cumulative amount; the contract cannot verify the basis. |
+| 7 | **无效上车可能无法退回**：附带 GRAM 不足 0.1 时，无效上车的代币留在协议中，不退回。 | **Invalid entries may not be refunded**: with less than 0.1 GRAM attached, an invalid entry's tokens stay in the protocol. |
+| 8 | 目标价按档位翻倍，失败轮同档重试；技术故障（价格提交停滞超过 7 天）全额退回本金。 | Targets double per tier; a failed gate retries the same tier; a technical abort (no prices for more than 7 days) returns principal in full. |
+| 9 | 合约在外部审计报告公布前不应视为安全；审计报告将在主网开放前公布。 | The contracts should not be considered safe before the external audit report is published, which is due before mainnet opens. |
+
+### 0.0 V7 历史口径（已取代，仅存档）
+
+以下 V7 文案与包装层表格保留作溯源；其中 TeamVault、pull claim/claimAll、三笔销毁等已被 v10/v11 取代，**不得再用于对外文案**。
 
 > **押多少你定，赌 72 小时内至少翻倍。**
 >

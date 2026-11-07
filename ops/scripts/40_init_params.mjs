@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /** 40 — 参数初始化校验：生成参数快照、比对链上 get_protocol_config（可选在线）。 */
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { flag, str } from './lib/cli.mjs';
-import { RECORDS_DIR, writeJSON } from './lib/config.mjs';
+import { RECORDS_DIR, readJSON, resolvePath, writeJSON } from './lib/config.mjs';
 import { bootstrap, finish, printProtocolConfigExpected, printNextSteps, resolveContractAddress } from './lib/step.mjs';
 import { commandTemplate, hasCommand, runCommand, substitute } from './lib/toolchain.mjs';
 import { runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
@@ -106,5 +106,28 @@ try {
   warn('请用 acton rpc 人工核对 get_protocol_config；未核对前不得 OpenRound。');
 }
 
-printNextSteps(['下一步：node scripts/55_fund_ton.mjs（RC / keeper gas）→ 50_fund_vaults.mjs（v10 无角色绑定步骤）']);
+// v11：RC 的 StakeTicket 代码哈希必须等于构建产物（攻城令地址由它推导，错了会导致领取全部失败）
+section('RC ticket code hash（get_ticket_code_hash）');
+function buildCodeHash(name) {
+  const file = resolvePath(params.toolchain.buildDir + '/' + name + '.json');
+  if (!existsSync(file)) return null;
+  const json = readJSON(file);
+  return json.hash && /^[0-9a-fA-F]{64}$/.test(json.hash) ? json.hash.toLowerCase() : null;
+}
+try {
+  const ticketResponse = await runGetMethod(params, controller, 'get_ticket_code_hash');
+  const onchain = stackItemToBigInt((ticketResponse.stack || [])[0]);
+  const onchainHex = onchain === null ? null : onchain.toString(16).padStart(64, '0');
+  const expectedHash = buildCodeHash('StakeTicket');
+  if (onchainHex && expectedHash && onchainHex === expectedHash) {
+    ok('RC.get_ticket_code_hash = 0x' + onchainHex + '（与 contracts/build/StakeTicket 一致）');
+  } else {
+    fail('RC.get_ticket_code_hash ' + (onchainHex || '未读取') + ' != 构建 ' + (expectedHash || '（缺少 contracts/build/StakeTicket.json）') + '：不得开轮');
+    process.exit(finish({ 模式: 'EXECUTE' }));
+  }
+} catch (error) {
+  warn('get_ticket_code_hash 读取失败：' + String(error.message || error) + '；请人工核对后再开轮');
+}
+
+printNextSteps(['下一步：node scripts/55_fund_ton.mjs（RC / keeper gas）→ 50_fund_vaults.mjs（RC 已注资则只核对）']);
 process.exit(finish({ 模式: execute ? 'EXECUTE' : 'DRY-RUN（online）', 快照: snapshotFile }));

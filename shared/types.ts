@@ -42,7 +42,7 @@ export interface ProtocolConfig {
   observationSeconds: number;
   /** PREVIEW 等待（结算后到下一轮报名开启），秒；R1 无 PREVIEW */
   previewSeconds: number;
-  /** 单笔最低有效质押，raw units（v10：100,000 A9） */
+  /** 单笔最低有效质押，raw units（v11：1,000 A9） */
   minStakeRaw: string;
   /** 每轮团队额度，raw units（成功轮 RC 直接转团队钱包；失败轮随本轮一起销毁） */
   teamRoundRaw: string;
@@ -52,6 +52,8 @@ export interface ProtocolConfig {
   contracts: {
     jettonMaster: string | null;
     roundController: string | null;
+    /** v11 军饷分发合约（未部署为 null） */
+    junxiangDistributor: string | null;
     stakingVault: string | null;
     rewardVault: string | null;
     codeHash: string | null;
@@ -212,12 +214,38 @@ export interface RefundLedger {
   claimedRaw: string;
 }
 
+/**
+ * v11 每城拆分（docs/35 §3.4）：本金 + 破城奖励的 20% 立即部分 + 80% 压城部分。
+ * 压城：unlocked = 已解锁累计（后续任一城破城即全部解锁；第 10 城后 30 天线性兜底），
+ * lockedClaimed = 已领压城部分，claimable = 现在可领（未领本金 + 未领即时奖励 + 已解锁未领部分）。
+ */
+export interface RoundPosition {
+  roundId: number;
+  state: RoundState;
+  principalRaw: string;
+  principalClaimed: boolean;
+  /** 破城奖励的 20%（未破城为 "0"） */
+  immediateRaw: string;
+  /** 破城奖励的 80%（压城） */
+  lockedRaw: string;
+  /** 压城中已解锁的累计额 */
+  unlockedRaw: string;
+  /** 压城中已领取的累计额 */
+  lockedClaimedRaw: string;
+  /** 现在可领取的总额 = claimablePrincipalRaw + claimableRewardRaw */
+  claimableRaw: string;
+  claimablePrincipalRaw: string;
+  claimableRewardRaw: string;
+}
+
 export interface MeResponse {
   address: string;
   stakes: StakePosition[];
   claimable: Claimable[];
+  /** v11 每城拆分（与 stakes 同序；只含有仓位的城） */
+  rounds: RoundPosition[];
   refund: RefundLedger;
-  /** 与链上 get_claimable_all 同口径：ClaimAll 现在会付的金额；roundsMask bit r-1 = 第 r 轮，bit 15 = 退款账本 */
+  /** 现在一次领取会付的金额（所有城之和）；roundsMask bit r-1 = 第 r 城（v11 不再有退款账本，bit 15 恒为 0） */
   claimableAll: { principalRaw: string; rewardRaw: string; roundsMask: number };
   totals: { stakedRaw: string; rewardRaw: string; claimedRaw: string };
 }
@@ -293,3 +321,176 @@ export const ENDPOINTS = {
   adminResumeOracle: '/api/admin/oracle/resume',
   adminAdvance: '/api/admin/rounds/advance'
 } as const;
+
+/* ------------------------------------------------------------------ *
+ * 社交层（docs/35 §4，链下）：/api/social/*、/s/:code、/og/:code.png
+ * 金额一律 raw 字符串；比例 bps；USD 为 number（展示用）。
+ * ------------------------------------------------------------------ */
+
+export type SocialSource = 'tg' | 'x' | 'web';
+
+/** 城门阶段：preview 预告 / staking 报名 / observing 观察 / settled 已结算（成功或失败） */
+export type SocialRoundPhase = 'preview' | 'staking' | 'observing' | 'settled';
+
+export type SocialLeaderboardType = 'squad' | 'power' | 'recruit';
+export type SocialLeaderboardScope = 'round' | 'season';
+
+export interface SocialSquadBrief {
+  code: string;
+  name: string;
+  /** 0 = 未成团，1..4 = Lv1..Lv4（按本城上车人数 stakersThisRound） */
+  level: number;
+  /** 成员总数（users.squad_code 计数，与等级无关）；展示文案用「成员」 */
+  memberCount: number;
+  /** 本城（当前轮）上车人数，distinct 报名地址；展示文案用「本城上车」，等级与 remainingToNext 都按它算 */
+  stakersThisRound: number;
+  /** 下一等级（1..4）；已满级为 null */
+  nextLevel: number | null;
+  /** 距下一等级还差几人 = 下一档门槛 − stakersThisRound；已满级为 null */
+  remainingToNext: number | null;
+}
+
+export interface SocialSquadDetail extends SocialSquadBrief {
+  leaderWallet: string | null;
+  tgChatId: string | null;
+}
+
+/** GET /api/social/me */
+export interface SocialMeResponse {
+  wallet: string;
+  inviteCode: string;
+  referrer: string | null;
+  squad: SocialSquadBrief | null;
+  stats: {
+    /** 当前轮战力（raw，字符串） */
+    power: string;
+    recruits: number;
+    recruitsFromX: number;
+    /** 阵亡勋章 = 本人报名过的失败轮数 */
+    medals: number;
+    /** 截至最新轮的连续报名轮数 */
+    streak: number;
+  };
+}
+
+/** POST /api/social/bind */
+export interface SocialBindRequest {
+  wallet: string;
+  referralCode?: string;
+  squadCode?: string;
+  source: SocialSource;
+  /** Telegram WebApp.initData 原文；服务端校验后取得 tgUserId（请求体不接受 tgUserId） */
+  tgInitData?: string;
+  /** TON Proof（写接口鉴权）；也可放在 X-Ton-Proof 头（base64 JSON） */
+  proof?: TonProof;
+}
+
+export interface SocialBindResponse {
+  wallet: string;
+  inviteCode: string;
+  referrer: string | null;
+  refSource: SocialSource | null;
+  squad: SocialSquadBrief | null;
+  /** 本次请求是否真正写入了邀请人 / 战队 */
+  bound: { referrer: boolean; squad: boolean };
+  /** 业务规则拒绝原因（不影响 200 返回）；null = 无拒绝 */
+  rejected: { referral: string | null; squad: string | null };
+}
+
+/** POST /api/social/squads（创建者自动成为团长并入队） */
+export interface SocialSquadCreateRequest {
+  wallet: string;
+  name: string;
+  tgChatId?: string;
+  proof?: TonProof;
+}
+
+/** POST /api/social/squads/:code/join */
+export interface SocialSquadJoinRequest {
+  wallet: string;
+  proof?: TonProof;
+}
+
+/** POST /api/social/squads 与 POST /api/social/squads/:code/join */
+export interface SocialSquadResponse {
+  squad: SocialSquadDetail;
+  /** 本次请求是否改变了该用户的战队归属 */
+  changed: boolean;
+}
+
+export interface SocialLeaderboardRow {
+  rank: number;
+  /** 战队码（type=squad）或脱敏钱包（其它类型） */
+  key: string;
+  name: string | null;
+  /** power：战力 raw；recruit：拉新积分（X 来源 ×2）；squad：全队战力 raw */
+  score: string;
+}
+
+/** GET /api/social/leaderboard（最多 100 行） */
+export interface SocialLeaderboardResponse {
+  type: SocialLeaderboardType;
+  scope: SocialLeaderboardScope;
+  roundId: number | null;
+  season: number;
+  rows: SocialLeaderboardRow[];
+}
+
+/** GET /api/social/gate */
+export interface SocialGateResponse {
+  roundId: number | null;
+  phase: SocialRoundPhase;
+  /** 城门价（USD）；轮次未开放时为 null */
+  gatePriceUsd: number | null;
+  /** 最近一根已收盘 K 线 TWAP（USD）；无数据为 null */
+  priceUsd: number | null;
+  /** STON.fi 池子 USDT 侧储备（USD）；未配置 STONFI_POOL_ADDRESS 或拉取失败为 null */
+  poolUsdt: number | null;
+  /** poolUsdt * (sqrt(gate / price) - 1)，下限 0；缺少价格或池子数据时为 null */
+  remainingUsd: number | null;
+  litCandles: number;
+  candlesSeen: number;
+  rewardBudgetRaw: string;
+  stakeCount: number;
+  /** 当前阶段结束时刻（unix 秒）；无法确定时为 null */
+  phaseEndsAt: number | null;
+}
+
+/** POST /api/social/guess {wallet, roundId, lit}（lit = 0..24） */
+export interface SocialGuessRequest {
+  wallet: string;
+  roundId: number;
+  lit: number;
+}
+
+/** POST / GET /api/social/guess；未猜过时 lit 与 createdAt 为 null（GET） */
+export interface SocialGuessResponse {
+  roundId: number;
+  wallet: string;
+  lit: number | null;
+  createdAt: number | null;
+}
+
+/** GET /api/social/payout/latest：最新累计军饷清单（金额为终身累计，raw） */
+export interface SocialPayoutLatestResponse {
+  listId: number;
+  root: string;
+  fromRound: number;
+  toRound: number;
+  leafCount: number;
+  totalRaw: string;
+  createdAt: number;
+}
+
+/** GET /api/social/payout/proof?wallet= ：叶子下标与 leafCount 用于判断晋级层，见 merkle.ts 文件头 */
+export interface SocialPayoutProofResponse {
+  listId: number;
+  root: string;
+  cumulativeRaw: string;
+  proof: string[];
+  index: number;
+  leafCount: number;
+}
+
+/** POST /api/admin/payout/build（管理员）返回的清单摘要 */
+export type AdminPayoutBuildResponse = SocialPayoutLatestResponse;

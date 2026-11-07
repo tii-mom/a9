@@ -1,4 +1,4 @@
-// A9 Protocol v10 — storage, message, event and view types for RoundController.
+// A9 Protocol v11 — storage, message, event and view types for RoundController.
 // Every cell stays under 1023 bits / 4 refs; config groups live behind refs.
 
 import "constants"
@@ -20,8 +20,6 @@ struct ProtocolEcon {
     roundRewardRaw: uint128
     teamRoundRaw: uint128
     minStakeRaw: uint128
-    maxStakePerAddressRaw: uint128
-    maxTotalStakeRaw: uint128
 }
 
 struct ProtocolTiming {
@@ -32,28 +30,46 @@ struct ProtocolTiming {
     minQualifiedCandles: uint8
     // after this delay past the expected end of a stage, anyone may abort
     abortTimeoutSeconds: uint32
+    // locked 80% fallback: linear unlock window after round 10 (and final team release delay).
+    // Mainnet 30 days; fast testnet profiles use seconds (docs/35 D-45).
+    fallbackUnlockSeconds: uint32
     riskDisclosureVersion: uint16
     configVersion: uint32
+}
+
+struct ProtocolCodes {
+    // standard Jetton Wallet code: RC derives its own wallet address on-chain,
+    // so no admin wiring step exists at all.
+    jettonWalletCode: cell
+    // StakeTicket code: RC verifies tickets by address derivation
+    ticketCode: cell
 }
 
 struct ProtocolConfig {
     addresses: Cell<ProtocolAddresses>
     econ: Cell<ProtocolEcon>
     timing: Cell<ProtocolTiming>
-    // standard Jetton Wallet code: RC derives its own wallet address on-chain,
-    // so no admin wiring step exists at all.
-    jettonWalletCode: cell
+    codes: Cell<ProtocolCodes>
 }
 
 // ===========================================================================
 // Round / stake storage
 // ===========================================================================
 
+// Rarely-written round fields live behind a ref to keep RoundData under 1023 bits.
+struct RoundExtra {
+    targetTwap24hUsdE8: uint128
+    // rolling sha256 over submitted candles: H(prev || index || twap || digest)
+    candleHash: uint256
+    // exact settlement amounts, kept so RetrySettlement resends the same thing
+    burnRaw: uint128
+    teamTransferRaw: uint128
+}
+
 struct RoundData {
     status: uint8
     targetTier: uint8
     targetPriceUsdE8: uint128
-    targetTwap24hUsdE8: uint128
     stakeOpenAt: uint64
     // = observationStart; for PREVIEW rounds this is unused (0)
     stakeCloseAt: uint64
@@ -61,27 +77,31 @@ struct RoundData {
     candlesSeen: uint8
     qualifiedCandles: uint8
     totalStakeRaw: uint128
-    stakerCount: uint16
+    // sum of stake x timing coefficient; rewards are split by weight
+    totalWeightRaw: uint128
+    // 7e8 + carry rolled in from failed / empty / aborted rounds, fixed at open
+    rewardBudgetRaw: uint128
+    // accepted deposits (not distinct addresses: tickets are not looked up)
+    stakeCount: uint32
     // settlement actions dispatched (ACTION_* bits) and those that bounced
     actionsSent: uint8
     retryMask: uint8
-    // rolling sha256 over submitted candles: H(prev || index || twap || digest)
-    candleHash: uint256
-}
-
-struct StakePosition {
-    amountRaw: uint128
-    lastDepositNonce: uint64
-    claimed: bool
+    extra: Cell<RoundExtra>
 }
 
 struct Storage {
     config: Cell<ProtocolConfig>
     currentRoundId: uint8
     successCount: uint8
-    // round 0 = refund ledger (only amounts >= minStake that could not be refunded instantly)
     rounds: map<uint8, RoundData>
-    stakes: map<uint8, map<address, StakePosition>>
+    // reward budget waiting to be added to the next opened round
+    carryRaw: uint128
+    // last round that succeeded (unlocks every earlier round's 80% locked reward)
+    lastSuccessRound: uint8
+    // team quota of the last success, paid at the next success (D-47)
+    teamPendingRaw: uint128
+    // time round 10 settled / was aborted; starts the 30-day fallback unlock
+    endAt: uint64
 }
 
 fun Storage.load(): Storage {
@@ -92,22 +112,27 @@ fun Storage.save(self) {
     contract.setData(self.toCell());
 }
 
+fun emptyExtra(): RoundExtra {
+    return { targetTwap24hUsdE8: 0, candleHash: 0 as uint256, burnRaw: 0, teamTransferRaw: 0 };
+}
+
 fun emptyRound(): RoundData {
     return {
         status: STATUS_UNOPENED,
         targetTier: 0,
         targetPriceUsdE8: 0,
-        targetTwap24hUsdE8: 0,
         stakeOpenAt: 0,
         stakeCloseAt: 0,
         settledAt: 0,
         candlesSeen: 0,
         qualifiedCandles: 0,
         totalStakeRaw: 0,
-        stakerCount: 0,
+        totalWeightRaw: 0,
+        rewardBudgetRaw: 0,
+        stakeCount: 0,
         actionsSent: 0,
         retryMask: 0,
-        candleHash: 0 as uint256,
+        extra: emptyExtra().toCell(),
     };
 }
 
@@ -136,16 +161,9 @@ struct (0x52540003) SubmitCandle {
     dataDigest: uint256
 }
 
-// Claim one round: principal (+ reward if SUCCEEDED). roundId 0 = refund ledger.
-struct (0x52540006) Claim {
+// Anyone, once endAt + 30 days has passed: pays the last pending team quota (D-47).
+struct (0x52540016) ReleaseTeam {
     queryId: uint64
-    roundId: uint8
-}
-
-// Claim everything claimable in rounds 0..10 with one transfer (roundId ignored).
-struct (0x5254000E) ClaimAll {
-    queryId: uint64
-    roundId: uint8
 }
 
 struct (0x52540010) AbortTechnical {
@@ -186,14 +204,15 @@ struct (0xd53276db) ReturnExcessesBack {
     queryId: uint64
 }
 
-// StakePayload carried inside transfer_notification.forward_payload (unchanged):
-// op(32)+version(8)+roundId(8)+depositNonce(64)+riskVersion(16)+acceptBurn(8) = 136 bit.
+// StakePayload v2 carried inside transfer_notification.forward_payload (ref cell):
+// op(32)+version(8)=2+roundId(8)+riskVersion(16)+acceptBurn(8)+beneficiary(address or none).
+// beneficiary = none -> the stake belongs to the transfer initiator (D-49).
 struct (0x5254000F) StakeDeposit {
     version: uint8
     roundId: uint8
-    depositNonce: uint64
     riskDisclosureVersion: uint16
     acceptFullPrincipalBurn: uint8
+    beneficiary: address?
 }
 
 // ===========================================================================
@@ -214,24 +233,30 @@ struct (0x52540102) RoundSettled {
     candlesSeen: uint8
     totalAcceptedStakeRaw: uint128
     tierAfter: uint8
-    // burn breakdown (all 0 on success with stakers)
+    // burn breakdown: rewardBurn = half the budget on failure, + leftover carry after round 10
     rewardBurnRaw: uint128
     teamBurnRaw: uint128
     principalBurnRaw: uint128
+    // team quota of the PREVIOUS success paid now (D-47)
     teamReleasedRaw: uint128
+    rewardBudgetRaw: uint128
+    carryAfterRaw: uint128
 }
 
 struct (0x52540103) DepositAccepted {
     roundId: uint8
     owner: address
     amountRaw: uint128
+    weightRaw: uint128
     totalAcceptedStakeRaw: uint128
+    totalWeightRaw: uint128
 }
 
 struct (0x52540104) TechnicalAborted {
     roundId: uint8
     reason: uint8
     at: uint64
+    burnRaw: uint128   // round-10 abort burns the remaining carry (0 otherwise); audit A9-V11-05
 }
 
 struct (0x5254010B) StakingClosed {
@@ -253,19 +278,31 @@ struct (0x5254010C) CandleSubmitted {
 
 struct (0x5254010E) Claimed {
     owner: address
-    // bit (r-1) = round r; bit 15 = refund ledger
-    roundsMask: uint16
+    roundId: uint8
     principalRaw: uint128
+    // immediate 20% (first claim) + newly unlocked part of the locked 80%
     rewardRaw: uint128
 }
 
 struct (0x5254010F) DepositRefunded {
     owner: address
     amountRaw: uint128
-    // true: sent back now; false: credited to the refund ledger (round 0)
+    // true: sent back now; false: not enough forward TON, kept by the contract
     instant: bool
-    // false: sub-minimum dust without TON for a refund, kept by the contract
-    recorded: bool
+}
+
+struct (0x52540112) Restaked {
+    owner: address
+    fromRound: uint8
+    toRound: uint8
+    amountRaw: uint128
+    weightRaw: uint128
+}
+
+struct (0x52540113) TeamReleased {
+    // round whose success released the quota (0 = final ReleaseTeam)
+    roundId: uint8
+    amountRaw: uint128
 }
 
 struct (0x52540110) SettlementBounced {
@@ -333,17 +370,20 @@ struct RoundView {
     totalWeight: uint128
 }
 
-struct StakePositionView {
-    amountRaw: uint128
-    lastDepositNonce: uint64
-    principalClaimed: bool
-    rewardClaimed: bool
-    weight: uint128
-    rewardState: uint8
+struct ProtocolStateView {
+    carryRaw: uint128
+    lastSuccessRound: uint8
+    teamPendingRaw: uint128
+    endAt: uint64
+    successCount: uint8
+    currentRoundId: uint8
+    fallbackUnlockSeconds: uint32
 }
 
-struct Claimable {
-    principalRaw: uint128
+// What a ticket with this weight is owed right now (reads only round state).
+struct RewardPreview {
     rewardRaw: uint128
-    roundsMask: uint16
+    immediateRaw: uint128
+    lockedRaw: uint128
+    unlockedLockedRaw: uint128
 }
