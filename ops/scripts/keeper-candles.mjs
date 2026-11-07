@@ -268,7 +268,14 @@ async function submitCandles(roundId) {
   log({ event: 'candles-done', roundId, candlesSeen: rd.candlesSeen, qualified: rd.qualified, status: STATUS[rd.status] });
 }
 
+// Heartbeat for monitor_check (keeper.down / price.sampling_stale): refreshed every 60s while running.
+const heartbeatFile = RECORDS_DIR + '/keeper-heartbeat-' + networkName(params) + '.json';
+function heartbeat() {
+  try { writeFileSync(heartbeatFile, JSON.stringify({ t: nowSec(), rc, signer, price: priceMode, priceSamplesFile: samplesFile, sampleSec, pid: process.pid })); } catch { /* best effort */ }
+}
 async function main() {
+  heartbeat();
+  setInterval(heartbeat, 60000);
   if (priceSource) {
     await sampleOnce(priceSource, samplesFile, log);
     setInterval(() => { void sampleOnce(priceSource, samplesFile, log); }, sampleSec * 1000);

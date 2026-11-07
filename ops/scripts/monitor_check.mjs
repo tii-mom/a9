@@ -8,10 +8,10 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { asBigInt, loadAndValidate } from './lib/config.mjs';
+import { asBigInt, loadAndValidate, RECORDS_DIR, networkName } from './lib/config.mjs';
 import { loadRegistry } from './lib/registry.mjs';
 import { expectedRcVault, expectedSettlementFor, pendingSettlementActions } from './lib/ledger.mjs';
 import { fetchRcEvents, getJettonWalletBalance, getRoundView, getTonBalance } from './lib/ton.mjs';
@@ -240,6 +240,47 @@ if (data.admin) {
   checks.push({ name: 'ops.events', ok: errors.length === 0 });
 }
 
+// ---- keeper liveness / price sampler / keeper alert events (from ops/records, same host as the keeper) ----
+{
+  const net = networkName(params);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const hbFile = RECORDS_DIR + '/keeper-heartbeat-' + net + '.json';
+  const heartbeatMaxSec = Number(getArg('heartbeat-max', '300'));
+  if (existsSync(hbFile)) {
+    const hb = JSON.parse(readFileSync(hbFile, 'utf8'));
+    const age = nowSec - Number(hb.t || 0);
+    record('keeper.heartbeat', age <= heartbeatMaxSec, () => add('keeper.down', 'P0', 'keeper 心跳停止（可能掉线）', '最后心跳 ' + age + 's 前（> ' + heartbeatMaxSec + 's）；K 线/开轮会停，超时将触发技术终止', RB + '#P0'));
+    if (hb.priceSamplesFile && existsSync(hb.priceSamplesFile)) {
+      const lines = readFileSync(hb.priceSamplesFile, 'utf8').trim().split('\n');
+      let lastT = 0;
+      try { lastT = JSON.parse(lines[lines.length - 1]).t; } catch { /* torn line */ }
+      const sampleAge = nowSec - lastT;
+      const maxAge = Math.max(300, 5 * Number(hb.sampleSec || 60));
+      record('price.sampling', sampleAge <= maxAge, () => add('price.sampling_stale', 'P0', '价格采样停止', '最新样本 ' + sampleAge + 's 前（> ' + maxAge + 's）；STON.fi 池或 toncenter 读取失败，K 线 TWAP 覆盖率会下降', RB + '#P0'));
+    }
+  } else if (getArg('expect-keeper')) {
+    add('keeper.down', 'P0', 'keeper 心跳文件不存在', hbFile + ' 缺失：keeper 未启动', RB + '#P0');
+  }
+  // keeper alert events (lines with "alert":true) in its latest log within the ops window
+  const windowSec = Number(thresholds.opsEventWindowMinutes || 15) * 60;
+  const logs = existsSync(RECORDS_DIR) ? readdirSync(RECORDS_DIR).filter((f) => f.startsWith('keeper-candles-') && f.endsWith('.jsonl')).map((f) => RECORDS_DIR + '/' + f) : [];
+  const latest = logs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  if (latest) {
+    const P0_EVENTS = new Set(['price-unavailable', 'open-blocked-low-coverage']);
+    const seen = new Map();
+    for (const line of readFileSync(latest, 'utf8').split('\n')) {
+      if (!line.includes('"alert":true')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (nowSec - Math.floor(Date.parse(e.at) / 1000) <= windowSec) seen.set(e.event, e);
+      } catch { /* skip */ }
+    }
+    for (const [event, e] of seen) {
+      add('keeper.' + event, P0_EVENTS.has(event) ? 'P0' : 'P1', 'keeper 告警：' + event, JSON.stringify(e).slice(0, 300), RB + (P0_EVENTS.has(event) ? '#P0' : '#P1'));
+    }
+  }
+}
+
 const sorted = alerts.sort((a, b) => (levelRank[b.level] || 0) - (levelRank[a.level] || 0));
 const counts = { P0: 0, P1: 0, P2: 0, P3: 0 };
 for (const alert of sorted) counts[alert.level] = (counts[alert.level] || 0) + 1;
@@ -257,16 +298,30 @@ if (jsonOut) {
   kv('P3（次工作日）', counts.P3);
 }
 
-if (notify && alerts.length) {
+if (notify) {
   const token = process.env[params.notifications.telegram.botTokenEnv];
   const chatId = process.env[params.notifications.telegram.chatIdEnv];
   if (!token || !chatId) {
+    if (alerts.length)
     warn('--notify 需要 ' + params.notifications.telegram.botTokenEnv + ' 与 ' + params.notifications.telegram.chatIdEnv + '（未设置，跳过发送）');
   } else {
-    const lines = sorted.map((alert) => '[' + alert.level + '] ' + alert.title + ' — ' + alert.detail);
+    const stateFile = RECORDS_DIR + '/monitor-notify-state-' + networkName(params) + '.json';
+    const repeatSec = Number(getArg('repeat-min', '30')) * 60;
+    let state = {};
+    try { state = JSON.parse(readFileSync(stateFile, 'utf8')); } catch { /* first run */ }
+    const tNow = Math.floor(Date.now() / 1000);
+    const due = sorted.filter((a) => !state[a.id] || tNow - state[a.id] >= repeatSec);
+    const active = new Set(sorted.map((a) => a.id));
+    const recovered = Object.keys(state).filter((id) => !active.has(id));
+    const next = {};
+    for (const a of sorted) next[a.id] = due.includes(a) ? tNow : state[a.id];
+    writeFileSync(stateFile, JSON.stringify(next));
+    const lines = due.map((alert) => '[' + alert.level + '] ' + alert.title + ' — ' + alert.detail).concat(recovered.map((id) => '[已恢复] ' + id));
+    if (!lines.length) { if (sorted.length) ok('告警均已发送过（' + repeatSec / 60 + ' 分钟内不重复）'); }
+    else {
     const text = 'A9 ' + (params.__net || 'testnet') + ' 告警\n' + new Date().toISOString() + '\n' + lines.join('\n');
     try {
-      const response = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      const response = await fetch((process.env.OPS_TELEGRAM_API || 'https://api.telegram.org') + '/bot' + token + '/sendMessage', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, text: text.slice(0, 3900), disable_web_page_preview: true }),
@@ -276,6 +331,7 @@ if (notify && alerts.length) {
       else warn('Telegram 发送失败：HTTP ' + response.status);
     } catch (error) {
       warn('Telegram 发送异常：' + String(error.message || error));
+    }
     }
   }
 }

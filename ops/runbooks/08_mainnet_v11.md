@@ -92,7 +92,19 @@ cd contracts && acton script scripts/deploy-emulation.tolk   # 本地仿真；�
 - 团队额度：`80_admin_ops.mjs --action release-team`（第 10 城后 30 天任何人可释放最后一笔）。
 - 军饷：每周 compute → 先充值分发合约 → `junxiang-set-root`。
 
-## 7. 上线后 24 小时
+## 7. 监控与告警（与 keeper 同机常驻）
+
+```bash
+TELEGRAM_BOT_TOKEN=<运维告警机器人 token> TELEGRAM_OPS_CHAT_ID=<运维群 id> OPS_PARAMS=ops/config/mainnet.params.json \
+  node ops/scripts/monitor_watch.mjs --every 60 -- --api https://a9.lat --chain --expect-keeper 1
+```
+
+- 运维告警机器人与玩家机器人分开（不要用 TG_BOT_TOKEN）；先把机器人拉进运维群拿 chat id。
+- 每分钟检查：keeper 心跳（> 5 分钟无心跳 = P0 掉线）、价格采样新鲜度（P0）、keeper 日志里的告警事件（price-unavailable / open-blocked = P0，其余 P1）、K 线缺失、判定/开轮超时、结算退回、keeper gas、RC 余额与供应量对账。
+- 同一告警 30 分钟内不重复（`--repeat-min`），恢复时发「已恢复」。
+- 部署前演练一次：停掉 keeper 5 分钟，确认运维群收到 P0，再启动确认收到「已恢复」。
+
+## 8. 上线后 24 小时
 
 - 监控：keeper 心跳与余额、索引器延迟、RC 余额对账、机器人推送；告警配置见 runbook 03。
 - 首轮第一个 K 线提交后人工复核 TWAP 与摘要。
