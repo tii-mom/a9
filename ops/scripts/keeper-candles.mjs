@@ -8,10 +8,20 @@
  *   OPS_EXECUTE=1 node ops/scripts/keeper-candles.mjs --rc <RC> --signer a9-keeper --rounds 1 --mode success
  *   --mode success|failure|mixed；mixed 默认模式 S,F,S,S,S,F,S,S,F,S
  *   --dry-run（不带 OPS_EXECUTE）只打印动作不广播
+ *
+ * 价格来源 --price（主网只允许 pool）：
+ *   test（默认，仅测试网演练）：按 --mode 强制成功/失败价格
+ *   pool：官方 STON.fi A9/USDT 池链上储备，每 --sample-sec 秒采样；K 线 = 该小时 TWAP，dataDigest = 所用样本的 sha256；
+ *         开轮 twap24h = 过去 24h TWAP（覆盖率 < --min-open-coverage 拒绝开轮，先用 --sample-only 预热 ≥ 24h）
+ *         需要 --pool <池地址>；A9 master 取 --a9-master / contracts/deploy/jetton-master.addr
+ *   mock：测试网替身（无 STON.fi 池），价格读 --mock-file {"priceE8":"..."} 或 --mock-price
+ *   每根 K 线的样本与摘要写入 ops/records/price-evidence-<net>/，供复核。
+ *   主网：OPS_EXECUTE=1 OPS_CONFIRM_MAINNET=YES node ops/scripts/keeper-candles.mjs --rc <RC> --signer <keeper> --rounds 10 --price pool --pool <POOL>
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { poolSource, mockSource, sampleOnce, loadSamples, twapOf, digestOf } from './lib/price.mjs';
 import { flag, parseArgs, str } from './lib/cli.mjs';
 import { RECORDS_DIR, asBigInt, loadParams, networkName, resolvePath } from './lib/config.mjs';
 import { decodeRoundView, runGetMethod, stackItemToBigInt } from './lib/ton.mjs';
@@ -25,6 +35,13 @@ const rounds = Number(str(args, 'rounds') || 1);
 const mode = str(args, 'mode') || 'mixed';
 const execute = process.env.OPS_EXECUTE === '1' && !flag(args, 'dry-run');
 const openTwap = str(args, 'twap') || '116000';
+const priceMode = str(args, 'price') || 'test';
+const sampleSec = Number(str(args, 'sample-sec') || 60);
+const minCoverage = Number(str(args, 'min-coverage') || 0.8);
+const minOpenCoverage = Number(str(args, 'min-open-coverage') || 0.5);
+const sampleOnly = flag(args, 'sample-only');
+if (!['test', 'pool', 'mock'].includes(priceMode)) { console.error('--price 只能是 test|pool|mock'); process.exit(2); }
+if (networkName(params) === 'mainnet' && priceMode !== 'pool') { console.error('主网只允许 --price pool（真实池价格）'); process.exit(2); }
 const closeDelayRound = Number(str(args, 'close-delay-round') || 0);
 const closeDelayMs = Number(str(args, 'close-delay-ms') || 0);
 const settleWaitMs = Number(str(args, 'settle-wait') || 0);
@@ -42,6 +59,24 @@ const nowSec = () => Math.floor(Date.now() / 1000);
 if (!existsSync(RECORDS_DIR)) mkdirSync(RECORDS_DIR, { recursive: true });
 const logFile = RECORDS_DIR + '/keeper-candles-' + new Date().toISOString().replace(/[:.]/g,'-') + '.jsonl';
 const metrics = { requests: 0, retries429: 0, failures: 0 };
+// ---- price source (pool / mock) ----
+let priceSource = null;
+let samplesFile = null;
+const evidenceDir = RECORDS_DIR + '/price-evidence-' + networkName(params);
+if (priceMode !== 'test') {
+  if (priceMode === 'pool') {
+    const pool = str(args, 'pool') || process.env.STONFI_POOL_ADDRESS;
+    if (!pool) { console.error('--price pool 需要 --pool <STON.fi A9/USDT 池地址>'); process.exit(2); }
+    let a9Master = str(args, 'a9-master');
+    if (!a9Master) a9Master = readFileSync(new URL('../../contracts/deploy/jetton-master.addr', import.meta.url), 'utf8').trim().split(/\s+/)[0];
+    priceSource = poolSource(params, { pool, a9Master, quoteDecimals: Number(str(args, 'quote-decimals') || 6) });
+    samplesFile = RECORDS_DIR + '/price-samples-' + networkName(params) + '-' + pool.replace(/[^A-Za-z0-9_-]/g, '') + '.jsonl';
+  } else {
+    priceSource = mockSource({ file: str(args, 'mock-file'), fixedE8: str(args, 'mock-price') });
+    samplesFile = RECORDS_DIR + '/price-samples-' + networkName(params) + '-mock.jsonl';
+  }
+  if (!existsSync(evidenceDir)) mkdirSync(evidenceDir, { recursive: true });
+}
 const log = (event) => {
   const record = { at: new Date().toISOString(), ...event };
   appendFileSync(logFile, JSON.stringify(record) + '\n');
@@ -104,9 +139,20 @@ async function runAdmin(op, extraArgs = [], envExtra = {}, label) {
 
 function digestFor(roundId, index, twap) { return createHash('sha256').update(roundId + ':' + index + ':' + twap).digest('hex'); }
 
-async function runCandle(roundId, index, periodStart, periodEnd, twap) {
+/** TWAP of the sampled price over [from, to); falls back to a fresh spot sample if the window has no data. */
+async function windowTwap(from, to, label) {
+  let r = twapOf(loadSamples(samplesFile, from - 3600), from, to);
+  if (r.twapE8 <= 0n) {
+    const s = await sampleOnce(priceSource, samplesFile, log);
+    if (s) r = { twapE8: s.priceE8, coverage: 0, used: [s], n: 1 };
+  }
+  if (r.coverage < minCoverage) log({ event: 'price-coverage-low', alert: true, label, coverage: Number(r.coverage.toFixed(3)), n: r.n });
+  return r;
+}
+
+async function runCandle(roundId, index, periodStart, periodEnd, twap, digestDec) {
   const script = resolvePath('ops/scripts/tolk/fast_candle.tolk');
-  const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' A9_PERIOD_START=' + periodStart + ' A9_PERIOD_END=' + periodEnd + ' A9_TWAP_E8=' + twap + ' acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + script + ' ' + roundId + ' ' + index;
+  const base = 'cd ' + params.toolchain.contractsDir + ' && export PATH=$HOME/.acton/bin:$PATH && OPS_EXECUTE=1 OPS_CONFIRM=YES A9_SIGNER_WALLET=' + signer + ' ROUND_CONTROLLER_ADDRESS=' + rc + ' A9_PERIOD_START=' + periodStart + ' A9_PERIOD_END=' + periodEnd + ' A9_TWAP_E8=' + twap + ' A9_DIGEST_DEC=' + (digestDec || '0') + ' acton script --manifest-path Acton.toml --net ' + networkName() + ' ' + script + ' ' + roundId + ' ' + index;
   if (!execute) { log({ action: 'candle', dryRun: true, command: base }); return; }
   // Do not throw on broadcast failure: wallet-level rejections (seqno race /
   // external not accepted) are retryable infra errors, not contract errors.
@@ -132,7 +178,21 @@ function modeFor(roundId) {
 
 async function ensureOpen(roundId) {
   // OpenRound 不带 roundId：合约自动开「当前已判定轮的下一轮」（R1 时 currentRound = 0）
-  await runAdmin('open-round', ['0', openTwap], {}, 'open-round(' + roundId + ')');
+  let twap24 = openTwap;
+  if (priceMode !== 'test') {
+    const now = nowSec();
+    const r = twapOf(loadSamples(samplesFile, now - 90000), now - 86400, now);
+    if (r.coverage < minOpenCoverage || r.twapE8 <= 0n) {
+      log({ event: 'open-blocked-low-coverage', alert: true, roundId, coverage: Number(r.coverage.toFixed(3)), need: minOpenCoverage });
+      await sleep(60000);
+      return;
+    }
+    twap24 = r.twapE8.toString();
+    const d = digestOf(r.used);
+    writeFileSync(evidenceDir + '/r' + roundId + '-open.json', JSON.stringify({ roundId, from: now - 86400, to: now, twap24hUsdE8: twap24, coverage: r.coverage, digest: d.hex, samples: r.used.map((x) => [x.t, x.priceE8.toString()]) }));
+    log({ event: 'open-twap24h', roundId, twap24, coverage: Number(r.coverage.toFixed(3)), n: r.n });
+  }
+  await runAdmin('open-round', ['0', twap24], {}, 'open-round(' + roundId + ')');
   await sleep(1500);
 }
 
@@ -174,11 +234,20 @@ async function submitCandles(roundId) {
     while (nowSec() < periodEnd) await sleep(500);
     const rdNow = await round(roundId);
     if (TERMINAL.has(rdNow.status)) break;
-    const twap = candleTwap(modeChar, rdNow.target);
+    let twap = candleTwap(modeChar, rdNow.target);
+    let digestDec = '0';
+    if (priceMode !== 'test') {
+      const r = await windowTwap(periodStart, periodEnd, 'r' + roundId + '#' + index);
+      if (r.twapE8 <= 0n) { log({ event: 'price-unavailable', alert: true, roundId, index }); await sleep(30000); continue; }
+      twap = r.twapE8;
+      const d = digestOf(r.used);
+      digestDec = d.value.toString();
+      writeFileSync(evidenceDir + '/r' + roundId + '-c' + index + '.json', JSON.stringify({ roundId, index, periodStart, periodEnd, twapUsdE8: twap.toString(), target: rdNow.target.toString(), qualified: twap >= rdNow.target, coverage: r.coverage, digest: d.hex, samples: r.used.map((x) => [x.t, x.priceE8.toString()]) }));
+    }
     let landed = false;
     const waits = [3000, 5000, 8000, 12000, 15000, 15000, 15000, 15000, 15000, 15000];
     for (let attempt = 0; attempt < 10; attempt++) {
-      const sent = await runCandle(roundId, index, periodStart, periodEnd, twap.toString());
+      const sent = await runCandle(roundId, index, periodStart, periodEnd, twap.toString(), digestDec);
       // A wallet-level rejection (seqno race) means the previous external is
       // still in flight: wait longer before resending the same candle.
       await sleep(sent ? 2500 : 10000);
@@ -200,6 +269,12 @@ async function submitCandles(roundId) {
 }
 
 async function main() {
+  if (priceSource) {
+    await sampleOnce(priceSource, samplesFile, log);
+    setInterval(() => { void sampleOnce(priceSource, samplesFile, log); }, sampleSec * 1000);
+    log({ event: 'price-sampling', source: priceSource.name, samplesFile, sampleSec });
+    if (sampleOnly) { log({ event: 'sample-only' }); return; } // keep sampling forever (interval keeps the process alive)
+  }
   const timing = await readTiming();
   candleSeconds = timing.seconds;
   candleCount = timing.count;
@@ -260,3 +335,5 @@ async function main() {
   log({ event: 'keeper-done', settled });
 }
 await main();
+// the price sampler's interval would keep the process alive; exit once the rounds are done
+if (!sampleOnly) process.exit(0);

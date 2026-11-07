@@ -10,7 +10,7 @@
 - [ ] 外部审计完成，Critical/High 全部修复或书面接受；最终 tag `v11-audit-fixed`
 - [ ] 在该 tag 上：`cd contracts && acton test`（全过）、`acton check`（0/0）、`acton build --info` 哈希与 contracts/README 一致
 - [ ] 测试网用**生产时序**完成至少 1 轮真实时长回归（keeper / 索引器 / 机器人推送稳定）
-- [ ] **生产价格 keeper 就绪**（读官方 STON.fi 池算 1h TWAP 并自动提交 K 线；见 §6，当前缺失）
+- [ ] 生产价格 keeper：建池后先 `--sample-only` 预热 ≥ 24h（§6），确认样本文件持续增长
 - [ ] 第 1 节所有值已由创始人填好并复核
 
 ## 1. 创始人需要提供的值
@@ -80,7 +80,14 @@ cd contracts && acton script scripts/deploy-emulation.tolk   # 本地仿真；�
 
 ## 6. 开轮与日常（keeper）
 
-- **生产价格 keeper（缺失，上线阻断项）**：现有 `keeper-candles.mjs` 只有测试模式（--mode success/failure），不能用于主网。需要：定时采样官方池储备 → 每小时算 TWAP（USD×1e8）与数据摘要 → `SubmitCandle`；开轮时算 24h TWAP → `OpenRound`；失联告警。
+- **生产价格 keeper**（`keeper-candles.mjs --price pool`）：每 60s 读官方 STON.fi A9/USDT 池链上储备；每根 K 线 = 该小时 TWAP，dataDigest = 所用样本 sha256；开轮 twap24h = 过去 24h TWAP（覆盖率 < 50% 拒绝开轮）。证据写入 `ops/records/price-evidence-mainnet/`，可用样本复算 TWAP 与摘要。主网下脚本拒绝 test/mock 价格。
+  ```bash
+  # 建池后立即预热（常驻，进程守护用 launchd/pm2）：
+  OPS_PARAMS=ops/config/mainnet.params.json node ops/scripts/keeper-candles.mjs --rc <RC> --price pool --pool <POOL> --sample-only
+  # ≥ 24h 后正式运行（同一个样本文件，停掉预热进程再启动）：
+  OPS_PARAMS=ops/config/mainnet.params.json OPS_EXECUTE=1 OPS_CONFIRM_MAINNET=YES node ops/scripts/keeper-candles.mjs --rc <RC> --signer <keeper 钱包名> --rounds 10 --price pool --pool <POOL>
+  ```
+  告警事件（日志 `"alert":true`）：`price-coverage-low`、`price-unavailable`、`open-blocked-low-coverage`、`price-sample-failed`。
 - 手动兜底：`80_admin_ops.mjs --action submit-candle --twap <USD_E8> --digest <64hex>`（runbook 02）。
 - 团队额度：`80_admin_ops.mjs --action release-team`（第 10 城后 30 天任何人可释放最后一笔）。
 - 军饷：每周 compute → 先充值分发合约 → `junxiang-set-root`。

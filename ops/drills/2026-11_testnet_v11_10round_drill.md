@@ -964,3 +964,19 @@ RC 余额 46.66 亿为玩家已解锁但演练脚本未回领的压城奖励及 
 | 超卖拒绝 | `--cap 2000` 预览 | 「累计 2,699.832 A9 将超过上限 2,000」，退出码 3，不发币 ✅ |
 
 口径：按**实际到账**金额计算应发 A9（买家钱包若由转账额扣手续费，会比输入额略少）；主网对外说明「以到账为准」。
+
+## 附录 T — 生产价格 keeper 演练（2026-11-07，测试网 run 3）
+
+实例：RC `kQCutdqSZTxcPEky3QdeSdr1dZioI4cohwjD3mA9O4DAWKSw`，master `kQCH62KISQOLAt9W6m4C9P_VLEjnNiuLkKWe_OLNXKzSAHJe`（快测档 10/90/10×24，部署用新的显式角色 + `A9_ALLOW_FAST_TIMING=1`）。
+keeper：`--price mock`（测试网无 STON.fi 池），采样 5s；价格 116000 开轮 → 700000（R1）→ 150000（R2）。
+
+| 检查 | 结果 |
+|---|---|
+| R1 开轮 twap24h | 116000 → 目标 max(P0×2, 2×116000) = 232000 ✅ |
+| R1 判定 | 24/24 达标，SUCCEEDED ✅ |
+| R2 开轮 twap24h | 683121（样本时间加权）→ 目标 ≥ 1,366,242 ✅ |
+| R2 判定 | 0/24 达标，FAILED_PERMANENT ✅ |
+| 链上 vs 证据 | R1 24 根 CandleSubmitted 的 twap 与 dataDigest 与 `price-evidence-testnet/r1-c*.json` 全部一致（24/24）；样本复算 TWAP 与摘要一致 ✅ |
+| 主网保护 | mainnet 参数下 `--mode`/`--price mock` 被拒，`--price pool` 缺 `--pool` 被拒 ✅ |
+| 池读取（主网只读） | STON.fi v2 池 `EQBbsMjy…sNGO`：储备与 STON.fi API 完全一致，价格 $0.4468 ✅ |
+| 修复 | 采样定时器导致进程不退出 → 完成后 `process.exit(0)` |
