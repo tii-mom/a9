@@ -307,7 +307,10 @@ fun main() {
     if (resumeMaster == null) {
         // --- 1. JettonMaster ------------------------------------------------
         var metadata: OnchainMetadataReply = { contentDict: [] };
-        metadata.contentDict.set("uri".sha256(), "https://a9.lat/a9.json".prefixWith00());
+        // A9_DEPLOY_METADATA_URI (testnet reruns only): a different URI gives a fresh master address,
+        // since the address is derived from the initial data. Mainnet keeps the default.
+        val metadataUri = env<string>("A9_DEPLOY_METADATA_URI") ?? "https://a9.lat/a9.json";
+        metadata.contentDict.set("uri".sha256(), metadataUri.prefixWith00());
         val masterStorage = MasterStorage {
             totalSupply: 0,
             adminAddress: admin.address,

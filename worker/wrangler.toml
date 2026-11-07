@@ -94,11 +94,11 @@ DEMO_ALLOW_UNSIGNED_WRITES = "false"
 TONCENTER_V2_URL = "https://testnet.toncenter.com/api/v2"
 TONCENTER_V3_URL = "https://testnet.toncenter.com/api/v3"
 # 部署后由 deploy-emulation 输出的 deploy/*.addr 填入（地址非机密）
-ROUND_CONTROLLER_ADDRESS = "kQBfMft6yykyzkcmpMsRpI3zqQAXEQDGwmbpgABEsQlyZYZf"
+ROUND_CONTROLLER_ADDRESS = "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt"
 TEAM_WALLET_ADDRESS = "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr"
 KEEPER_ADDRESS = "kQB2_JOvF0Aqp6AHmQIy9HdORKL8-kUmbjsBIuTsp7meN-Qb"
-JETTON_MASTER_ADDRESS = "kQDNyvApbpZNibyuLHuoj3XqbNUdu2ldurxO-WsyVIop9Kag"
-JUNXIANG_DISTRIBUTOR_ADDRESS = "kQCyTbjVfO1kkS0Pzl-iUnejsUgPfivj-ycRhR_Z6KNnFb8k"
+JETTON_MASTER_ADDRESS = "kQActKc_feFVN7n95a_yrCCtd9SACBCN2zBinFq2dXijx374"
+JUNXIANG_DISTRIBUTOR_ADDRESS = "kQBKpzusd8LanpLhoSsYg3U64C1zKgJ0sXVSmipkNWltViNi"
 STONFI_POOL_ADDRESS = ""
 TG_BOT_USERNAME = "a9_test_bot"
 ORACLE_CONFIG_VERSION = "1"
@@ -116,9 +116,9 @@ TONCONNECT_MANIFEST_URL = "/tonconnect-manifest.json"
 
 [[env.testnet.d1_databases]]
 binding = "DB"
-database_name = "a9-testnet"
+database_name = "a9-testnet-run2"
 # 先执行 wrangler d1 create a9-testnet，把返回的 id 填在这里（id 非机密）
-database_id = "a1453e38-3ba4-4149-a417-28974358e4a5"
+database_id = "0d61caf7-583c-420c-8123-178ec13d4611"
 
 [env.production]
 # 与顶层同名，确保部署覆盖现有 Worker（保留 a9.lat / www 自定义域名）

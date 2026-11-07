@@ -137,8 +137,8 @@ test('timing.profiles', () => {
   const fastResult = validateParams(fast);
   assert(fastResult.errors.length === 0, 'testnet-fast：' + fastResult.errors.join('; '));
   assert(fast.meta.timingProfile === 'fast-cycle' && fast.techAbort.abortTimeoutSeconds === 60 && fast.techAbort.fallbackUnlockSeconds === 60, 'fast-cycle 必须 abortTimeout=60s 且 fallbackUnlock=60s');
-  assert(Number(fast.timeline.previewSeconds) === 10 && Number(fast.timeline.stakeDurationSeconds) === 30 && Number(fast.timeline.candleSeconds) === 10 && Number(fast.timeline.candleCount) === 24 && Number(fast.timeline.minQualifiedCandles) === 16, 'fast-cycle 时序应为 10/30/10×24/16');
-  assert(Number(fast.timeline.roundsTotalSeconds) === 2800, 'fast-cycle 10 轮应为 2800s');
+  assert(Number(fast.timeline.previewSeconds) === 10 && Number(fast.timeline.stakeDurationSeconds) === 90 && Number(fast.timeline.candleSeconds) === 10 && Number(fast.timeline.candleCount) === 24 && Number(fast.timeline.minQualifiedCandles) === 16, 'fast-cycle 时序应为 10/90/10×24/16');
+  assert(Number(fast.timeline.roundsTotalSeconds) === 3400, 'fast-cycle 10 轮应为 3400s');
   const mislabeled = JSON.parse(JSON.stringify(fast));
   mislabeled.network = { ...mislabeled.network, net: 'mainnet', chainId: -239 };
   assert(validateParams(mislabeled).errors.some((message) => message.includes('fast-cycle')), 'fast-cycle 档不得用于主网');
@@ -146,7 +146,7 @@ test('timing.profiles', () => {
   wrongTimer.techAbort.abortTimeoutSeconds = 900;
   assert(validateParams(wrongTimer).errors.some((message) => message.includes('技术终止超时')), 'production 档不得静默改成快测超时');
   assert(Object.keys(TIMING_PROFILES).join(',') === 'production,fast-cycle,rehearsal', '时序档位集合应为 production / fast-cycle / rehearsal');
-  return 'production（12h/36h/24×1h，超时 7 天，兜底 30 天）· fast-cycle（10/30/10×24，超时 60s，兜底 60s，仅测试网）';
+  return 'production（12h/36h/24×1h，超时 7 天，兜底 30 天）· fast-cycle（10/90/10×24，超时 60s，兜底 60s，仅测试网）';
 });
 test('raw.amount.helper', () => {
   assert(rawAmount(700000000) === '700000000000000000', 'rawAmount 错误');
@@ -306,7 +306,7 @@ test('dryrun.80.junxiang_set_root.requires_total', () => {
 test('dryrun.15.fast_profile_env', () => {
   const result = run([join(SCRIPTS, '15_deploy_contracts.mjs')], { OPS_REGISTRY: tempRegistry, OPS_PARAMS: join(OPS_ROOT, 'config', 'testnet-fast.params.json') });
   assert(result.code === 0, '15 快测档 dry-run 失败：' + result.out.slice(-700));
-  for (const expected of ['A9_TIMING_PREVIEW_SECONDS=10', 'A9_TIMING_STAKE_SECONDS=30', 'A9_TIMING_CANDLE_SECONDS=10', 'A9_TIMING_ABORT_TIMEOUT_SECONDS=60', 'A9_TIMING_FALLBACK_UNLOCK_SECONDS=60']) assert(result.out.includes(expected), '快测 env 缺失：' + expected);
+  for (const expected of ['A9_TIMING_PREVIEW_SECONDS=10', 'A9_TIMING_STAKE_SECONDS=90', 'A9_TIMING_CANDLE_SECONDS=10', 'A9_TIMING_ABORT_TIMEOUT_SECONDS=60', 'A9_TIMING_FALLBACK_UNLOCK_SECONDS=60']) assert(result.out.includes(expected), '快测 env 缺失：' + expected);
   return '15 读取 testnet-fast.params.json → deploy-emulation 的 A9_TIMING_* 环境变量';
 });
 section('自测：广播脚本 dry-run 摘要（50/55/80）');

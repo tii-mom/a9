@@ -160,12 +160,12 @@ export const ALLOWED_OPCODE_NAMES = [...Object.keys(V11_OPCODES), 'JettonTransfe
 
 /**
  * 时序档位。production = 上主网/测试网正式档（V7：12h + 36h + 24×1h，阈值 16）；
- * fast-cycle = 测试网极速档（10 s K 线，10 轮约 47 分钟）；rehearsal = 仪式演练档，只校验内部一致性。
+ * fast-cycle = 测试网极速档（10 s K 线、90 s 攻城期，10 轮约 57 分钟）；rehearsal = 仪式演练档，只校验内部一致性。
  */
 export const TIMING_PROFILES = {
   production: { previewSeconds: 43200, stakeDurationSeconds: 129600, candleSeconds: 3600, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 604800, fallbackUnlockSeconds: 2592000 },
   // extreme-fast testnet drill (10 s candles, ~47 min for 10 rounds); restore production values before mainnet
-  'fast-cycle': { previewSeconds: 10, stakeDurationSeconds: 30, candleSeconds: 10, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 60, fallbackUnlockSeconds: 60 },
+  'fast-cycle': { previewSeconds: 10, stakeDurationSeconds: 90, candleSeconds: 10, candleCount: 24, minQualifiedCandles: 16, abortTimeoutSeconds: 60, fallbackUnlockSeconds: 60 },
   rehearsal: null,
 };
 

@@ -131,13 +131,13 @@
   },
   "timeline": {
     "previewSeconds": 10,
-    "stakeDurationSeconds": 30,
+    "stakeDurationSeconds": 90,
     "candleSeconds": 10,
     "candleCount": 24,
     "minQualifiedCandles": 16,
     "observationSeconds": 240,
-    "roundSeconds": 280,
-    "roundsTotalSeconds": 2800,
+    "roundSeconds": 340,
+    "roundsTotalSeconds": 3400,
     "formula": "previewEnd = prevSettledAt + previewSeconds; keeper OpenRound → stakeOpenAt; stakeCloseAt = stakeOpenAt + stakeDurationSeconds（到期后任何人 CloseStaking）; observationStart = stakeCloseAt; observationEnd = observationStart + candleCount × candleSeconds; 第 24 根 K 线提交即判定",
     "boundaryRule": "快测档不做整点取整；关窗即观察（与生产档同规则）"
   },

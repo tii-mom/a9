@@ -7,14 +7,14 @@
   "paramsDigest": null,
   "codeHashes": {},
   "createdAt": "2026-11-06T00:00:00.000Z",
-  "updatedAt": "2026-11-06T23:51:28.868Z",
+  "updatedAt": "2026-11-07T03:22:36.033Z",
   "contracts": {
     "jettonMaster": {
-      "address": "kQDNyvApbpZNibyuLHuoj3XqbNUdu2ldurxO-WsyVIop9Kag",
-      "raw": "0:cdcaf0296e964d89bcae2c7ba88f75ea6cd51dbb695dbabc4ef96b32548a29f4",
+      "address": "kQActKc_feFVN7n95a_yrCCtd9SACBCN2zBinFq2dXijx374",
+      "raw": "0:1cb4a73f7de15537b9fde5aff2ac20ad77d48008108ddb30629c5ab67578a3c7",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": "2026-11-06T23:51:28.500Z",
+      "deployedAt": "2026-11-07T03:22:35.082Z",
       "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "jettonMasterTreasuryWallet": {
@@ -26,19 +26,19 @@
       "note": null
     },
     "roundController": {
-      "address": "kQBfMft6yykyzkcmpMsRpI3zqQAXEQDGwmbpgABEsQlyZYZf",
-      "raw": "0:5f31fb7acb2932ce4726a4cb11a48df3a900171100c6c266e9800044b1097265",
+      "address": "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt",
+      "raw": "0:9df707634dcf534dc470368ce97c3b73ac5fd006d965417fb23bf6b59b9fb7ff",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": "2026-11-06T23:51:28.500Z",
+      "deployedAt": "2026-11-07T03:22:35.082Z",
       "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "roundControllerJettonWallet": {
-      "address": "kQBfJcNLfO6YjsyqUjofsAM_1k2WnAMQEf2u9PIp6xGWWtz9",
-      "raw": "0:5f25c34b7cee988eccaa523a1fb0033fd64d969c031011fdaef4f229eb11965a",
+      "address": "kQCdvTQR0VnAr2Zt5kPKs4k3ktE5geupwpLChjn4t0Utw9RI",
+      "raw": "0:9dbd3411d159c0af666de643cab3893792d13981eba9c292c28639f8b7452dc3",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": "2026-11-06T23:51:28.500Z",
+      "deployedAt": "2026-11-07T03:22:35.082Z",
       "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "teamWalletJettonWallet": {
@@ -50,19 +50,19 @@
       "note": null
     },
     "junxiangDistributor": {
-      "address": "kQCyTbjVfO1kkS0Pzl-iUnejsUgPfivj-ycRhR_Z6KNnFb8k",
-      "raw": "0:b24db8d57ced64912d0fce5fa25277a3b1480f7e2be3fb2711851fd9e8a36715",
+      "address": "kQBKpzusd8LanpLhoSsYg3U64C1zKgJ0sXVSmipkNWltViNi",
+      "raw": "0:4aa73bac77c2da9e92e1a12b1883753ae02d732a0274b175529a2a6435696d56",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": "2026-11-06T23:51:28.500Z",
+      "deployedAt": "2026-11-07T03:22:35.082Z",
       "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     },
     "junxiangDistributorJettonWallet": {
-      "address": "kQCynxOnvvfL6LqJGJsGxvHoV7LPDcuYFT5nffp12xhEu21j",
-      "raw": "0:b29f13a7bef7cbe8ba89189b06c6f1e857b2cf0dcb98153e677dfa75db1844bb",
+      "address": "kQBKSXzaBfK5E6adliGfkyqJDerBa_1xGWMqmbWpwEvFPBmW",
+      "raw": "0:4a497cda05f2b913a69d96219f932a890deac16bfd7119632a99b5a9c04bc53c",
       "deployTxHash": null,
       "codeHash": null,
-      "deployedAt": "2026-11-06T23:51:28.500Z",
+      "deployedAt": "2026-11-07T03:22:35.082Z",
       "note": "deploy-emulation 输出解析 + 链上 active/code hash 校验"
     }
   },
@@ -118,7 +118,7 @@
     }
   },
   "bindings": {
-    "roundControllerJettonWalletOwner": "kQBfMft6yykyzkcmpMsRpI3zqQAXEQDGwmbpgABEsQlyZYZf",
+    "roundControllerJettonWalletOwner": "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt",
     "roundControllerKeeper": "kQB2_JOvF0Aqp6AHmQIy9HdORKL8-kUmbjsBIuTsp7meN-Qb",
     "roundControllerTeamWallet": "kQB0IgvjnXY0wmuwwy_XVrCvxZenxENQTT3minXY0dGM3Gvr",
     "roundControllerUpgradeable": false,
@@ -126,12 +126,12 @@
   },
   "funding": [
     {
-      "key": "roundController:kQBfJcNLfO6YjsyqUjofsAM_1k2WnAMQEf2u9PIp6xGWWtz9:8200000000000000000",
-      "at": "2026-11-06T23:51:28.868Z",
+      "key": "roundController:kQCdvTQR0VnAr2Zt5kPKs4k3ktE5geupwpLChjn4t0Utw9RI:8200000000000000000",
+      "at": "2026-11-07T03:22:36.033Z",
       "confirmed": true,
       "kind": "roundController",
-      "recipient": "kQBfJcNLfO6YjsyqUjofsAM_1k2WnAMQEf2u9PIp6xGWWtz9",
-      "recipientOwner": "kQBfMft6yykyzkcmpMsRpI3zqQAXEQDGwmbpgABEsQlyZYZf",
+      "recipient": "kQCdvTQR0VnAr2Zt5kPKs4k3ktE5geupwpLChjn4t0Utw9RI",
+      "recipientOwner": "kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt",
       "amountRaw": "8200000000000000000",
       "forwardTonNano": "0",
       "txHash": null,

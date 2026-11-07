@@ -930,3 +930,22 @@ RC 余额期望 = 8,200,000,000
 发现并修复的问题（均在演练脚本，合约无缺陷）：runner 硬编码旧 Jetton master（RC 正确以 exit 104 拒收）；窗口关闭后仍重试质押（改为提前 6s 截止）；读回失败即退出（改为记录后继续）。
 
 未覆盖（30 秒攻城期只够 1–2 人上车，需 90 秒攻城期重新部署后补跑）：多人按战力分奖、一键续战 (d)、受益人与 STON.fi 一键上车 (g)、技术终止 (f)、第 10 城有人上车时的 60 秒线性解锁 (h 后半)、军饷全流程 (i)、社交 (j，需 BotFather 配置 Mini App)、TON Proof (k，需人工钱包签名)。
+
+## 附录 R2：第二次测试网实跑（2026-11-07，攻城期 90 s，其余同极速档）
+
+部署：JettonMaster `kQActKc_feFVN7n95a_yrCCtd9SACBCN2zBinFq2dXijx374` · RoundController `kQCd9wdjTc9TTcRwNozpfDtzrF_QBtllQX-yO_a1m5-3_5Tt` · JunxiangDistributor `kQBKpzusd8LanpLhoSsYg3U64C1zKgJ0sXVSmipkNWltViNi` · D1 `a9-testnet-run2`。
+
+| 场景 | 链上结果 |
+| --- | --- |
+| (a) 多人按战力分奖 | R1：A ×1.5、B ×1.5、C ×1.2 → 2.5 / 2.5 / 2.0 亿，合计正好 7 亿，各自 20% 即领 ✅ |
+| (d) 一键续战 | 玩家 D：R3 上车 → R4 攻城期续战，R3 攻城令 principalDone=true、R4 攻城令 10 万 A9 ×1.5（续战落在第一档）；D 最终余额 333,172,546.230441 A9 = R3 20% + R3 80%（R4 破城解锁）+ 本金 + R4 20%，逐位吻合 ✅ |
+| (f) 技术终止 | R8 开城后不提交 K 线，观察结束 +60 s 由普通玩家钱包调用 AbortTechnical → 状态 10、奖池 7 亿全额滚存、successCount 不变；A/B/C 经攻城令取回本金 ✅ |
+| (h) 第 10 城后 60 s 线性解锁 | 结束后约 6 s / 10 s / 15 s 领取分别拿到压城部分的 10% / 17% / 25%；60 s 后 A 再领，lockedClaimed = 2 亿（100%） ✅ |
+| (i) 军饷全流程 | compute R1–R7 → 累计清单 listId 1（4 个钱包、合计 130,000 A9）→ 先注资分发合约 → SetRoot → A 凭 2 个兄弟哈希领取 24,000 A9，金额精确；同一证明重放被拒、余额不变 ✅（链下 Merkle 与链上校验逐字节一致） |
+| 团队额度 | 7 次破城 × 1.2 = 8.4 亿到团队钱包（R10 的一笔在 endAt + 60 s 后释放） ✅ |
+
+RC 余额 46.66 亿为玩家已解锁但演练脚本未回领的压城奖励及 R8 留存团队额度（D-39），属预期；完整守恒已在第一次实跑中核对到 0。
+
+本轮发现的脚本问题：keeper `--rounds N` 把已结算的当前城计入 N；并发 acton 调用偶发 exit 400（重试即可）；runner 在结算瞬间就领取，续战需用不受 runner 驱动的钱包。合约无缺陷。
+
+仍需人工：BotFather 配置 Mini App（社交 j）、Tonkeeper 测试网钱包签名（TON Proof k）、STON.fi 测试池与一键上车 / 受益人上车（g）。
