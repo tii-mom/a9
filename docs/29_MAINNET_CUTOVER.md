@@ -1,3 +1,5 @@
+> ⚠️ **已作废（v8–v10 口径）**：主网上线请只按 [08_mainnet_v11.md](../ops/runbooks/08_mainnet_v11.md) 执行。本文仅供溯源。
+
 # 29 — 主网切换包（MAINNET CUTOVER）
 
 **版本**：V1.0 · 2026-11-06
