@@ -665,6 +665,23 @@ export default {
         logRequest(request, r.status, started);
         return r;
       }
+      if (url.pathname === '/api/admin/tg/setup' && request.method.toUpperCase() === 'POST') {
+        // Registers this Worker's webhook + the "开战" menu button with Telegram (token stays a secret).
+        requireAdmin(request, env);
+        const e = env as unknown as { TG_BOT_TOKEN?: string; TG_WEBHOOK_SECRET?: string };
+        if (!e.TG_BOT_TOKEN || !e.TG_WEBHOOK_SECRET) throw new ApiError('BAD_REQUEST', 'TG secrets missing');
+        const tgApi = (m: string, body: unknown) => fetch(`https://api.telegram.org/bot${e.TG_BOT_TOKEN}/${m}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        }).then((x) => x.json());
+        const webhook = await tgApi('setWebhook', {
+          url: `${url.origin}/api/tg/webhook`, secret_token: e.TG_WEBHOOK_SECRET, allowed_updates: ['message', 'callback_query'],
+        });
+        const menu = await tgApi('setChatMenuButton', { menu_button: { type: 'web_app', text: '开战', web_app: { url: `${url.origin}/app` } } });
+        const info = await tgApi('getWebhookInfo', {});
+        const r = finalizeResponse(okResponse({ webhook, menu, info }), env, request);
+        logRequest(request, r.status, started);
+        return r;
+      }
       if (url.pathname === '/api/tg/webhook' && request.method.toUpperCase() === 'POST') {
         const tg = await handleTelegramWebhook(request, env, { gateSource: () => loadGateForBot(env) });
         logRequest(request, tg.status, started);

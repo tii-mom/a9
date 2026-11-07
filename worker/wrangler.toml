@@ -81,10 +81,10 @@ custom_domain = true
 # ===========================================================================
 [env.testnet]
 # v11 测试网演练（ops/drills/2026-11_testnet_v11_10round_drill.md）。独立 Worker 名与独立 D1，
-# 不绑定自定义域名（走 workers.dev），绝不复用 demo 或 production 的数据库。
+# 绑定 test.a9.lat 子域名（workers.dev 保留作备用），绝不复用 demo 或 production 的数据库。
 name = "a9-testnet"
 workers_dev = true
-routes = []   # never inherit the production a9.lat routes
+routes = [ { pattern = "test.a9.lat", custom_domain = true } ]   # testnet subdomain only; never the production a9.lat routes
 
 [env.testnet.vars]
 DATA_SOURCE = "chain"
@@ -103,8 +103,8 @@ STONFI_POOL_ADDRESS = ""
 TG_BOT_USERNAME = "a9_test_bot"
 ORACLE_CONFIG_VERSION = "1"
 ORACLE_CONFIG_HASH = ""
-ALLOWED_ORIGINS = "https://a9-testnet.348421501.workers.dev,http://localhost:5173"
-TON_PROOF_DOMAINS = "a9-testnet.348421501.workers.dev,localhost"
+ALLOWED_ORIGINS = "https://test.a9.lat,https://a9-testnet.348421501.workers.dev,http://localhost:5173"
+TON_PROOF_DOMAINS = "test.a9.lat,a9-testnet.348421501.workers.dev,localhost"
 RATE_LIMIT_PER_MINUTE = "60"
 RATE_LIMIT_NONCE_PER_MINUTE = "10"
 RATE_LIMIT_READ_PER_MINUTE = "120"
